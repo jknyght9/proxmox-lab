@@ -1,0 +1,6 @@
+{
+	"ca-url": "https://ca.jdclabs.io",
+	"ca-config": "/etc/step-ca/config/ca.json",
+	"fingerprint": "b90b242ccd6c82a21be33ad9043fe61468efa250d7a9f204dbcc2fc22ebaf2e4",
+	"root": "/etc/step-ca/certs/root_ca.crt"
+}

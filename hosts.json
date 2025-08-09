@@ -1,0 +1,1 @@
+{"external":[{"hostname":"docker01","ip":"10.1.50.91"},{"hostname":"docker02","ip":"10.1.50.83"},{"hostname":"docker03","ip":"10.1.50.169"},{"hostname":"kasm01","ip":"10.1.50.49"},{"hostname":"pihole-external","ip":"10.1.50.3/24"},{"hostname":"step-ca","ip":"10.1.50.4/24"}],"internal":[{"hostname":"pihole-internal","ip":"172.16.0.3/24"}]}

@@ -1,0 +1,7 @@
+crypto
+**/*.tfvars
+**/*.tfstate*
+**/*.lock.hcl
+.terraform
+**/*.log
+**/*.bak.*

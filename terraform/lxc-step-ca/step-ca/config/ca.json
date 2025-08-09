@@ -1,0 +1,50 @@
+{
+	"root": "/etc/step-ca/certs/root_ca.crt",
+	"federatedRoots": null,
+	"crt": "/etc/step-ca/certs/intermediate_ca.crt",
+	"key": "/etc/step-ca/secrets/intermediate_ca_key",
+	"address": ":443",
+	"insecureAddress": "",
+	"dnsNames": [
+		"ca.jdclabs.io"
+	],
+	"logger": {
+		"format": "text"
+	},
+	"db": {
+		"type": "badgerv2",
+		"dataSource": "/etc/step-ca/db",
+		"badgerFileLoadingMode": ""
+	},
+	"authority": {
+		"provisioners": [
+			{
+				"type": "JWK",
+				"name": "admin@lab.com",
+				"key": {
+					"use": "sig",
+					"kty": "EC",
+					"kid": "RS1KVh5Vys7_dAm3G_dTLqdzm3w8l7Qq1_MhFQ2-6Vg",
+					"crv": "P-256",
+					"alg": "ES256",
+					"x": "135N19fJj18aDmHlnbSh3ZDcJ6JBXuFXBONSiLPnq64",
+					"y": "f891p1CErBL4iUDfZT7wfOsBLTFqmLGDYLbx2SSi6JQ"
+				},
+				"encryptedKey": "eyJhbGciOiJQQkVTMi1IUzI1NitBMTI4S1ciLCJjdHkiOiJqd2sranNvbiIsImVuYyI6IkEyNTZHQ00iLCJwMmMiOjYwMDAwMCwicDJzIjoiTFhMNVYzczFOTTk1WHBZSjFwNzBmQSJ9.pAxAa91-BOzfZvcK2SAllcB9Um6EQUbRzWeYjQl99Kjh8f-awJo3UQ.pD83mzIBVDGp0-zS.laKY50uNjaX6yNOoAqQh_9oCz51hRHcuGwZ8pXPJrW84VjjD0MWcH8LCzcdlI0dKYhAnSLgUzbhO8_8U-Yca227N1eI6eeqghFybQ4tWCQVdf_EeqKmfdjEb_S5ylxuTqvG5SoIe_d0UuqS63PQqVuCo8xX1hQ1uv48tRxBjPaXbbHdDRcghzG00E5JxixS2hS0V98HU-15Uh0wpqJt6YpuJ64mXsUXcERQhW5vyX67n7HlSWPzJJBNZKlnKxNyS1pSfs88HeTnnoe4XLZNI4LgYYwZ3xDo07OFz8Wq84AS60cdPgnoN9IkUbDlY2Cq4rNhwk_0VoktTbPaik5o.AFepXOeBYU8R7cOTOX1XIg"
+			},
+			{
+				"type": "ACME",
+				"name": "acme"
+			}
+		]
+	},
+	"tls": {
+		"cipherSuites": [
+			"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+			"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+		],
+		"minVersion": 1.2,
+		"maxVersion": 1.3,
+		"renegotiation": false
+	}
+}

@@ -1,0 +1,47 @@
+# This is not designed to run all at once, but a general configuration for the project
+# do not run this, run ./setup.sh.
+
+services:
+  mkdocs:
+    build: ./mkdocs
+    #image: squidfunk/mkdocs-material
+    container_name: mkdocs
+    working_dir: /
+    volumes:
+      - ./mkdocs.yml:/mkdocs.yml
+      - ./docs:/docs
+    ports:
+      - 8000:8000
+    command: "serve -a 0.0.0.0:8000"
+  packer:
+    image: hashicorp/packer:latest
+    container_name: packer
+    working_dir: /packer
+    volumes:
+      - ./packer:/packer # where your packer configs are stored
+      - ./packer/.config:/root/.config
+      - ./crypto:/crypto:ro # for SSH keys if needed
+      - /var/run/docker.sock:/var/run/docker.sock # if using Docker builds
+    environment:
+      PACKER_LOG: "1"
+    stdin_open: true
+    tty: true
+    network_mode: host
+  step-ca:
+    image: smallstep/step-ca
+    user: root
+    container_name: step-ca
+    volumes:
+      - ./terraform/lxc-step-ca/step-ca:/etc/step-ca
+      - ./terraform/lxc-step-ca/init-step-ca.sh:/init-step-ca.sh:ro
+    environment:
+      STEPPATH: "/etc/step-ca"
+    entrypoint: ["/bin/bash", "/init-step-ca.sh"]
+  terraform:
+    image: hashicorp/terraform
+    container_name: terraform
+    working_dir: /terraform
+    volumes:
+      - ./crypto:/crypto:ro
+      - ./terraform:/terraform
+    network_mode: host
