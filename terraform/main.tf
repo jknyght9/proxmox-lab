@@ -14,6 +14,7 @@ module "pihole" {
   external_eth0_vmbr = var.network_interface_bridge
   external_eth0_ipv4_cidr = var.pihole_eth0_ipv4_cidr
   external_eth0_gw = var.network_gateway_address
+  proxmox_api_url = var.proxmox_api_url
 }
 
 module "step-ca" {
@@ -25,6 +26,7 @@ module "step-ca" {
   eth0_vmbr = var.network_interface_bridge
   eth0_ipv4_cidr = var.step-ca_eth0_ipv4_cidr
   eth0_gateway = var.network_gateway_address
+  pihole_ipv4_cidr = var.pihole_eth0_ipv4_cidr
 }
 
 module "kasm" {

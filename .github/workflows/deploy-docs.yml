@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main # or 'master' if you use that
+      - initial
 
 jobs:
   deploy:

@@ -14,7 +14,8 @@ services:
       - 8000:8000
     command: "serve -a 0.0.0.0:8000"
   packer:
-    image: hashicorp/packer:latest
+    build: ./packer
+    #image: hashicorp/packer:latest
     container_name: packer
     working_dir: /packer
     volumes:

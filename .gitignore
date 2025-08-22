@@ -1,7 +1,10 @@
 crypto
+**/*.pkrvars.hcl
 **/*.tfvars
 **/*.tfstate*
 **/*.lock.hcl
 .terraform
 **/*.log
 **/*.bak.*
+hosts.json
+**/*.crt

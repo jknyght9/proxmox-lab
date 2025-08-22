@@ -1,5 +1,6 @@
 locals {
   external_eth0_ipv4 = regex("^([^/]+)", var.external_eth0_ipv4_cidr)[0] # strip CIDR mask
+  proxmox_api_host   = regex("^https?://([^:/]+)", var.proxmox_api_url)[0]
 }
 
 resource "proxmox_lxc" "pihole-internal" {
@@ -9,6 +10,7 @@ resource "proxmox_lxc" "pihole-internal" {
   clone             = "pihole-template"
   full              = true 
   unprivileged      = false
+  ostype            = "debian"
   cores             = 2
   memory            = 1024
   swap              = 1024
@@ -25,8 +27,22 @@ resource "proxmox_lxc" "pihole-internal" {
     gw              = "172.16.0.1"
   }
   features {
-      nesting         = true
+    nesting         = true
   }
+
+  provisioner "remote-exec" {
+    inline = [
+      "pct start ${var.vmid_internal} || true"
+    ]
+
+    connection {
+      type          = "ssh"
+      user          = "root"
+      private_key   = file("/crypto/lab-deploy")
+      host          = local.proxmox_api_host
+    }
+  }
+
   tags              = "terraform,infra,lxc"
 }
 
@@ -37,6 +53,7 @@ resource "proxmox_lxc" "pihole-external" {
   clone             = "pihole-template"
   full              = true 
   unprivileged      = false
+  ostype            = "debian"
   cores             = 2
   memory            = 1024
   swap              = 1024
@@ -55,6 +72,20 @@ resource "proxmox_lxc" "pihole-external" {
   features {
     nesting         = true
   }
+
+  provisioner "remote-exec" {
+    inline = [
+      "pct start ${var.vmid_external} || true"
+    ]
+
+    connection {
+      type          = "ssh"
+      user          = "root"
+      private_key   = file("/crypto/lab-deploy")
+      host          = local.proxmox_api_host
+    }
+  }
+
   provisioner "remote-exec" {
     inline = [
       "pihole-FTL --config dhcp.active false",

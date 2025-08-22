@@ -8,7 +8,7 @@ export TERM=dumb
 SID_REPO="deb http://deb.debian.org/debian sid main contrib non-free non-free-firmware"
 SID_LIST="/etc/apt/sources.list.d/sid.list"
 SID_PIN="/etc/apt/preferences.d/sid"
-WEBSERVER_PASSWORD="changeme123"
+WEBSERVER_PASSWORD="1%P@55w0rD%1"
 DNS_SUFFIX="lab"
 
 ### This is a work around for DNScrypt-proxy on Debian 12
@@ -42,6 +42,22 @@ apt-get update
 apt-get install -y curl git unbound net-tools
 apt-get install -y -t sid dnscrypt-proxy
 apt-get autoremove
+
+### Removing SID configuration and reverting to bookworm
+rm -f /etc/apt/sources.list.d/sid.list /etc/apt/preferences.d/limit-sid
+cat >/etc/apt/preferences.d/99-pin-bookworm <<'EOF'
+Package: *
+Pin: release n=bookworm
+Pin-Priority: 990
+EOF
+apt-get update
+apt-get install -y -t bookworm base-files
+echo "12" > /etc/debian_version
+sed -i -E 's/^(VERSION_ID=).*/\112/;
+           s/^(VERSION_CODENAME=).*/\1bookworm/;
+           s/^(PRETTY_NAME=).*/\1"Debian GNU\/Linux 12 (bookworm)"/' /etc/os-release
+apt-mark hold dnscrypt-proxy
+#########################################################
 
 # DNScrypt-proxy config
 echo "[+] Updating and restarting dnscrypt-proxy..."

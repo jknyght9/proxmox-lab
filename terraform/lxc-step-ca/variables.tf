@@ -28,6 +28,16 @@ variable "eth0_ipv4_cidr" {
   }
 }
 
+variable "pihole_ipv4_cidr" {
+  type = string
+  description = "IPv4 address for Pihole instance"
+
+  validation {
+    condition     = can(cidrhost(var.pihole_ipv4_cidr, 0))
+    error_message = "Must be a valid CIDR block."
+  }
+}
+
 variable "eth0_gateway" {
   type = string
   description = "Gateway IPv4 address"

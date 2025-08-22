@@ -8,6 +8,7 @@ PROXMOX_PASS="${2:-}"
 
 # Global variables
 CRYPTO_DIR="crypto"
+DNS_POSTFIX=""
 KEY_NAME="lab-deploy"
 KEY_PATH="$CRYPTO_DIR/$KEY_NAME"
 PUBKEY_PATH="$KEY_PATH.pub"
@@ -28,6 +29,8 @@ function success() { echo -e "${C_GREEN}[✓] $*${C_RESET}"; }
 function error()   { echo -e "${C_RED}[X] $*${C_RESET}"; }
 function warn()    { echo -e "${C_YELLOW}[!] $*${C_RESET}"; }
 function question() { echo -e "  ${C_YELLOW}[?] $*${C_RESET}"; }
+function sshRun() { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$1@$2" "$3"; }
+function pressAnyKey() { ead -n 1 -s -p "$(question "Press any key to continue")"; echo; }
 
 function header() {
   clear
@@ -124,7 +127,8 @@ function proxmoxPostInstall() {
       exit 1
     fi
     
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"'
+    sshRun $REMOTE_USER $PROXMOX_HOST 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"'
+    #ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"'
     success "Completed post-installation on $PROXMOX_HOST.\n"
   else
     warn "Skipped running the post-install script.\n"
@@ -134,6 +138,7 @@ function proxmoxPostInstall() {
 function proxmoxLabInstall() {
   doing "Running Proxmox VE Lab Install Script..."
   scp -i "$KEY_PATH" -o StrictHostKeyChecking=no ./proxmox/setup.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
+  #sshRun $REMOTE_USER $PROXMOX_HOST 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
   ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
   success "Completed the lab installation script on $PROXMOX_HOST\n"
 }
@@ -162,7 +167,6 @@ and a Docker Swarm cluster. At this time, you will configure the DNS suffix
 Please make sure that you update your packer.auto.pkvars.hcl and 
 terraform.tfvars before starting this process.
 #############################################################################
-
 EOF
   read -n 1 -s -p "$(question "Press any key to continue")"
   echo
@@ -227,6 +231,7 @@ EOF
 
   # Build packer templates
     cat << "EOF"
+
 #############################################################################
 Template creation
 
@@ -249,6 +254,7 @@ EOF
   fi
 
   cat << "EOF"
+
 #############################################################################
 Template deployment
 
@@ -316,8 +322,130 @@ function createPiholeTemplate() {
     systemctl enable ssh'"
 
   doing "Stopping container and converting to template..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID}"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
   success "LXC creation complete"
+}
+
+function setupDockerSwarm() {
+  BRICK="/gluster/volume1"
+  SSH_USERNAME=$(jq -r '.[] | select(.build | contains("docker")) | .ssh_username' packer/packer-outputs/template-credentials.json)
+  
+  doing "Setting up docker swarm"
+  NODE_IPS=()
+  while IFS= read -r ip; do
+    [[ -n "$ip" ]] && NODE_IPS+=("$ip")
+  done < <(
+    jq -r '.external[] | select(.hostname | contains("docker")) | .ip' hosts.json \
+    | sed 's:/.*$::'
+  )
+  
+  if ((${#NODE_IPS[@]} < 1)); then
+    echo "No hosts found to configure."
+    exit 1
+  fi
+
+  MGR="${NODE_IPS[0]}"
+  ND1="${NODE_IPS[1]}"
+  ND2="${NODE_IPS[2]}"
+
+  # doing "Ensuring GlusterFS is running on nodes"
+  # for ip in "${NODE_IPS[@]}"; do
+  #   sshRun "$ip" "systemctl enable --now glusterd || systemctl enable --now glusterfsd || true"
+  #   sshRun "$ip" "mkdir -p '$BRICK'"
+  # done 
+
+  # Probe peers
+  for peer in "${NODE_IPS[@]}"; do
+    if ! sshRun "$SSH_USERNAME" "$MGR" "gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then 
+      doing "Probing peer $peer"
+      sshRun "$SSH_USERNAME" "$MGR" "gluster peer probe $peer"
+    else 
+      info "$peer is already in pool"
+    fi
+  done
+
+  pressAnyKey
+
+  # Wait for connections
+  for peer in "${NODE_IPS[@]}"; do
+    until sshRun "$SSH_USERNAME" "$MGR" "gluster peer status | grep -A1 -w '$peer' | grep -q Connected"; do
+      sleep 2
+    done
+  done
+
+  pressAnyKey
+
+  # Create and start volume
+  BRICKS="$MGR:$BRICK $N1:$BRICK $N2:$BRICK"
+  if ! sshRun "$SSH_USERNAME" "$MGR" "gluster volume info $VOL >/dev/null 2>&1"; then
+    doing "Creating volume $VOL"
+    sshRun "$SSH_USERNAME" "$MGR" "gluster volume create $VOL replica 3 $BRICKS force"
+  else
+    info "Volume $VOL exists"
+  fi
+
+  if ! sshRun "$SSH_USERNAME" "$MGR" "gluster volume status $VOL >/dev/null 2>&1"; then
+    doing "Starting volume $VOL"
+    sshRun "$SSH_USERNAME" "$MGR" "gluster volume start $VOL"
+  fi
+
+  pressAnyKey
+
+  # Set recommended options
+  for opt in \
+    cluster.quorum-type=auto \
+    cluster.self-heal-daemon=on \
+    cluster.data-self-heal=on \
+    cluster.metadata-self-heal=on \
+    cluster.entry-self-heal=on \
+    performance.client-io-threads=on \
+    network.ping-timeout=10
+  do
+    sshRun "$SSH_USERNAME" "$MGR" "gluster volume set $VOL $opt || true"
+  done
+
+  pressAnyKey
+
+  # Mount with fstab
+  PREF="$MGR"
+  BACKUPS=$(printf ",backupvolfile-server=%s" "$N1" "$N2")
+  for ip in "${NODE_IPS[@]}"; do
+    doing "Mounting on $ip"
+    sshRun "$ip" "mkdir -p '$MOUNTPOINT'"
+    sshRun "$ip" "sed -i \"/:${VOL}[[:space:]]/d\" /etc/fstab"
+    sshRun "$ip" "echo '${PREF}:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev${BACKUPS} 0 0' | tee -a /etc/fstab >/dev/null"
+    sshRun "$ip" "mount -a || mount.glusterfs ${PREF}:/${VOL} ${MOUNTPOINT}"
+  done
+
+  pressAnyKey
+
+  # Verify
+  sshRun "$SSH_USERNAME" "$MGR" "gluster volume info $VOL"
+  sshRun "$SSH_USERNAME" "$MGR" "gluster volume status $VOL"
+  sshRun "$SSH_USERNAME" "$MGR" "gluster volume heal $VOL info || true"
+
+  success "GlusterFS '$VOL' up on: ${NODE_IPS[*]}"
+  info "Mounted at ${MOUNTPOINT} on each node."
+
+  NODES=("${NODE_IPS[@]:1}")
+
+  info "Manager Primary: $MGR"
+  info "Managers: ${NODES[*]:-<none>}"
+
+  doing "Initializing docker swarm primary manager $MGR"
+  sshRun "$PROXMOX_HOST" "docker swarm init --advertise-addr $MGR || true"
+  MANAGER_TOKEN=$(sshRun "$SSH_USERNAME" "$MGR" "docker swarm join-token -q manager")
+  WORKER_TOKEN=$(sshRun "$SSH_USERNAME" "$MGR" "docker swarm join-token -q worker")
+
+  pressAnyKey
+  
+  doing "Adding additional nodes to swarm"
+  for ip in "${NODES[@]}"; do
+    info "Worker join: $ip"
+    sshRun "$ip" "sudo docker swarm join --token $WORKER_TOKEN $MGR:2377 || true"
+  done
+
+  pressAnyKey
 }
 
 function manageVMIDs() {
@@ -349,7 +477,11 @@ function manageVMIDs() {
 }
 
 function updateDNSRecords() {
-  doing "Updating DNS records."
+  if [ -z "${DNS_POSTFIX}" ]; then
+    read -rp "Enter your DNS suffix: " DNS_POSTFIX
+  fi
+
+  doing "Generating DNS records."
   PIHOLE_IP=$(jq -r '.external[] | select(.hostname == "pihole-external") | .ip' hosts.json | cut -d'/' -f1)
   EXT_RECORDS=$(jq -r --arg suffix "$DNS_POSTFIX" \
     '[.external[] | "\(.ip | split("/")[0]) \(.hostname) \(.hostname).\($suffix)"] | @json' hosts.json)
@@ -361,22 +493,29 @@ function updateDNSRecords() {
     --arg suffix "$DNS_POSTFIX" \
     '$ext + [($pveip + " " + $pvename + " " + $pvename + "." + $suffix)]'
   )
-  ssh -i "$KEY_PATH" "$REMOTE_USER@$PIHOLE_IP" "pihole-FTL --config dns.hosts '$UPDATED_RECORDS' \
+  doing "Updating PiHole..."
+  sshRun $REMOTE_USER $PIHOLE_IP "pihole-FTL --config dns.hosts '$UPDATED_RECORDS' \
     && pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX, step-ca.$DNS_POSTFIX\"]'"
-  ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" "pvesh set /nodes/pve/dns -dns1 $PIHOLE_IP -search $DNS_POSTFIX" 
+  doing "Updating Proxmox's DNS servers..."
+  sshRun $REMOTE_USER $PROXMOX_HOST "pvesh set /nodes/pve/dns -dns1 $PIHOLE_IP -search $DNS_POSTFIX" 
+  success "Pihole-external DNS records updated"
 }
 
 function updateRootCertificates() {
-  DNS_POSTFIX="jdclabs.io"
+  if [ -z "${DNS_POSTFIX}" ]; then
+    read -rp "Enter your DNS suffix: " DNS_POSTFIX
+  fi
 
   doing "Updating root certificates on Proxmox"
   CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json | cut -d'/' -f1)
+  PVE_HOSTNAME=$(ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" "hostname")
   curl -ko proxmox-lab-root-ca.crt https://$CA_IP/roots.pem
-  scp proxmox-lab-root-ca.crt "$REMOTE_USER@$PROXMOX_HOST:/usr/local/share/ca-certificates/proxmox-lab-root-ca.crt"
-  ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" "update-ca-certificates \
+  scp -i "$KEY_PATH" proxmox-lab-root-ca.crt "$REMOTE_USER@$PROXMOX_HOST:/usr/local/share/ca-certificates/proxmox-lab-root-ca.crt"
+  sshRun $REMOTE_USER $PROXMOX_HOST "update-ca-certificates \
     && pvenode acme account register default admin@example.com --directory https://ca.$DNS_POSTFIX/acme/acme/directory \
-    && pvenode config set --acme domains=$DNS_POSTFIX \
-    && pvenode acme cert order"
+    && pvenode config set --acme domains=$PVE_HOSTNAME.$DNS_POSTFIX \
+    && pvenode acme cert order -force"
+  success "Proxmox root certificates updated"
 }
 
 function destroyLab() {
@@ -389,7 +528,11 @@ function destroyLab() {
     error "An error occurred during lab destruction"
     exit 1
   fi
-  ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" 'bash /root/setup.sh destroy'
+  sshRun $REMOTE_USER $PROXMOX_HOST 'bash /root/setup.sh destroy || true'
+  sshRun $REMOTE_USER $PROXMOX_HOST 'pvesh set /nodes/pve/dns -dns1 1.1.1.1 -search domain.local'
+  sshRun $REMOTE_USER $PROXMOX_HOST 'rm /usr/local/share/ca-certificates/proxmox-lab*.crt || true && update-ca-certificates -v'
+  sshRun $REMOTE_USER $PROXMOX_HOST 'pvenode acme account deactivate default > /dev/null &2>1 || true'
+  sshRun $REMOTE_USER $PROXMOX_HOST 'rm /etc/pve/priv/acme/default > /dev/null &2>1 || true'
   info "Destruction complete"
 }
 
@@ -416,16 +559,18 @@ function runEverythingButSSH() {
 }
 
 header
-options=("New installation" "Rerun everything but SSH key gen" "Rerun deploy services" "Build DNS records" "Update Root Certificates" "Destroy lab" "Exit")
+options=("New installation" "Rerun everything but SSH key gen" "Rebuild Pihole Template" "Rerun deploy services" "Deploy Docker Swarm" "Build DNS records" "Update Root Certificates" "Destroy lab" "Exit")
 select opt in "${options[@]}"; do
   case $REPLY in
     1) runEverything;;
     2) runEverythingButSSH;;
-    3) deployServices;;
-    4) updateDNSRecords;;
-    5) updateRootCertificates;;
-    6) destroyLab;;
-    7) warn "Exiting..."; break;;
+    3) createPiholeTemplate;; 
+    4) deployServices;;
+    5) setupDockerSwarm;;
+    6) updateDNSRecords;;
+    7) updateRootCertificates;;
+    8) destroyLab;;
+    9|q|Q) warn "Exiting..."; break;;
     *) echo "Invalid option";;
   esac
 done

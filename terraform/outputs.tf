@@ -1,23 +1,3 @@
-output "docker" {
-  value = module.docker.docker
-  sensitive = true
-}
-
-output "pihole" {
-  value = module.pihole
-  sensitive = true
-}
-
-output "step-ca" {
-  value = module.step-ca
-  sensitive = true
-}
-
-output "kasm" {
-  value = module.kasm.kasm
-  sensitive = true
-}
-
 output "hosts" {
   value = {
     docker = module.docker.docker-hosts

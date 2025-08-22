@@ -1,14 +1,14 @@
 # Proxmox configuration
-proxmox_url = "https://10.1.50.210:8006/api2/json"
+proxmox_url = "https://IP.ADD.RE.SS:8006/api2/json"
 proxmox_node = "pve"
-proxmox_token_id = "terraform@pam!terraform-access-token"
-proxmox_token_secret = "17986a2d-3b84-4163-8107-c6c6fd8803fc"
+proxmox_token_id = "ACCESSTOKENID"
+proxmox_token_secret = "ACCESSTOKENSECRET"
 
 # Template admin Passwords
 root_password = "changeme123"
 ssh_username = "labadmin"
 ssh_password = "changeme123"
-ssh_private_key_file = "/crypto/lab-deploy"
+ssh_private_key_file = "/crypto/lab-deploy" #DO NOT CHANGE
 
 # Kasm configuration
 kasm_admin_password = "changeme123"

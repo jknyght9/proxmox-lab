@@ -2,6 +2,10 @@ variable "proxmox_url"    { type = string }
 variable "proxmox_node"   { type = string }
 variable "proxmox_token_id"  { type = string }
 variable "proxmox_token_secret" { type = string }
+variable root_password {
+  type = string 
+  default = "changeme123"
+}
 variable ssh_username {
   type = string 
   default = "labadmin"
@@ -13,6 +17,10 @@ variable ssh_password {
 variable "ssh_private_key_file" { 
   type = string 
   default = "/crypto/lab-deploy"
+}
+variable "ssh_public_key_file" { 
+  type = string 
+  default = "/crypto/lab-deploy.pub"
 }
 variable "docker_name" {
   type = string 

@@ -47,3 +47,6 @@ variable "external_eth0_gw" {
     error_message = "Must be a valid IPv4 address."
   }
 }
+variable "proxmox_api_url" {
+  type = string
+}

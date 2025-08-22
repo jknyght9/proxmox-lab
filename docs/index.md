@@ -1,24 +1,18 @@
 # Proxmox Lab
 
-This project uses Infrastructure as Code (IaC) to build lab infrastructure for testing, development, and deployment of enterprise services.
+Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Proxmox VE. Automates golden images, VM/LXC provisioning, and local documentation.
 
 ---
 
-## Description
+## Features
 
-This project is designed to:
-
-- Automate infrastructure deployments
-- Experiment with cloud-native tools in a self-hosted environment
-- Document everything for reproducibility and learning
-- Support hybrid (bare metal + cloud) configurations
-
-You’ll find:
-
-- ✅ Infrastructure as Code (IaC)
-- 📄 MkDocs-powered documentation
-- 🐧 Linux-first setup (but cross-platform where possible)
-- 🔐 Security- and privacy-aware tooling
+- Proxmox-first lab automation (API token based)
+- Packer templates for golden images (VM/LXC)
+- Terraform for declarative provisioning
+- MkDocs (Material) docs site with Docker Compose
+- Internal CA artifacts for lab services
+- Pihole/Unbound/dnscrypt-proxy for secure DNS services
+- Docker Swarm cluster for HA application testing
 
 ---
 
@@ -28,17 +22,9 @@ To use this repo effectively, you'll need:
 
 - **Docker & Docker Compose**
 - **Proxmox VE** `>= 8.x` (API access enabled)
+    - Proxmox API token with proper permissions
 
----
-
-## Documentation
-
-This documentation is inside the [`/docs`](./docs) folder and built using [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
-
-To serve locally:
-```bash
-docker compose up mkdocs
-```
+> Tip: Create a restricted API token on Proxmox (Datacenter → Permissions → API Tokens) and use it via environment variables rather than committing anything.  ￼
 
 ---
 
@@ -64,11 +50,10 @@ If you find this project useful and want to support future development:
 
 ## Related Projects
 
-### IaC and Documentation
+### IaC
 
 - [Packer](https://developer.hashicorp.com/packer)
 - [Terraform](https://www.terraform.io/)
-- [MkDocs](https://www.mkdocs.org/)
 
 ### DNS
 

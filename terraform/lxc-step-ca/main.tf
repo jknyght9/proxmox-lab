@@ -1,5 +1,6 @@
 locals {
   eth0_ipv4 = regex("^([^/]+)", var.eth0_ipv4_cidr)[0] # strip CIDR mask
+  pihole_ipv4 = regex("^([^/]+)", var.pihole_ipv4_cidr)[0]
 }
 
 resource "proxmox_lxc" "step-ca" {
@@ -64,7 +65,8 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
         systemctl daemon-reload
-        systemctl enable --now step-ca"
+        systemctl enable --now step-ca
+        sed -i 's/^nameserver .*/nameserver ${local.pihole_ipv4}/' /etc/resolv.conf"
     EOT
     ]
   }
