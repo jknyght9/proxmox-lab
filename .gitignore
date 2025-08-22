@@ -8,4 +8,5 @@ crypto
 **/*.bak.*
 hosts.json
 proxmox-lab-root-ca.crt
-*.crt
+**/*.crt
+terraform/lxc-step-ca/step-ca
