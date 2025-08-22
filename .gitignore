@@ -6,5 +6,5 @@ crypto
 .terraform
 **/*.log
 **/*.bak.*
-hosts.json
-**/*.crt
+**/hosts.json
+**/proxmox-lab-root-ca.crt
