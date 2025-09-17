@@ -2,7 +2,7 @@
 set -eo pipefail
 
 DNS_POSTFIX="lab"
-DNS_NAME="jdclabs.io"
+DNS_NAME="jdclabs.lan"
 
 function generate_password () {
     set +o pipefail
@@ -10,6 +10,10 @@ function generate_password () {
     echo
     set -o pipefail
 }
+
+# Install requirements
+apt-get update
+apt-get install jq -y
 
 # Generate password for keys
 mkdir -p /etc/step-ca/secrets
@@ -26,5 +30,14 @@ step ca init \
   --password-file /etc/step-ca/secrets/password_file \
   --acme
 
-# Add ACME provider
-#step ca provisioner add acme --type ACME
+# Update ACME configuration allowing longer duration certs
+CA_CFG="/etc/step-ca/config/ca.json"
+tmp=$(mktemp)
+
+jq '
+  .authority.provisioners |=
+  map(if .type=="ACME" and .name=="acme" then
+        .claims = (.claims // {}) +
+          {defaultTLSCertDuration:"2160h", maxTLSCertDuration:"2160h"}
+      else . end)
+' "$CA_CFG" >"$tmp" && mv "$tmp" "$CA_CFG"

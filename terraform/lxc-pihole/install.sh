@@ -8,7 +8,7 @@ export TERM=dumb
 SID_REPO="deb http://deb.debian.org/debian sid main contrib non-free non-free-firmware"
 SID_LIST="/etc/apt/sources.list.d/sid.list"
 SID_PIN="/etc/apt/preferences.d/sid"
-WEBSERVER_PASSWORD="1%P@55w0rD%1"
+WEBSERVER_PASSWORD="changeme123"
 DNS_SUFFIX="lab"
 
 ### This is a work around for DNScrypt-proxy on Debian 12

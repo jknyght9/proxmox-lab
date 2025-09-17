@@ -1,9 +1,21 @@
+# Token authenication
 proxmox_api_url = "https://IP.ADD.RE.SS:8006/api2/json"
 proxmox_api_token_id = "terraform@pam!terraform-access-token"
 proxmox_api_token = "API-ACCESS-TOKEN-EXAMPLE123"
 
 # No token
-username = "root@pam"
-password = "password123"
+proxmox_api_username = "root@pam"
+proxmox_api_password = "proxmox-password123"
+proxmox_target_node = "pve01"
 
+# Network configuration
+network_interface_bridge = "vmbr0"
+network_gateway_address = "10.1.50.1"
+
+# PiHole configuration
 pihole_root_password = "pihole-password123"
+pihole_eth0_ipv4_cidr = "10.1.50.3/24"
+
+# StepCA configuration
+step-ca_root_password = "stepca-password123"
+step-ca_eth0_ipv4_cidr = "10.1.50.4/24"

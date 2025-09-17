@@ -23,6 +23,11 @@ variable proxmox_api_password {
   description = "Proxmox password for authentication"
 }
 
+variable "proxmox_target_node" {
+  type = string 
+  description = "Proxmox node"
+}
+
 variable network_interface_bridge {
   type = string
   description = "Network interface for all traffic"

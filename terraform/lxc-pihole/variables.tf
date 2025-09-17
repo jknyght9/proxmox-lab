@@ -1,23 +1,3 @@
-variable "vmid_external" {
-  type = number
-  default = 900
-}
-
-variable "vmid_internal" {
-  type = number
-  default = 901
-}
-
-variable "vmid_template" {
-  type = number
-  default = 9002
-}
-
-variable "root_password" {
-  type = string
-  description = "Root password"
-}
-
 variable "external_eth0_vmbr" {
   type = string 
   description = "Proxmox bridge interface"
@@ -49,4 +29,29 @@ variable "external_eth0_gw" {
 }
 variable "proxmox_api_url" {
   type = string
+}
+
+variable "proxmox_target_node" {
+  type = string 
+  description = "Proxmox node"
+}
+
+variable "root_password" {
+  type = string
+  description = "Root password"
+}
+
+variable "vmid_external" {
+  type = number
+  default = 900
+}
+
+variable "vmid_internal" {
+  type = number
+  default = 901
+}
+
+variable "vmid_template" {
+  type = number
+  default = 9002
 }

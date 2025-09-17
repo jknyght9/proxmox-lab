@@ -59,6 +59,7 @@ If you find this project useful and want to support future development:
 
 - [PiHole](https://pi-hole.net/)
 - [Unbound](https://github.com/NLnetLabs/unbound)
+- [DNSCrypt-Proxy](https://github.com/DNSCrypt/dnscrypt-proxy)
 
 ### Certificate Authorities
 
@@ -67,3 +68,8 @@ If you find this project useful and want to support future development:
 ### Virtualization
 
 - [Proxmox VE](https://www.proxmox.com/)
+
+### Containerization
+
+- [Docker](https://www.docker.com/)
+- [Portainer](https://www.portainer.io/)

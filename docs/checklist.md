@@ -5,7 +5,7 @@ Review and complete the following items prior to installation.
 ## Proxmox
 
 - [ ] Create a new user named "terraform"
-  - Datacenter > Permissions > Users > Add
+    - Datacenter > Permissions > Users > Add
 
 ## Packer
 

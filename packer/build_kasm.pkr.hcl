@@ -11,13 +11,13 @@ build {
 
   provisioner "shell" {
     inline = [
-      "echo \"root:${var.root_password}\" | sudo chpasswd"
+      "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y",
     ]
   }
 
   provisioner "shell" {
     inline = [
-      "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y",
+      "echo \"root:${var.root_password}\" | sudo chpasswd"
     ]
   }
 

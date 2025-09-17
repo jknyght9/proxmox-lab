@@ -16,7 +16,7 @@ VM_TEMP_IMAGES='[
   {"name": "debian-12", "url": "https://cloud.debian.org/images/cloud/bookworm/20250703-2162/debian-12-genericcloud-amd64-20250703-2162.qcow2", "vmid": 9997}
 ]'
 LXC_TEMP_IMAGES='[
-  {"name": "debian-12-standard_12.7-1_amd64.tar.zst"}
+  {"name": "debian-12-standard"}
 ]'
 
 function header() {
@@ -38,7 +38,7 @@ function installRequirements() {
 }
 
 function chooseStorage() {
-  mapfile -t STORES < <(pvesh get /storage --output-format json | jq -r '.[] | select(.content | contains("images")) | .storage')
+  mapfile -t STORES < <(pvesh get /storage --output-format json | jq -r '.[] | select(.content | contains("images")) | .storage' | sort)
 
   if [[ ${#STORES[@]} -eq 0 ]]; then
     whiptail --title "Storage selection" --msgbox "No stores found!" 8 40
@@ -139,9 +139,10 @@ function installDebianLXCImage() {
   else 
     echo "[>] Downloading template..."
     pveam update > /dev/null 2>&1
-    pveam download $STORAGE "$TEMPLATE" > /dev/null 2>&1
+    DEBIAN_LXC=$(pveam available | grep debian-12-standard | awk '{print $2}')
+    pveam download $STORAGE "$DEBIAN_LXC" > /dev/null 2>&1
 
-    if pveam list $STORAGE | grep -q "$TEMPLATE"; then
+    if pveam list $STORAGE | grep -q "$DEBIAN_LXC"; then
       echo "[!] Download complete!"
     else
       echo "[X] Download failed or template not found."
@@ -164,6 +165,7 @@ function deployCloudImages() {
 
 function installCloudInitUserdata() {
   echo "[+] Installing userdata snippets for cloud-init"
+  mkdir -p /var/lib/vz/snippets > /dev/null 2>&1
   cat << EOF > /var/lib/vz/snippets/userdata-qemu-agent.yaml
 #cloud-config
 ssh_pwauth: true
@@ -210,6 +212,54 @@ function installCloudInitImage() {
   qm template $VMID
 }
 
+function createHashicorpUser() {
+  local USER="hashicorp@pam"
+  local ROLE="HashicorpBuild"
+  local TOKEN_ID="hashicorp-token"
+
+  has_user()   { pveum user list   | awk -v u="$USER"     '$1==u{f=1} END{exit !f}'; }
+  has_role()   { pveum role list   | awk -v r="$ROLE"     '$1==r{f=1} END{exit !f}'; }
+  has_token()  { pveum user token list "$USER" "$TOKEN_ID"  | awk -v u="$USER" -v t="$TOKEN_ID" '$1==u && $2==t{f=1} END{exit !f}'; }
+  has_acl_all(){ pveum acl list    | awk -v u="$USER" -v r="$ROLE" '$1=="/" && $3==u && $2==r{f=1} END{exit !f}'; }
+
+  echo "[*] Ensuring Proxmox user: $USER"
+  if ! has_user; then
+    pveum user add "$USER" --enable 1 --comment "CI user for Packer/Terraform builds" || true
+    echo "    - created"
+  else
+    echo "    - exists"
+  fi
+
+  echo "[*] Ensuring minimal custom role: $ROLE"
+  if ! has_role; then
+    pveum roleadd "$ROLE" -privs \
+      "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Datastore.Audit,Datastore.Allocate,Datastore.AllocateTemplate,Datastore.AllocateSpace,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.Cloudinit,VM.Config.CPU,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.PowerMgmt,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,Permissions.Modify" \
+      || true
+    echo "    - created"
+  else
+    echo "    - exists"
+  fi
+
+  echo "[*] Granting ACL on Datacenter root '/'"
+  if ! has_acl_all; then
+    pveum aclmod / -user "$USER" -role "$ROLE" || true
+    echo "    - ACL granted"
+  else
+    echo "    - ACL already present"
+  fi
+
+  echo "[*] Ensuring API token: ${USER}!${TOKEN_ID}"
+  if ! has_token; then
+    echo "    - creating token (SAVE the secret now; it will not be shown again)"
+    pveum user token add "$USER" "$TOKEN_ID" --privsep=0 || true
+  else
+    echo "    - token exists (secret cannot be retrieved; delete & recreate if needed)"
+  fi
+  echo
+  read -n 1 -s -p "[!] Ensure that you update the proxmox token in the 'packer.auto.pkvars.hcl' and 'terraform.tfvars' files"
+  echo
+}
+
 function destroyLab() {
   echo "[-] Deleting SDN..."
   rm /etc/pve/sdn/subnets.cfg
@@ -246,9 +296,10 @@ fi
 BRIDGE_INTERFACE=$(chooseBridge)
 BRIDGE_NAME="${BRIDGE_INTERFACE%%:*}"
 BRIDGE_IP="${BRIDGE_INTERFACE##*:}"
-STORE=$(chooseStorage)
 
 installRequirements
+STORE=$(chooseStorage)
 createLabSDN $BRIDGE_NAME $BRIDGE_IP
 deployLXCImages
 deployCloudImages
+createHashicorpUser

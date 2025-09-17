@@ -22,14 +22,14 @@ resource "proxmox_vm_qemu" "kasm" {
   network {
     id          = 0
     model       = "virtio"
-    bridge      = "vmbr1"
+    bridge      = var.proxmox_bridge
   }
 
   disk {
     slot        = "scsi0"
     size        = each.value.disk_size
     type        = "disk"
-    storage     = "pve1-local-ssd-mirror"
+    storage     = each.value.target_storage
   }
 
   tags          = "terraform,infra,vm"

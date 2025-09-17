@@ -9,4 +9,6 @@ crypto
 hosts.json
 proxmox-lab-root-ca.crt
 **/*.crt
-terraform/lxc-step-ca/step-ca
+terraform/lxc-step-ca/step-ca/
+**/.config
+**/dev

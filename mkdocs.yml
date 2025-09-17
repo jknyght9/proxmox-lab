@@ -54,5 +54,6 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
+      - Overview: overview.md
       - Pre-Installation: pre-installation.md
       - Checklist: checklist.md

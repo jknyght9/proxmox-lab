@@ -4,7 +4,7 @@ locals {
 }
 
 resource "proxmox_lxc" "pihole-internal" {
-  target_node       = "pve"
+  target_node       = var.proxmox_target_node
   vmid              = var.vmid_internal
   hostname          = "pihole-internal"
   clone             = "pihole-template"
@@ -47,7 +47,7 @@ resource "proxmox_lxc" "pihole-internal" {
 }
 
 resource "proxmox_lxc" "pihole-external" {
-  target_node       = "pve"
+  target_node       = var.proxmox_target_node
   vmid              = var.vmid_external
   hostname          = "pihole-external"
   clone             = "pihole-template"

@@ -4,10 +4,10 @@ locals {
 }
 
 resource "proxmox_lxc" "step-ca" {
-  target_node       = "pve"
+  target_node       = var.proxmox_target_node
   vmid              = var.vmid
   hostname          = "step-ca"
-  ostemplate        = "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+  ostemplate        = var.ostemplate
   password          = var.root_password 
   ssh_public_keys   = file("/crypto/lab-deploy.pub")
   unprivileged      = true

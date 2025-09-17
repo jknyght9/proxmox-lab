@@ -3,6 +3,7 @@ module "docker" {
     proxmox = proxmox
   }
   source = "./vm-docker-swarm"
+  proxmox_bridge = var.network_interface_bridge
 }
 
 module "pihole" {
@@ -15,6 +16,7 @@ module "pihole" {
   external_eth0_ipv4_cidr = var.pihole_eth0_ipv4_cidr
   external_eth0_gw = var.network_gateway_address
   proxmox_api_url = var.proxmox_api_url
+  proxmox_target_node = var.proxmox_target_node
 }
 
 module "step-ca" {
@@ -27,8 +29,10 @@ module "step-ca" {
   eth0_ipv4_cidr = var.step-ca_eth0_ipv4_cidr
   eth0_gateway = var.network_gateway_address
   pihole_ipv4_cidr = var.pihole_eth0_ipv4_cidr
+  proxmox_target_node = var.proxmox_target_node
 }
 
 module "kasm" {
   source = "./vm-kasm"
+  proxmox_bridge = var.network_interface_bridge
 }
