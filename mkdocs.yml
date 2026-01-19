@@ -32,13 +32,18 @@ theme:
         icon: material/brightness-4
         name: Switch to system preference
 markdown_extensions:
+  - admonition
   - pymdownx.superfences
-  - pymdownx.tabbed
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.details
-  - pymdownx.emoji
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.tasklist:
       clickable_checkbox: true
-  - pymdownx.highlight
+  - pymdownx.highlight:
+      anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.keys
   - pymdownx.mark
@@ -51,9 +56,40 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+
 nav:
   - Home: index.md
   - Getting Started:
-      - Overview: overview.md
-      - Pre-Installation: pre-installation.md
-      - Checklist: checklist.md
+      - Introduction: getting-started/introduction.md
+      - Prerequisites: getting-started/prerequisites.md
+      - Quick Start: getting-started/quick-start.md
+      - Pre-Flight Checklist: getting-started/checklist.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Network Topology: architecture/network-topology.md
+      - Service Relationships: architecture/service-relationships.md
+      - Certificate Chain: architecture/certificate-chain.md
+  - Configuration:
+      - Terraform Variables: configuration/terraform-variables.md
+      - Packer Variables: configuration/packer-variables.md
+      - Module Reference: configuration/module-reference.md
+      - Cloud-Init Templates: configuration/cloudinit-templates.md
+  - Modules:
+      - Docker Swarm: modules/docker-swarm.md
+      - Kasm Workspaces: modules/kasm.md
+      - Pihole DNS: modules/pihole.md
+      - Step-CA: modules/step-ca.md
+  - Operations:
+      - Accessing Services: operations/accessing-services.md
+      - DNS Management: operations/dns-management.md
+      - Certificate Operations: operations/certificate-operations.md
+      - Docker Swarm Operations: operations/docker-swarm-operations.md
+      - Backup & Recovery: operations/backup-recovery.md
+  - Troubleshooting:
+      - Common Issues: troubleshooting/common-issues.md
+      - Error Reference: troubleshooting/error-reference.md
+      - Diagnostic Commands: troubleshooting/diagnostic-commands.md
+      - FAQ: troubleshooting/faq.md
+  - Reference:
+      - Glossary: reference/glossary.md
+      - External Resources: reference/external-resources.md
