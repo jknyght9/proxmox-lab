@@ -6,6 +6,7 @@ crypto
 hosts.json
 proxmox-lab-root-ca.crt
 terraform/lxc-step-ca/step-ca/
+terraform/vm-kasm/rendered/
 **/.config
 **/archive
 **/dev
