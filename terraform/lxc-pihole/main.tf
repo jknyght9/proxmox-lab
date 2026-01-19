@@ -10,6 +10,7 @@ resource "proxmox_lxc" "pihole-internal" {
   clone             = "pihole-template"
   full              = true 
   unprivileged      = false
+  
   ostype            = "debian"
   cores             = 2
   memory            = 1024

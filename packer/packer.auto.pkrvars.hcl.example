@@ -10,5 +10,5 @@ ssh_username = "labadmin"
 ssh_password = "changeme123"
 ssh_private_key_file = "/crypto/lab-deploy" #DO NOT CHANGE
 
-# Kasm configuration
-kasm_admin_password = "changeme123"
+# DNS config
+dns_postfix = "mylab.lan"

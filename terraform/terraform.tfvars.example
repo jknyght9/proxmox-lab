@@ -19,3 +19,10 @@ pihole_eth0_ipv4_cidr = "10.1.50.3/24"
 # StepCA configuration
 step-ca_root_password = "stepca-password123"
 step-ca_eth0_ipv4_cidr = "10.1.50.4/24"
+
+# DNS postfix
+dns_postfix = "mylab.lan"
+
+# Kasm configuration
+kasm_version = "1.17.0.7f020d"
+kasm_admin_password = "kasm-password123"

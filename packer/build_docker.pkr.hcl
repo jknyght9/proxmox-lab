@@ -5,34 +5,38 @@ build {
   provisioner "shell" {
     inline = [
       "echo '[+] Waiting for cloud-init to finish...'",
-      "cloud-init status --wait || true"
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
+      "cloud-init status --wait || true",
       "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y",
-    ]
-  }
-
-  provisioner "shell" {
-    inline = [
       "echo \"root:${var.root_password}\" | sudo chpasswd"
     ]
   }
 
+  provisioner "shell" {
+    inline = [
+      "echo '[+] Installing internal certificate authority'",
+      "curl -k -o proxmox-lab.crt https://ca.${var.dns_postfix}/roots.pem",
+      "sudo install -m 0644 proxmox-lab.crt /usr/local/share/ca-certificates/proxmox-lab.crt",
+      "sudo update-ca-certificates --fresh" 
+    ]
+  }
+
   #### Install software
+  provisioner "shell" {
+    inline = [
+      "echo '[+] Installing acme.sh'",
+      "curl https://get.acme.sh | sh -s email=admin@${var.dns_postfix}",
+      "~/.acme.sh/acme.sh --version"
+    ]
+  }
 
   provisioner "shell" {
     inline = [
       "echo '[+] Installing Docker'",
       "export DEBIAN_FRONTEND=noninteractive",
       "sudo apt-get update",
-      "sudo apt-get install -y apt-transport-https ca-certificates curl gnupg jq software-properties-common",
-      "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -",
-      "sudo add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable\"",
-      "sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
-      "sudo usermod -aG docker $USER"
+      "sudo apt-get install -y ca-certificates curl jq software-properties-common socat",
+      "curl -fsSL https://get.docker.com | sh",
+      "sudo usermod -aG docker ${var.ssh_username}"
     ]
   }
 
@@ -47,50 +51,23 @@ build {
   }
 
   #### Cloud-init configuration
-
   provisioner "shell" {
     inline = [
       "echo '[+] Enabling qemu-guest-agent and cloud-init'",
-      "sudo apt-get install -y cloud-init qemu-guest-agent",
+      "sudo apt-get update && sudo apt-get upgrade -y",
+      "sudo apt-get install -y --no-install-recommends cloud-init qemu-guest-agent",
       "sudo systemctl enable qemu-guest-agent",
-      "sudo systemctl enable cloud-init cloud-init-local"
-    ]
-  }
-
-  provisioner "file" {
-    destination = "/tmp/user-data"
-    content = <<-CLOUD
-      #cloud-config
-      users:
-        - name: ${var.ssh_username}
-          groups: [sudo]
-          shell: /bin/bash
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          ssh_authorized_keys:
-            - ${file(var.ssh_public_key_file)}
-
-        - name: root
-          ssh_authorized_keys:
-            - ${file(var.ssh_public_key_file)}
-    CLOUD
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo '[+] Resetting cloud-init for template'",
-      "sudo mkdir -p /var/lib/cloud/seed/nocloud",
-      "echo 'instance-id: iid-local-template' | sudo tee /var/lib/cloud/seed/nocloud/meta-data >/dev/null",
-      "sudo mv /tmp/user-data /var/lib/cloud/seed/nocloud/user-data",
-      "sudo chmod 600 /var/lib/cloud/seed/nocloud/user-data /var/lib/cloud/seed/nocloud/meta-data",
-      "sudo cloud-init clean --logs",
-      "sudo tee /etc/netplan/01-netcfg.yaml <<EOF\nnetwork:\n  version: 2\n  ethernets:\n    ens18:\n      dhcp4: true\nEOF",
+      "sudo systemctl enable cloud-init cloud-init-local",
+      "sudo cloud-init clean --logs || true",
+      "sudo rm -rf /var/lib/cloud/instance /var/lib/cloud/instances",
+      "sudo rm -rf /var/lib/cloud/seed/nocloud",
+      "sudo bash -lc 'cat >/etc/netplan/01-netcfg.yaml <<EOF\nnetwork:\n  version: 2\n  ethernets:\n    all-en:\n      match:\n        name: \"en*\"\n      dhcp4: true\nEOF'",
       "sudo chmod 600 /etc/netplan/01-netcfg.yaml",
       "sudo netplan generate"
     ]
   }
 
   #### Generalize and clean up after APT
-
   provisioner "shell" {
     scripts = ["files/linux-generalize.sh"]
   }
@@ -105,7 +82,6 @@ build {
   }
 
   #### Output variables to JSON file
-  
   provisioner "shell-local" {
     inline = [
       "umask 077",
@@ -131,7 +107,7 @@ build {
               timestamp: $ts,
               root_password: $root_password,
               ssh_username: $ssh_username,
-              ssh_password: $ssh_password
+              ssh_password: $ssh_password,
             }]' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
       EOF
     ]

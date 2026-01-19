@@ -12,8 +12,9 @@ sudo tee /etc/systemd/system/regen-ssh-hostkeys.service >/dev/null <<'EOF'
 [Unit]
 Description=Regenerate SSH host keys if missing
 ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
-After=network-online.target
-Wants=network-online.target
+DefaultDependencies=no
+After=local-fs.target
+Before=ssh.service
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/ssh-keygen -A

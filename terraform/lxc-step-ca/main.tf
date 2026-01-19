@@ -15,7 +15,8 @@ resource "proxmox_lxc" "step-ca" {
   cores             = 2
   memory            = 2048
   swap              = 2048
-  start             = true 
+  start             = true
+  onboot            = true
 
   rootfs {
     storage         = "local-lvm"
@@ -50,6 +51,7 @@ resource "proxmox_lxc" "step-ca" {
         echo \"deb [signed-by=/etc/apt/trusted.gpg.d/smallstep.asc] https://packages.smallstep.com/stable/debian debs main\" | tee /etc/apt/sources.list.d/smallstep.list
         apt-get update && apt-get -y install step-cli step-ca
         mkdir -p /etc/step-ca && cp -r /root/step-ca/* /etc/step-ca/
+        rm -rf /root/step-ca
         cat <<EOF >/etc/systemd/system/step-ca.service
 [Unit]
 Description=Step Certificate Authority

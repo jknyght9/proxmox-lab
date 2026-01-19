@@ -1,3 +1,46 @@
+locals {
+  proxmox_api_host   = regex("^https?://([^:/]+)", var.proxmox_api_url)[0]
+  kasm_template     = join(".", slice((split(".", var.kasm_version)), 0, 2))
+}
+
+resource "local_file" "kasm_user_data" {
+  for_each = var.vm_configs
+  filename = "${path.module}/rendered/${each.value.name}-user-data.yml"
+  content  = templatefile("${path.module}/cloudinit/kasm-user-data.tmpl", {
+    acme_dir            = "https://ca.${var.dns_postfix}/acme/acme/directory"
+    dns_postfix         = "${var.dns_postfix}"
+    hostname            = each.value.name
+    kasm_admin_password = "${var.kasm_admin_password}"
+    kasm_download_url   = "https://kasm-static-content.s3.amazonaws.com/kasm_release_${var.kasm_version}.tar.gz"
+    kasm_version        = "${var.kasm_version}"
+    sans                = "${each.value.name}.${var.dns_postfix} kasm.${var.dns_postfix}",
+    ssh_authorized_keys = file(var.ssh_public_key_file)
+  })
+}
+
+resource "null_resource" "upload_snippet" {
+  for_each = var.vm_configs
+  depends_on = [local_file.kasm_user_data]
+  triggers = {
+    sha = sha256(local_file.kasm_user_data[each.key].content)
+  }
+  connection {
+    type        = "ssh"
+    host        = local.proxmox_api_host
+    user        = "root"
+    private_key = file("/crypto/lab-deploy")
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "mkdir -p /var/lib/vz/snippets",
+    ]
+  }
+  provisioner "file" {
+    source      = local_file.kasm_user_data[each.key].filename
+    destination = "/var/lib/vz/snippets/${each.value.name}-user-data.yml"
+  }
+}
+
 resource "proxmox_vm_qemu" "kasm" {
   for_each      = var.vm_configs
 
@@ -5,20 +48,19 @@ resource "proxmox_vm_qemu" "kasm" {
   name          = each.value.name
   target_node   = each.value.target_node
 
-  clone         = "kasm-1.17-template"
+  clone         = "docker-template"
   full_clone    = true
   
+  agent         = 1
+  onboot        = true 
+  vm_state      = each.value.vm_state
   cpu {
     sockets     = 1
     cores       = each.value.cores
   }
   scsihw        = "virtio-scsi-pci"
   memory        = each.value.memory
-  onboot        = true 
-  vm_state      = each.value.vm_state
-
-  agent         = 1
-
+  
   network {
     id          = 0
     model       = "virtio"
@@ -31,6 +73,16 @@ resource "proxmox_vm_qemu" "kasm" {
     type        = "disk"
     storage     = each.value.target_storage
   }
+
+  disk {
+    slot        = "ide2"
+    type        = "cloudinit"
+    storage     = each.value.target_storage
+  }
+
+  ciuser        = "labadmin"
+  sshkeys       = file("/crypto/lab-deploy.pub")
+  cicustom      = "user=local:snippets/${each.value.name}-user-data.yml"
 
   tags          = "terraform,infra,vm"
 }
