@@ -6,19 +6,35 @@ proxmox_api_token = "API-ACCESS-TOKEN-EXAMPLE123"
 # No token
 proxmox_api_username = "root@pam"
 proxmox_api_password = "proxmox-password123"
-proxmox_target_node = "pve01"
+proxmox_target_node = "pve-01"
 
 # Network configuration
 network_interface_bridge = "vmbr0"
 network_gateway_address = "10.1.50.1"
 
-# PiHole configuration
-pihole_root_password = "pihole-password123"
-pihole_eth0_ipv4_cidr = "10.1.50.3/24"
+# Technitium DNS configuration
+technitium_admin_password = "technitium-admin-password123"
+technitium_root_password = "technitium-root-password123"
+
+# DNS cluster nodes - Main cluster (3 nodes on external network)
+dns_main_nodes = [
+  { hostname = "dns-01", target_node = "pve-01", ip = "10.1.50.3/24", gw = "10.1.50.1" },
+  { hostname = "dns-02", target_node = "pve-02", ip = "10.1.50.4/24", gw = "10.1.50.1" },
+  { hostname = "dns-03", target_node = "pve-03", ip = "10.1.50.5/24", gw = "10.1.50.1" },
+]
+
+# DNS cluster nodes - Labnet SDN cluster (2 nodes on internal network)
+dns_labnet_nodes = [
+  { hostname = "labnet-dns-01", target_node = "pve-01", ip = "172.16.0.3/24", gw = "172.16.0.1" },
+  { hostname = "labnet-dns-02", target_node = "pve-02", ip = "172.16.0.4/24", gw = "172.16.0.1" },
+]
+
+# Primary DNS IP (for other services to reference)
+dns_primary_ipv4 = "10.1.50.3"
 
 # StepCA configuration
 step-ca_root_password = "stepca-password123"
-step-ca_eth0_ipv4_cidr = "10.1.50.4/24"
+step-ca_eth0_ipv4_cidr = "10.1.50.6/24"
 
 # DNS postfix
 dns_postfix = "mylab.lan"

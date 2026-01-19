@@ -186,12 +186,12 @@ function deployServices() {
 ############################################################################
 Services Deployment
 
-Next, we will setup critical services for the lab. This includes secured DNS
-(Pihole, Unbound, & dnscrypt-proxy), a certificate authority (Step-CA), KASM
-and a Docker Swarm cluster. At this time, you will configure the DNS suffix 
-(.lab, .com, .io, lab.io), and the Pihole web UI administrator passwords.
+Next, we will setup critical services for the lab. This includes Technitium
+DNS Server with clustering support, a certificate authority (Step-CA), KASM
+and a Docker Swarm cluster. At this time, you will configure the DNS suffix
+(.lab, .com, .io, lab.io) and the Technitium admin password.
 
-Please make sure that you update your packer.auto.pkvars.hcl and 
+Please make sure that you update your packer.auto.pkvars.hcl and
 terraform.tfvars before starting this process.
 #############################################################################
 
@@ -204,8 +204,8 @@ EOF
       read -rp "$(question "Enter DNS domain postfix without a period [lab]: ")" DNS_POSTFIX
       DNS_POSTFIX=${DNS_POSTFIX:-lab}
 
-      read -rp "$(question "Enter PiHole webserver API password [changeme123]: ")" PIHOLE_PASSWORD
-      PIHOLE_PASSWORD=${PIHOLE_PASSWORD:-changeme123}
+      read -rp "$(question "Enter Technitium DNS admin password [changeme123]: ")" TECHNITIUM_PASSWORD
+      TECHNITIUM_PASSWORD=${TECHNITIUM_PASSWORD:-changeme123}
 
       # Display configuration summary
       cat <<EOF
@@ -214,8 +214,8 @@ EOF
 Configuration Summary:
 --------------------------------------
 
-DNS suffix:             $DNS_POSTFIX
-Pihole Web API pass:    $PIHOLE_PASSWORD
+DNS suffix:               $DNS_POSTFIX
+Technitium admin pass:    $TECHNITIUM_PASSWORD
 ======================================
 
 EOF
@@ -240,21 +240,21 @@ EOF
   success "Step-CA installation script updated successfully!"
   generateCertificates
 
-  # Update the pihole installation script with new password
+  # Update the technitium installation script with new password
   if sed --version >/dev/null 2>&1; then
-      sed -i "s/^WEBSERVER_PASSWORD=.*/WEBSERVER_PASSWORD=\"$PIHOLE_PASSWORD\"/" terraform/lxc-pihole/install.sh
+      sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=\"$TECHNITIUM_PASSWORD\"/" terraform/lxc-technitium/install.sh
   else
-      sed -i '' "s/^WEBSERVER_PASSWORD=.*/WEBSERVER_PASSWORD=\"$PIHOLE_PASSWORD\"/" terraform/lxc-pihole/install.sh
+      sed -i '' "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=\"$TECHNITIUM_PASSWORD\"/" terraform/lxc-technitium/install.sh
   fi
-  success "Pihole installation script updated successfully!"
+  success "Technitium installation script updated successfully!"
 
   # Checking VMIDs
   doing "Checking if required Proxmox VMIDs currently exist..."
   manageVMIDs "${REQUIRED_VMIDS[@]}"
   success "VMID check complete\n"
 
-  # Create the LXC container
-  createPiholeTemplate
+  # Technitium doesn't need a pre-built template - Terraform handles installation directly
+  info "Technitium DNS will be installed directly by Terraform (no template needed)"
   read -n 1 -s -p "$(question "Press any key to continue")"
   echo
 
@@ -304,18 +304,20 @@ EOF
   docker compose run --rm -it terraform output -json host-records > hosts.json
 }
 
-# Because packer doesnt support LXC
-function createPiholeTemplate() {
-  local TEMPLATE_VMID=9000
-  local TEMPLATE_NAME="pihole-template"
-  local STORAGE="local-lvm"
-  local BRIDGE="vmbr0"
-  local CORES=2
-  local MEMORY=2048
+# Generic LXC template creation function
+# Parameters: VMID, template name, install script path, storage, bridge, cores, memory
+function createLXCTemplate() {
+  local TEMPLATE_VMID="$1"
+  local TEMPLATE_NAME="$2"
+  local INSTALL_SCRIPT="$3"
+  local STORAGE="${4:-local-lvm}"
+  local BRIDGE="${5:-vmbr0}"
+  local CORES="${6:-2}"
+  local MEMORY="${7:-2048}"
 
-  doing "Creating LXC container for Pihole"
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no ./terraform/lxc-pihole/install.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
-  
+  doing "Creating LXC template: ${TEMPLATE_NAME} (VMID: ${TEMPLATE_VMID})"
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$INSTALL_SCRIPT" "$REMOTE_USER@$PROXMOX_HOST":/root/install.sh
+
   doing "Creating LXC container ${TEMPLATE_VMID} (${TEMPLATE_NAME})..."
   local OSTEMPLATE=$(sshRun $REMOTE_USER $PROXMOX_HOST "pveam list local | awk '/vztmpl/ {print \$1; exit}'")
   echo $OSTEMPLATE
@@ -353,7 +355,17 @@ function createPiholeTemplate() {
 
   doing "Stopping container and converting to template..."
   ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
-  success "LXC creation complete"
+  success "LXC template '${TEMPLATE_NAME}' created successfully"
+}
+
+# Legacy wrapper for pihole template (kept for backwards compatibility)
+function createPiholeTemplate() {
+  createLXCTemplate 9000 "pihole-template" "./terraform/lxc-pihole/install.sh" "local-lvm" "vmbr0" 2 2048
+}
+
+# Create Technitium DNS template
+function createTechnitiumTemplate() {
+  createLXCTemplate 9001 "technitium-template" "./terraform/lxc-technitium/install.sh" "local-lvm" "vmbr0" 2 1024
 }
 
 function setupDockerSwarm() {
@@ -526,45 +538,73 @@ function updateDNSRecords() {
     read -rp "Enter your DNS suffix: " DNS_POSTFIX
   fi
 
+  if [ -z "${TECHNITIUM_PASSWORD:-}" ]; then
+    read -rp "Enter Technitium admin password: " TECHNITIUM_PASSWORD
+  fi
+
   doing "Reading Proxmox node member map from $PROXMOX_HOST:/etc/pve/.members"
   local MEMBERS_JSON
   MEMBERS_JSON="$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "cat /etc/pve/.members")"
 
-  doing "Generating Proxmox node DNS records."
-  local NODE_RECORDS_JSON
-  NODE_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" '.nodelist | to_entries | map("\(.value.ip) \(.key) \(.key)." + $suffix)' <<<"$MEMBERS_JSON")"
-  NODE_RECORDS_ALIAS_JSON="$(jq -c --arg prefix "proxmox" --arg suffix "$DNS_POSTFIX" '.nodelist | to_entries | map("\(.value.ip) \($prefix) \($prefix + "." + $suffix)")' <<<"$MEMBERS_JSON")"
-
-  doing "Generating other DNS records."
-  local EXT_RECORDS_JSON
-  local PIHOLE_IP
+  # Get primary DNS IP from hosts.json
+  local DNS_IP
   if [ -s hosts.json ]; then
-    EXT_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
-      '(.external // []) | map("\((.ip | split("/")[0])) \(.hostname) \(.hostname)." + $suffix)' hosts.json)"
-    PIHOLE_IP=$(jq -r '.external[] | select(.hostname == "pihole-external") | .ip' hosts.json | cut -d'/' -f1)
-  else
-    warn "Hosts.json was not found"
-  fi 
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json | cut -d'/' -f1)
+  fi
 
-  local ALL_DNS_RECORDS_JSON
-  ALL_DNS_RECORDS_JSON="$(jq -c -n --argjson a "$NODE_RECORDS_JSON" --argjson b "$EXT_RECORDS_JSON" --argjson c "$NODE_RECORDS_ALIAS_JSON" '$a + $b + $c')"
+  if [ -z "$DNS_IP" ]; then
+    read -rp "Enter primary DNS server IP (dns-01): " DNS_IP
+  fi
 
-  doing "Updating Pi-hole @ $PIHOLE_IP with $(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON") A-records"
-  sshRun "$REMOTE_USER" "$PIHOLE_IP" "
-    pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' &&
-    pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX, step-ca.$DNS_POSTFIX\"]'
-  "
-  
+  doing "Authenticating with Technitium DNS @ $DNS_IP"
+  local TOKEN
+  TOKEN=$(curl -s "http://${DNS_IP}:5380/api/user/login?user=admin&pass=${TECHNITIUM_PASSWORD}" | jq -r '.token')
+
+  if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
+    error "Failed to authenticate with Technitium DNS"
+    return 1
+  fi
+
+  doing "Creating/updating primary zone: ${DNS_POSTFIX}"
+  curl -s "http://${DNS_IP}:5380/api/zones/create?token=${TOKEN}&zone=${DNS_POSTFIX}&type=Primary" > /dev/null
+
+  doing "Adding Proxmox node A records..."
+  while IFS= read -r line; do
+    local name=$(echo "$line" | jq -r '.key')
+    local ip=$(echo "$line" | jq -r '.value.ip')
+    # Add hostname record
+    curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=${name}.${DNS_POSTFIX}&type=A&ipAddress=${ip}&ttl=3600&overwrite=true" > /dev/null
+    echo "  - ${name}.${DNS_POSTFIX} -> ${ip}"
+  done < <(jq -c '.nodelist | to_entries[]' <<<"$MEMBERS_JSON")
+
+  # Add proxmox alias pointing to first node
+  local FIRST_NODE_IP=$(jq -r '.nodelist | to_entries[0].value.ip' <<<"$MEMBERS_JSON")
+  curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=proxmox.${DNS_POSTFIX}&type=A&ipAddress=${FIRST_NODE_IP}&ttl=3600&overwrite=true" > /dev/null
+  echo "  - proxmox.${DNS_POSTFIX} -> ${FIRST_NODE_IP}"
+
+  doing "Adding service A records from hosts.json..."
+  if [ -s hosts.json ]; then
+    while IFS= read -r line; do
+      local hostname=$(echo "$line" | jq -r '.hostname')
+      local ip=$(echo "$line" | jq -r '.ip' | cut -d'/' -f1)
+      curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=${hostname}.${DNS_POSTFIX}&type=A&ipAddress=${ip}&ttl=3600&overwrite=true" > /dev/null
+      echo "  - ${hostname}.${DNS_POSTFIX} -> ${ip}"
+    done < <(jq -c '.external[]' hosts.json)
+  fi
+
+  doing "Adding CNAME for ca.${DNS_POSTFIX} -> step-ca.${DNS_POSTFIX}"
+  curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=ca.${DNS_POSTFIX}&type=CNAME&cname=step-ca.${DNS_POSTFIX}&ttl=3600&overwrite=true" > /dev/null
+
   doing "Updating Proxmox's DNS servers..."
   NODE_NAMES=()
   while IFS= read -r name; do
     NODE_NAMES+=("$name")
   done < <(jq -r '.nodelist | keys[]' <<<"$MEMBERS_JSON")
-  for name in "${NODE_NAMES[@]}"; do 
+  for name in "${NODE_NAMES[@]}"; do
     sshRun "$REMOTE_USER" "$PROXMOX_HOST" \
-      "pvesh set /nodes/$name/dns -dns1 $PIHOLE_IP -dns2 1.1.1.1 -search $DNS_POSTFIX"
-  done 
-  success "Pihole-external DNS records updated"
+      "pvesh set /nodes/$name/dns -dns1 $DNS_IP -dns2 1.1.1.1 -search $DNS_POSTFIX"
+  done
+  success "Technitium DNS records updated"
 }
 
 function updateRootCertificates() {
@@ -683,18 +723,17 @@ function runEverythingButSSH() {
 }
 
 header
-options=("New installation" "Rerun everything but SSH key gen" "Rebuild Pihole Template" "Rerun deploy services" "Deploy Docker Swarm" "Build DNS records" "Update Root Certificates" "Destroy lab" "Exit")
+options=("New installation" "Rerun everything but SSH key gen" "Rerun deploy services" "Deploy Docker Swarm" "Build DNS records" "Update Root Certificates" "Destroy lab" "Exit")
 select opt in "${options[@]}"; do
   case $REPLY in
     1) runEverything;;
     2) runEverythingButSSH;;
-    3) createPiholeTemplate;; 
-    4) deployServices;;
-    5) setupDockerSwarm;;
-    6) updateDNSRecords;;
-    7) updateRootCertificates;;
-    8) destroyLab;;
-    9|q|Q) warn "Exiting..."; break;;
+    3) deployServices;;
+    4) setupDockerSwarm;;
+    5) updateDNSRecords;;
+    6) updateRootCertificates;;
+    7) destroyLab;;
+    8|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option";;
   esac
 done

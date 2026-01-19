@@ -34,13 +34,13 @@ variable "ostemplate" {
   default = "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 }
 
-variable "pihole_ipv4_cidr" {
-  type = string
-  description = "IPv4 address for Pihole instance"
+variable "dns_primary_ipv4" {
+  type        = string
+  description = "IPv4 address for primary DNS server"
 
   validation {
-    condition     = can(cidrhost(var.pihole_ipv4_cidr, 0))
-    error_message = "Must be a valid CIDR block."
+    condition     = can(regex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$", var.dns_primary_ipv4))
+    error_message = "Must be a valid IPv4 address."
   }
 }
 
