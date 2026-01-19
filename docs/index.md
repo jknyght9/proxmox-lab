@@ -1,75 +1,114 @@
 # Proxmox Lab
 
-Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Proxmox VE. Automates golden images, VM/LXC provisioning, and local documentation.
+Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Proxmox VE. Automates golden images, VM/LXC provisioning, internal certificate authority, and secure DNS services.
+
+---
+
+## Quick Navigation
+
+<div class="grid cards" markdown>
+
+-   :material-rocket-launch: **Getting Started**
+
+    ---
+
+    New to Proxmox Lab? Start here for installation and setup.
+
+    [:octicons-arrow-right-24: Introduction](getting-started/introduction.md)
+
+-   :material-sitemap: **Architecture**
+
+    ---
+
+    Understand the system design, network topology, and service relationships.
+
+    [:octicons-arrow-right-24: Architecture Overview](architecture/overview.md)
+
+-   :material-cog: **Configuration**
+
+    ---
+
+    Reference documentation for Terraform and Packer variables.
+
+    [:octicons-arrow-right-24: Configuration Reference](configuration/terraform-variables.md)
+
+-   :material-wrench: **Operations**
+
+    ---
+
+    Day-to-day operations: accessing services, managing DNS, issuing certificates.
+
+    [:octicons-arrow-right-24: Operations Guide](operations/accessing-services.md)
+
+</div>
+
+---
+
+## What You'll Build
+
+This project deploys a complete lab infrastructure on Proxmox VE:
+
+| Component | Type | Purpose |
+|-----------|------|---------|
+| **Docker Swarm** | 3 VMs | Container orchestration cluster |
+| **Kasm Workspaces** | 1 VM | Browser-based remote desktops |
+| **Pihole (External)** | LXC | DNS + ad-blocking for your network |
+| **Pihole (Internal)** | LXC | DNS + DHCP for isolated lab network |
+| **Step-CA** | LXC | Internal Certificate Authority with ACME |
 
 ---
 
 ## Features
 
-- Proxmox-first lab automation (API token based)
-- Packer templates for golden images (VM/LXC)
-- Terraform for declarative provisioning
-- MkDocs (Material) docs site with Docker Compose
-- Internal CA artifacts for lab services
-- Pihole/Unbound/dnscrypt-proxy for secure DNS services
-- Docker Swarm cluster for HA application testing
+- **Proxmox-first** automation using API tokens
+- **Packer** templates for golden VM/LXC images
+- **Terraform** for declarative infrastructure provisioning
+- **Internal CA** with ACME protocol for automated TLS certificates
+- **Secure DNS** with Pihole, Unbound, and dnscrypt-proxy
+- **Docker Swarm** cluster for high-availability container testing
+- **Dual network** architecture (external + isolated lab SDN)
 
 ---
 
 ## Requirements
 
-To use this repo effectively, you'll need:
+!!! info "Prerequisites"
+    - **Docker & Docker Compose** on your workstation
+    - **Proxmox VE 8.x** or later with API access enabled
+    - Network connectivity to your Proxmox server
 
-- **Docker & Docker Compose**
-- **Proxmox VE** `>= 8.x` (API access enabled)
-    - Proxmox API token with proper permissions
-
-> Tip: Create a restricted API token on Proxmox (Datacenter → Permissions → API Tokens) and use it via environment variables rather than committing anything.  ￼
+[:octicons-arrow-right-24: Full prerequisites](getting-started/prerequisites.md)
 
 ---
 
-## Legal / License
+## Quick Start
 
-This project is open source and distributed under the MIT License.
+```bash
+# Clone the repository
+git clone https://github.com/jknyght9/proxmox-lab.git
+cd proxmox-lab
 
-> This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the software or the use or other dealings in the software.
+# Run the automated setup
+./setup.sh <PROXMOX_IP> <PROXMOX_PASSWORD>
+```
 
-> 🔐 Do not commit secrets, credentials, or private keys. Use `.gitignore` and Vaults.
+[:octicons-arrow-right-24: Detailed quick start guide](getting-started/quick-start.md)
+
+---
+
+## License
+
+This project is open source under the MIT License.
+
+!!! warning "Security Notice"
+    Never commit secrets, credentials, or private keys. Use `.gitignore` and secure vaults.
 
 ---
 
 ## Support This Project
 
-If you find this project useful and want to support future development:
+If you find this project useful:
 
-- [Buy me a coffee ☕](https://buymeacoffee.com/jstauffer)
-- [Sponsor me on GitHub 💖](https://github.com/sponsors/jknyght9)
-- Share the repo and give a ⭐ if you like it!
-
----
-
-## Related Projects
-
-### IaC
-
-- [Packer](https://developer.hashicorp.com/packer)
-- [Terraform](https://www.terraform.io/)
-
-### DNS
-
-- [PiHole](https://pi-hole.net/)
-- [Unbound](https://github.com/NLnetLabs/unbound)
-- [DNSCrypt-Proxy](https://github.com/DNSCrypt/dnscrypt-proxy)
-
-### Certificate Authorities
-
-- [Step-CA](https://smallstep.com/)
-
-### Virtualization
-
-- [Proxmox VE](https://www.proxmox.com/)
-
-### Containerization
-
-- [Docker](https://www.docker.com/)
-- [Portainer](https://www.portainer.io/)
+- [Buy me a coffee](https://buymeacoffee.com/jstauffer)
+- [Sponsor on GitHub](https://github.com/sponsors/jknyght9)
+- Star the repo on GitHub
