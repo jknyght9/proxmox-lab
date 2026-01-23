@@ -9,34 +9,44 @@ module "docker" {
   ssh_public_key_file = var.ssh_public_key_file
 }
 
-# Main DNS cluster (3 nodes on external network)
+# Main DNS cluster (one node per Proxmox cluster node, on external network)
 module "dns-main" {
   providers = {
     proxmox = proxmox
   }
-  source          = "./lxc-technitium"
-  cluster_name    = "main"
-  nodes           = var.dns_main_nodes
-  network_bridge  = var.network_interface_bridge
-  admin_password  = var.technitium_admin_password
-  root_password   = var.technitium_root_password
-  proxmox_api_url = var.proxmox_api_url
-  vmid_start      = 910
+  source           = "./lxc-pihole"
+  cluster_name     = "main"
+  nodes            = local.effective_dns_main_nodes
+  network_bridge   = var.network_interface_bridge
+  storage          = var.lxc_storage
+  admin_password   = var.pihole_admin_password
+  root_password    = var.pihole_root_password
+  proxmox_api_url  = var.proxmox_api_url
+  vmid_start       = 910
+  is_sdn_network   = false
+  proxmox_ssh_host = local.proxmox_api_host
+  node_ip_map      = local.node_ip_map
+  dns_zone         = var.dns_postfix
 }
 
-# Labnet SDN DNS cluster (2 nodes)
+# Labnet SDN DNS cluster (max 2 nodes on SDN network)
 module "dns-labnet" {
   providers = {
     proxmox = proxmox
   }
-  source          = "./lxc-technitium"
-  cluster_name    = "labnet"
-  nodes           = var.dns_labnet_nodes
-  network_bridge  = "labnet"
-  admin_password  = var.technitium_admin_password
-  root_password   = var.technitium_root_password
-  proxmox_api_url = var.proxmox_api_url
-  vmid_start      = 920
+  source           = "./lxc-pihole"
+  cluster_name     = "labnet"
+  nodes            = local.effective_dns_labnet_nodes
+  network_bridge   = "labnet"
+  storage          = var.lxc_storage
+  admin_password   = var.pihole_admin_password
+  root_password    = var.pihole_root_password
+  proxmox_api_url  = var.proxmox_api_url
+  vmid_start       = 920
+  is_sdn_network   = true
+  proxmox_ssh_host = local.proxmox_api_host
+  node_ip_map      = local.node_ip_map
+  dns_zone         = var.dns_postfix
 }
 
 module "step-ca" {

@@ -34,7 +34,7 @@ resource "proxmox_lxc" "step-ca" {
     nesting         = true
   }
 
-  tags              = "terraform,infra,lxc"
+  tags              = "terraform,ca,lxc"
 
   # Upload secrets and certificates after creation
   provisioner "file" {
@@ -46,6 +46,10 @@ resource "proxmox_lxc" "step-ca" {
   provisioner "remote-exec" {
     inline = [<<-EOT
       bash -c "set -euxo pipefail
+        # Use public DNS for package installation (internal DNS may not be ready)
+        cp /etc/resolv.conf /etc/resolv.conf.bak
+        echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+
         apt-get update && apt-get install -y --no-install-recommends curl gpg ca-certificates
         curl -fsSL https://packages.smallstep.com/keys/apt/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/smallstep.asc
         echo \"deb [signed-by=/etc/apt/trusted.gpg.d/smallstep.asc] https://packages.smallstep.com/stable/debian debs main\" | tee /etc/apt/sources.list.d/smallstep.list
@@ -68,7 +72,9 @@ WantedBy=multi-user.target
 EOF
         systemctl daemon-reload
         systemctl enable --now step-ca
-        sed -i 's/^nameserver .*/nameserver ${local.dns_primary_ipv4}/' /etc/resolv.conf"
+
+        # Switch to internal DNS now that setup is complete
+        echo 'nameserver ${local.dns_primary_ipv4}' > /etc/resolv.conf"
     EOT
     ]
   }

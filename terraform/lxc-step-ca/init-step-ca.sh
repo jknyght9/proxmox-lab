@@ -4,6 +4,11 @@ set -eo pipefail
 DNS_POSTFIX="lab"
 DNS_NAME="jdclabs.lan"
 
+CA_CFG="/etc/step-ca/config/ca.json"
+ROOT_CERT="/etc/step-ca/certs/root_ca.crt"
+INT_CERT="/etc/step-ca/certs/intermediate_ca.crt"
+PASSWORD_FILE="/etc/step-ca/secrets/password_file"
+
 function generate_password () {
     set +o pipefail
     < /dev/urandom tr -dc A-Za-z0-9 | head -c40
@@ -11,14 +16,24 @@ function generate_password () {
     set -o pipefail
 }
 
-# Install requirements
-apt-get update
-apt-get install jq -y
+# Install requirements (Alpine-based image uses apk)
+apk add --no-cache jq
+
+# Check if CA is already initialized
+if [[ -f "$CA_CFG" && -f "$ROOT_CERT" && -f "$INT_CERT" && -f "$PASSWORD_FILE" ]]; then
+    echo "[✓] Step-CA already initialized, skipping certificate generation"
+    echo "    Root cert: $ROOT_CERT"
+    echo "    Intermediate cert: $INT_CERT"
+    echo "    Config: $CA_CFG"
+    exit 0
+fi
+
+echo "[+] Initializing Step-CA..."
 
 # Generate password for keys
 mkdir -p /etc/step-ca/secrets
-generate_password > /etc/step-ca/secrets/password_file
-chmod 600 /etc/step-ca/secrets/password_file
+generate_password > "$PASSWORD_FILE"
+chmod 600 "$PASSWORD_FILE"
 
 # Generate certificates
 step ca init \
@@ -27,11 +42,10 @@ step ca init \
   --address ':443' \
   --dns "ca.$DNS_NAME" \
   --provisioner 'admin@lab.com' \
-  --password-file /etc/step-ca/secrets/password_file \
+  --password-file "$PASSWORD_FILE" \
   --acme
 
 # Update ACME configuration allowing longer duration certs
-CA_CFG="/etc/step-ca/config/ca.json"
 tmp=$(mktemp)
 
 jq '
@@ -41,3 +55,5 @@ jq '
           {defaultTLSCertDuration:"2160h", maxTLSCertDuration:"2160h"}
       else . end)
 ' "$CA_CFG" >"$tmp" && mv "$tmp" "$CA_CFG"
+
+echo "[✓] Step-CA initialization complete"

@@ -11,12 +11,19 @@ build {
     ]
   }
 
+  # Upload local CA cert (generated during setup.sh step-ca phase)
+  # Mounted at /step-ca-certs in the packer container (see compose.yml)
+  provisioner "file" {
+    source      = "/step-ca-certs/root_ca.crt"
+    destination = "/tmp/proxmox-lab-root-ca.crt"
+  }
+
   provisioner "shell" {
     inline = [
       "echo '[+] Installing internal certificate authority'",
-      "curl -k -o proxmox-lab.crt https://ca.${var.dns_postfix}/roots.pem",
-      "sudo install -m 0644 proxmox-lab.crt /usr/local/share/ca-certificates/proxmox-lab.crt",
-      "sudo update-ca-certificates --fresh" 
+      "sudo install -m 0644 /tmp/proxmox-lab-root-ca.crt /usr/local/share/ca-certificates/proxmox-lab-root-ca.crt",
+      "sudo update-ca-certificates --fresh",
+      "rm /tmp/proxmox-lab-root-ca.crt"
     ]
   }
 

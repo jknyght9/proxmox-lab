@@ -20,7 +20,7 @@ variable "network_bridge" {
 
 variable "admin_password" {
   type        = string
-  description = "Technitium admin password"
+  description = "Pi-hole web admin password"
   sensitive   = true
 }
 
@@ -63,4 +63,34 @@ variable "disk_size" {
   type        = string
   description = "Disk size for root filesystem"
   default     = "4G"
+}
+
+variable "storage" {
+  type        = string
+  description = "Storage for root filesystem (e.g., 'local-lvm', 'ceph', 'nfs-storage')"
+  default     = "local-lvm"
+}
+
+variable "is_sdn_network" {
+  type        = bool
+  description = "Whether this uses SDN (requires pct exec for provisioning instead of direct SSH)"
+  default     = false
+}
+
+variable "proxmox_ssh_host" {
+  type        = string
+  description = "Default Proxmox host IP for pct exec (fallback when node_ip_map is empty)"
+  default     = ""
+}
+
+variable "node_ip_map" {
+  type        = map(string)
+  description = "Map of Proxmox node names to their IP addresses (e.g., {pve01 = \"10.1.50.210\", pve02 = \"10.1.50.211\"})"
+  default     = {}
+}
+
+variable "dns_zone" {
+  type        = string
+  description = "Primary DNS zone to create (e.g., 'lab', 'mylab.lan')"
+  default     = ""
 }

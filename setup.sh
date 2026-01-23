@@ -14,6 +14,29 @@ KEY_PATH="$CRYPTO_DIR/$KEY_NAME"
 PUBKEY_PATH="$KEY_PATH.pub"
 REMOTE_USER="root"
 REQUIRED_VMIDS=(903 904 905 906 907 908 909 910 911 912 913 9000 9001 9002 9100 9200)
+DNS_VMIDS=(910 911 912 920 921)
+
+# Cluster-related globals (populated by detectAndSaveCluster or loadClusterInfo)
+CLUSTER_INFO_FILE="cluster-info.json"
+CLUSTER_NODES=()
+CLUSTER_NODE_IPS=()
+IS_CLUSTER=false
+USE_SHARED_STORAGE=false
+TEMPLATE_STORAGE="local-lvm"
+NETWORK_BRIDGE="vmbr0"
+
+# Network configuration globals (user-provided, stored in cluster-info.json)
+EXT_CIDR=""
+EXT_GATEWAY=""
+DNS_START_IP=""
+SVC_START_IP=""
+CREATE_SDN=true
+INT_CIDR=""
+INT_GATEWAY=""
+
+# Deployment phase tracking for rollback
+# 0=not started, 1=LXC deployed, 2=Packer built, 3=VMs deployed
+DEPLOY_PHASE=0
 
 # Colors for terminal outputs
 C_RESET="\033[0m"
@@ -32,16 +55,710 @@ function question()     { echo -e "  ${C_YELLOW}[?] $*${C_RESET}"; }
 function sshRun()       { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$1@$2" "$3"; }
 function pressAnyKey()  { read -n 1 -s -p "$(question "Press any key to continue")"; echo; }
 
+function rollbackDeployment() {
+  local phase="${1:-$DEPLOY_PHASE}"
+
+  warn "Deployment failed at phase $phase. Rolling back..."
+  echo
+
+  case $phase in
+    3)
+      # Phase 3 failed: Destroy VMs only, keep LXC infrastructure
+      doing "Rolling back Phase 3: Destroying VMs..."
+      docker compose run --rm terraform destroy \
+        -target=module.docker \
+        -target=module.kasm \
+        -auto-approve 2>/dev/null || true
+      warn "VMs destroyed. LXC infrastructure (DNS, step-ca) preserved."
+      ;;
+    2)
+      # Phase 2 failed: Clean up any partial Packer artifacts
+      doing "Rolling back Phase 2: Cleaning Packer artifacts..."
+      rm -rf packer/packer-outputs 2>/dev/null || true
+      warn "Packer artifacts cleaned."
+
+      read -rp "$(question "Do you want to also destroy LXC containers (DNS, step-ca)? [y/N]: ")" DESTROY_LXC
+      if [[ "$DESTROY_LXC" =~ ^[Yy]$ ]]; then
+        rollbackDeployment 1
+      else
+        info "LXC infrastructure preserved. You can retry Packer build."
+      fi
+      ;;
+    1)
+      # Phase 1 failed: Destroy all LXC containers
+      doing "Rolling back Phase 1: Destroying LXC containers..."
+      docker compose run --rm terraform destroy \
+        -target=module.dns-main \
+        -target=module.dns-labnet \
+        -target=module.step-ca \
+        -auto-approve 2>/dev/null || true
+
+      # Also clean up any VMIDs that might be orphaned
+      for VMID in "${DNS_VMIDS[@]}" 909; do
+        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" \
+          "pct stop $VMID 2>/dev/null; pct destroy $VMID 2>/dev/null" 2>/dev/null || true
+      done
+      warn "LXC containers destroyed."
+      ;;
+    0)
+      info "Nothing to roll back (deployment not started)."
+      ;;
+  esac
+
+  DEPLOY_PHASE=0
+  echo
+  error "Rollback complete. Please review the errors above and try again."
+}
+
 function header() {
   clear
   cat << "EOF"
-   ___                                       __       _     
-  / _ \_ __ _____  ___ __ ___   _____  __   / /  __ _| |__  
- / /_)/ '__/ _ \ \/ / '_ ` _ \ / _ \ \/ /  / /  / _` | '_ \ 
+   ___                                       __       _
+  / _ \_ __ _____  ___ __ ___   _____  __   / /  __ _| |__
+ / /_)/ '__/ _ \ \/ / '_ ` _ \ / _ \ \/ /  / /  / _` | '_ \
 / ___/| | | (_) >  <| | | | | | (_) >  <  / /__| (_| | |_) |
-\/    |_|  \___/_/\_\_| |_| |_|\___/_/\_\ \____/\__,_|_.__/ 
+\/    |_|  \___/_/\_\_| |_| |_|\___/_/\_\ \____/\__,_|_.__/
 
 EOF
+}
+
+function detectClusterNodes() {
+  doing "Detecting Proxmox cluster configuration..."
+
+  CLUSTER_NODES=()
+  CLUSTER_NODE_IPS=()
+
+  # Check if this is a cluster by reading /etc/pve/.members
+  local MEMBERS_JSON
+  MEMBERS_JSON=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "cat /etc/pve/.members 2>/dev/null || echo '{}'")
+
+  if echo "$MEMBERS_JSON" | jq -e '.nodelist' > /dev/null 2>&1; then
+    # Multi-node cluster
+    while IFS= read -r line; do
+      local name=$(echo "$line" | jq -r '.key')
+      local ip=$(echo "$line" | jq -r '.value.ip')
+      CLUSTER_NODES+=("$name")
+      CLUSTER_NODE_IPS+=("$ip")
+    done < <(echo "$MEMBERS_JSON" | jq -c '.nodelist | to_entries[]')
+
+    success "Detected ${#CLUSTER_NODES[@]}-node cluster: ${CLUSTER_NODES[*]}"
+  else
+    # Single node - get hostname
+    local hostname
+    hostname=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "hostname")
+    CLUSTER_NODES+=("$hostname")
+    CLUSTER_NODE_IPS+=("$PROXMOX_HOST")
+    info "Single-node Proxmox (not clustered): $hostname"
+  fi
+
+  export CLUSTER_NODES
+  export CLUSTER_NODE_IPS
+}
+
+function checkClusterConnectivity() {
+  doing "Checking internet connectivity on Proxmox nodes..."
+
+  local failed_nodes=()
+  local dns_configs=()
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    # Test internet connectivity (try to reach a reliable endpoint)
+    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+      "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
+      failed_nodes+=("$node ($ip)")
+
+      # Get DNS configuration for this node
+      local dns_info
+      dns_info=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+        "echo 'resolv.conf:'; cat /etc/resolv.conf; echo ''; echo 'pvesh DNS:'; pvesh get /nodes/$node/dns --output-format json 2>/dev/null | jq -r 'to_entries[] | \"  \\(.key): \\(.value)\"'" 2>/dev/null)
+      dns_configs+=("=== $node ($ip) ===\n$dns_info")
+    else
+      success "  $node ($ip): OK"
+    fi
+  done
+
+  if [ ${#failed_nodes[@]} -gt 0 ]; then
+    echo
+    error "Internet connectivity check FAILED on the following nodes:"
+    for node in "${failed_nodes[@]}"; do
+      echo "  - $node"
+    done
+
+    echo
+    warn "Current DNS configuration on failed nodes:"
+    echo
+    for config in "${dns_configs[@]}"; do
+      echo -e "$config"
+      echo
+    done
+
+    cat <<EOF
+
+#############################################################################
+CONNECTIVITY ERROR
+
+The Proxmox nodes listed above cannot reach the internet. This is required
+for downloading packages during LXC container provisioning.
+
+Common causes:
+  1. DNS server is set to 127.0.0.1 or an unreachable address
+  2. Firewall blocking outbound traffic
+  3. Network misconfiguration
+
+To fix DNS on each affected node, run:
+  pvesh set /nodes/<nodename>/dns -dns1 1.1.1.1 -dns2 8.8.8.8
+
+Then re-run this setup.
+#############################################################################
+EOF
+    return 1
+  fi
+
+  success "All nodes have internet connectivity"
+  return 0
+}
+
+function detectAndSaveCluster() {
+  doing "Detecting Proxmox cluster and capturing configuration..."
+
+  CLUSTER_NODES=()
+  CLUSTER_NODE_IPS=()
+
+  # Check if this is a cluster by reading /etc/pve/.members
+  local MEMBERS_JSON
+  MEMBERS_JSON=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "cat /etc/pve/.members 2>/dev/null || echo '{}'")
+
+  local nodes_json="[]"
+
+  if echo "$MEMBERS_JSON" | jq -e '.nodelist' > /dev/null 2>&1; then
+    # Multi-node cluster
+    IS_CLUSTER=true
+    while IFS= read -r line; do
+      local name=$(echo "$line" | jq -r '.key')
+      local ip=$(echo "$line" | jq -r '.value.ip')
+      CLUSTER_NODES+=("$name")
+      CLUSTER_NODE_IPS+=("$ip")
+    done < <(echo "$MEMBERS_JSON" | jq -c '.nodelist | to_entries[]')
+    success "Detected ${#CLUSTER_NODES[@]}-node cluster: ${CLUSTER_NODES[*]}"
+  else
+    # Single node - get hostname
+    IS_CLUSTER=false
+    local hostname
+    hostname=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "hostname")
+    CLUSTER_NODES+=("$hostname")
+    CLUSTER_NODE_IPS+=("$PROXMOX_HOST")
+    info "Single-node Proxmox (not clustered): $hostname"
+  fi
+
+  # Capture DNS configuration for each node
+  doing "Capturing DNS configuration per node..."
+  local nodes_array="["
+  local failed_nodes=()
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    # Get current DNS config
+    local dns1="" dns2="" search=""
+    local dns_json
+    dns_json=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      "pvesh get /nodes/$node/dns --output-format json 2>/dev/null" || echo "{}")
+
+    dns1=$(echo "$dns_json" | jq -r '.dns1 // ""')
+    dns2=$(echo "$dns_json" | jq -r '.dns2 // ""')
+    search=$(echo "$dns_json" | jq -r '.search // ""')
+
+    # Test connectivity
+    local connectivity="unknown"
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+      "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
+      connectivity="ok"
+      success "  $node ($ip): Connectivity OK, DNS1=$dns1, DNS2=$dns2"
+    else
+      connectivity="failed"
+      failed_nodes+=("$node")
+      warn "  $node ($ip): Connectivity FAILED, DNS1=$dns1, DNS2=$dns2"
+    fi
+
+    # Build node JSON
+    [ $i -gt 0 ] && nodes_array+=","
+    nodes_array+=$(jq -n \
+      --arg name "$node" \
+      --arg ip "$ip" \
+      --arg dns1 "$dns1" \
+      --arg dns2 "$dns2" \
+      --arg search "$search" \
+      --arg connectivity "$connectivity" \
+      '{name: $name, ip: $ip, dns: {dns1: $dns1, dns2: $dns2, search: $search}, connectivity: $connectivity}')
+  done
+  nodes_array+="]"
+
+  # Handle failed connectivity
+  if [ ${#failed_nodes[@]} -gt 0 ]; then
+    echo
+    warn "The following nodes have connectivity issues: ${failed_nodes[*]}"
+    read -rp "$(question "Would you like to set DNS to 1.1.1.1/8.8.8.8 on failed nodes? [Y/n]: ")" FIX_DNS
+    FIX_DNS=${FIX_DNS:-Y}
+
+    if [[ "$FIX_DNS" =~ ^[Yy]$ ]]; then
+      for node in "${failed_nodes[@]}"; do
+        local idx=-1
+        for i in "${!CLUSTER_NODES[@]}"; do
+          [ "${CLUSTER_NODES[$i]}" = "$node" ] && idx=$i && break
+        done
+        [ $idx -ge 0 ] || continue
+        local ip="${CLUSTER_NODE_IPS[$idx]}"
+
+        doing "  Setting DNS on $node..."
+        ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+          "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
+          success "  $node: DNS updated" || warn "  $node: Failed to update DNS"
+      done
+    fi
+  fi
+
+  # Save initial cluster info (network config added later by configureNetworking)
+  jq -n \
+    --arg detected_at "$(date -Iseconds)" \
+    --argjson is_cluster "$IS_CLUSTER" \
+    --argjson nodes "$nodes_array" \
+    '{
+      detected_at: $detected_at,
+      is_cluster: $is_cluster,
+      nodes: $nodes,
+      primary_node: $nodes[0].name
+    }' > "$CLUSTER_INFO_FILE"
+
+  success "Cluster info saved to $CLUSTER_INFO_FILE"
+}
+
+function loadClusterInfo() {
+  if [ ! -f "$CLUSTER_INFO_FILE" ]; then
+    warn "Cluster info file not found. Will detect cluster."
+    return 1
+  fi
+
+  doing "Loading cluster info from $CLUSTER_INFO_FILE..."
+
+  CLUSTER_NODES=()
+  CLUSTER_NODE_IPS=()
+
+  while IFS= read -r line; do
+    local name=$(echo "$line" | jq -r '.name')
+    local ip=$(echo "$line" | jq -r '.ip')
+    CLUSTER_NODES+=("$name")
+    CLUSTER_NODE_IPS+=("$ip")
+  done < <(jq -c '.nodes[]' "$CLUSTER_INFO_FILE")
+
+  IS_CLUSTER=$(jq -r '.is_cluster' "$CLUSTER_INFO_FILE")
+
+  # Load network config if present
+  if jq -e '.network' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    EXT_CIDR=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
+    EXT_GATEWAY=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE")
+    DNS_START_IP=$(jq -r '.network.external.dns_start_ip // ""' "$CLUSTER_INFO_FILE")
+    SVC_START_IP=$(jq -r '.network.external.services_start_ip // ""' "$CLUSTER_INFO_FILE")
+    INT_CIDR=$(jq -r '.network.labnet.cidr // ""' "$CLUSTER_INFO_FILE")
+    INT_GATEWAY=$(jq -r '.network.labnet.gateway // ""' "$CLUSTER_INFO_FILE")
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    NETWORK_BRIDGE=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
+    TEMPLATE_STORAGE=$(jq -r '.storage.selected // "local-lvm"' "$CLUSTER_INFO_FILE")
+  fi
+
+  success "Loaded ${#CLUSTER_NODES[@]} nodes from cluster info"
+  return 0
+}
+
+function distributeSSHKeys() {
+  doing "Distributing SSH keys to all cluster nodes..."
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    # Skip if this is the primary (already has keys from installSSHKeys)
+    if [ "$ip" = "$PROXMOX_HOST" ]; then
+      info "  $node ($ip): Primary - already configured"
+      continue
+    fi
+
+    doing "  $node ($ip): Installing SSH keys..."
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
+        || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>/dev/null
+    success "  $node ($ip): Keys installed"
+  done
+
+  success "SSH keys distributed to all nodes"
+}
+
+function configureNetworking() {
+  doing "Configuring network settings..."
+  echo
+
+  # Try to get DNS search domain from Proxmox (captured during cluster detection)
+  local PROXMOX_DNS_SEARCH=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    PROXMOX_DNS_SEARCH=$(jq -r '.nodes[0].dns.search // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  # External network (where Proxmox and services live)
+  info "External Network Configuration"
+  info "(This is the network where your Proxmox hosts and services will reside)"
+  echo
+
+  read -rp "$(question "External network CIDR (e.g., 10.1.50.0/24): ")" EXT_CIDR
+  while [ -z "$EXT_CIDR" ]; do
+    warn "Network CIDR is required"
+    read -rp "$(question "External network CIDR: ")" EXT_CIDR
+  done
+
+  # Calculate default gateway from CIDR (assume .1)
+  local CIDR_BASE=$(echo "$EXT_CIDR" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+  local DEFAULT_GW="${CIDR_BASE}1"
+
+  read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
+  EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
+
+  # Calculate default service IPs from CIDR
+  local DEFAULT_DNS_START="${CIDR_BASE}3"
+  local DEFAULT_SVC_START="${CIDR_BASE}6"
+
+  echo
+  info "Service IP Allocation"
+  info "(IP addresses for Pi-hole containers and other services)"
+  echo
+
+  read -rp "$(question "Pi-hole containers start IP [$DEFAULT_DNS_START]: ")" DNS_START_IP
+  DNS_START_IP=${DNS_START_IP:-$DEFAULT_DNS_START}
+
+  read -rp "$(question "Other services start IP (step-ca, kasm) [$DEFAULT_SVC_START]: ")" SVC_START_IP
+  SVC_START_IP=${SVC_START_IP:-$DEFAULT_SVC_START}
+
+  echo
+  # Internal/SDN network
+  read -rp "$(question "Create internal SDN network (labnet)? [Y/n]: ")" CREATE_SDN_INPUT
+  CREATE_SDN_INPUT=${CREATE_SDN_INPUT:-Y}
+
+  if [[ "$CREATE_SDN_INPUT" =~ ^[Yy]$ ]]; then
+    CREATE_SDN=true
+    echo
+    info "Internal SDN Network Configuration"
+    info "(This creates an isolated network for internal services)"
+    echo
+
+    read -rp "$(question "Internal network CIDR [172.16.0.0/24]: ")" INT_CIDR
+    INT_CIDR=${INT_CIDR:-172.16.0.0/24}
+
+    read -rp "$(question "Internal gateway [172.16.0.1]: ")" INT_GATEWAY
+    INT_GATEWAY=${INT_GATEWAY:-172.16.0.1}
+  else
+    CREATE_SDN=false
+    INT_CIDR=""
+    INT_GATEWAY=""
+  fi
+
+  echo
+  # DNS domain - use Proxmox search domain as default if available
+  info "DNS Domain Configuration"
+  if [ -n "$PROXMOX_DNS_SEARCH" ]; then
+    info "(Using search domain from Proxmox: $PROXMOX_DNS_SEARCH)"
+  fi
+  echo
+
+  read -rp "$(question "DNS domain suffix [${PROXMOX_DNS_SEARCH:-lab.local}]: ")" DNS_POSTFIX
+  DNS_POSTFIX=${DNS_POSTFIX:-${PROXMOX_DNS_SEARCH:-lab.local}}
+
+  # Display summary
+  cat <<EOF
+
+======================================
+Network Configuration Summary:
+--------------------------------------
+External Network:
+  CIDR:              $EXT_CIDR
+  Gateway:           $EXT_GATEWAY
+
+Service IP Allocation:
+  Pi-hole start IP:  $DNS_START_IP
+  Services start IP: $SVC_START_IP
+EOF
+
+  if $CREATE_SDN; then
+    cat <<EOF
+
+Internal SDN Network:
+  CIDR:              $INT_CIDR
+  Gateway:           $INT_GATEWAY
+EOF
+  fi
+
+  cat <<EOF
+
+DNS Domain:          $DNS_POSTFIX
+======================================
+
+Note: Proxmox nodes will continue using their current DNS
+settings until Pi-hole is deployed and configured.
+
+EOF
+
+  read -rp "$(question "Is this correct? [Y/n]: ")" CONFIRM
+  CONFIRM=${CONFIRM:-Y}
+
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    configureNetworking
+    return
+  fi
+
+  # Update cluster-info.json with network configuration
+  local tmp_file=$(mktemp)
+  jq --arg ext_cidr "$EXT_CIDR" \
+     --arg ext_gw "$EXT_GATEWAY" \
+     --arg dns_start "$DNS_START_IP" \
+     --arg svc_start "$SVC_START_IP" \
+     --argjson create_sdn "$CREATE_SDN" \
+     --arg int_cidr "$INT_CIDR" \
+     --arg int_gw "$INT_GATEWAY" \
+     --arg dns_postfix "$DNS_POSTFIX" \
+     '. + {
+       network: {
+         external: {
+           cidr: $ext_cidr,
+           gateway: $ext_gw,
+           dns_start_ip: $dns_start,
+           services_start_ip: $svc_start
+         },
+         labnet: {
+           enabled: $create_sdn,
+           cidr: $int_cidr,
+           gateway: $int_gw
+         }
+       },
+       dns_postfix: $dns_postfix
+     }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+
+  success "Network configuration saved to $CLUSTER_INFO_FILE"
+}
+
+function ensureLXCTemplates() {
+  doing "Ensuring LXC templates are available on all cluster nodes..."
+
+  local TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
+  local failed_nodes=()
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    # Check if template exists on this node
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      "test -f /var/lib/vz/template/cache/${TEMPLATE}" 2>/dev/null; then
+      info "  $node: Template already exists"
+    else
+      doing "  $node: Downloading template..."
+      if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+        "pveam update && pveam download local ${TEMPLATE}" 2>/dev/null; then
+        success "  $node: Template downloaded"
+      else
+        failed_nodes+=("$node ($ip)")
+      fi
+    fi
+  done
+
+  if [ ${#failed_nodes[@]} -gt 0 ]; then
+    error "Failed to download template on the following nodes:"
+    for node in "${failed_nodes[@]}"; do
+      echo "  - $node"
+    done
+    return 1
+  fi
+
+  success "LXC templates available on all nodes"
+  return 0
+}
+
+function selectSharedStorage() {
+  # Check if storage is already configured in cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local EXISTING_STORAGE
+    EXISTING_STORAGE=$(jq -r '.storage.selected // ""' "$CLUSTER_INFO_FILE")
+    if [ -n "$EXISTING_STORAGE" ] && [ "$EXISTING_STORAGE" != "null" ]; then
+      TEMPLATE_STORAGE="$EXISTING_STORAGE"
+      USE_SHARED_STORAGE=$(jq -r '.storage.is_shared // false' "$CLUSTER_INFO_FILE")
+      export TEMPLATE_STORAGE
+      export USE_SHARED_STORAGE
+      success "Using configured storage: $TEMPLATE_STORAGE (shared: $USE_SHARED_STORAGE)"
+      return 0
+    fi
+  fi
+
+  doing "Detecting available storage..."
+
+  # Get storage list from first node
+  local STORAGE_JSON
+  STORAGE_JSON=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pvesh get /storage --output-format json")
+
+  # Find shared storage (type: rbd, cephfs, nfs, etc.)
+  local SHARED_STORES=()
+  while IFS= read -r store; do
+    [[ -n "$store" ]] && SHARED_STORES+=("$store")
+  done < <(echo "$STORAGE_JSON" | jq -r '.[] | select(.shared == 1 and (.content | contains("images"))) | .storage')
+
+  if [ ${#SHARED_STORES[@]} -gt 0 ]; then
+    echo
+    info "Storage Selection"
+    info "Shared storage detected - recommended for clusters"
+    echo
+    info "Available shared storage:"
+    for i in "${!SHARED_STORES[@]}"; do
+      echo "    $((i + 1)). ${SHARED_STORES[$i]} (shared)"
+    done
+    echo "    $((${#SHARED_STORES[@]} + 1)). local-lvm (per-node)"
+    echo
+
+    local DEFAULT_STORE="${SHARED_STORES[0]}"
+    read -rp "$(question "Select storage [$DEFAULT_STORE]: ")" STORAGE_CHOICE
+    STORAGE_CHOICE=${STORAGE_CHOICE:-$DEFAULT_STORE}
+
+    # Check if user entered a number or a name
+    if [[ "$STORAGE_CHOICE" =~ ^[0-9]+$ ]]; then
+      if [ "$STORAGE_CHOICE" -le "${#SHARED_STORES[@]}" ] && [ "$STORAGE_CHOICE" -ge 1 ]; then
+        TEMPLATE_STORAGE="${SHARED_STORES[$((STORAGE_CHOICE - 1))]}"
+        USE_SHARED_STORAGE=true
+      else
+        TEMPLATE_STORAGE="local-lvm"
+        USE_SHARED_STORAGE=false
+      fi
+    elif [ "$STORAGE_CHOICE" = "local-lvm" ]; then
+      TEMPLATE_STORAGE="local-lvm"
+      USE_SHARED_STORAGE=false
+    else
+      # Assume they typed the storage name
+      TEMPLATE_STORAGE="$STORAGE_CHOICE"
+      USE_SHARED_STORAGE=true
+    fi
+  else
+    warn "No shared storage found. Using local-lvm (templates must exist on each node)"
+    TEMPLATE_STORAGE="local-lvm"
+    USE_SHARED_STORAGE=false
+  fi
+
+  export TEMPLATE_STORAGE
+  export USE_SHARED_STORAGE
+  success "Using storage: $TEMPLATE_STORAGE (shared: $USE_SHARED_STORAGE)"
+}
+
+function selectNetworkBridge() {
+  # Check if bridge is already configured in cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local EXISTING_BRIDGE
+    EXISTING_BRIDGE=$(jq -r '.network.selected_bridge // ""' "$CLUSTER_INFO_FILE")
+    if [ -n "$EXISTING_BRIDGE" ] && [ "$EXISTING_BRIDGE" != "null" ]; then
+      NETWORK_BRIDGE="$EXISTING_BRIDGE"
+      export NETWORK_BRIDGE
+      success "Using configured network bridge: $NETWORK_BRIDGE"
+      return 0
+    fi
+  fi
+
+  doing "Detecting network bridges available on all cluster nodes..."
+
+  # Get bridges from each node and find common ones
+  local ALL_BRIDGES=()
+  local FIRST_NODE=true
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    # Get bridges on this node (excluding vmbr for internal use)
+    local NODE_BRIDGES=()
+    while IFS= read -r bridge; do
+      [[ -n "$bridge" ]] && NODE_BRIDGES+=("$bridge")
+    done < <(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      "pvesh get /nodes/$node/network --output-format json 2>/dev/null" | \
+      jq -r '.[] | select(.type == "bridge") | .iface' 2>/dev/null)
+
+    if $FIRST_NODE; then
+      ALL_BRIDGES=("${NODE_BRIDGES[@]}")
+      FIRST_NODE=false
+    else
+      # Find intersection with previous nodes
+      local COMMON_BRIDGES=()
+      for bridge in "${ALL_BRIDGES[@]}"; do
+        for nb in "${NODE_BRIDGES[@]}"; do
+          if [[ "$bridge" == "$nb" ]]; then
+            COMMON_BRIDGES+=("$bridge")
+            break
+          fi
+        done
+      done
+      ALL_BRIDGES=("${COMMON_BRIDGES[@]}")
+    fi
+  done
+
+  if [ ${#ALL_BRIDGES[@]} -eq 0 ]; then
+    warn "No common network bridges found across all nodes. Using vmbr0."
+    NETWORK_BRIDGE="vmbr0"
+  elif [ ${#ALL_BRIDGES[@]} -eq 1 ]; then
+    NETWORK_BRIDGE="${ALL_BRIDGES[0]}"
+    info "Only one common bridge found: $NETWORK_BRIDGE"
+  else
+    echo
+    info "Network Bridge Selection"
+    info "Available bridges (present on all nodes):"
+    echo
+    for i in "${!ALL_BRIDGES[@]}"; do
+      echo "    $((i + 1)). ${ALL_BRIDGES[$i]}"
+    done
+    echo
+
+    local DEFAULT_BRIDGE="${ALL_BRIDGES[0]}"
+    read -rp "$(question "Select network bridge [$DEFAULT_BRIDGE]: ")" BRIDGE_CHOICE
+    BRIDGE_CHOICE=${BRIDGE_CHOICE:-$DEFAULT_BRIDGE}
+
+    # Check if user entered a number or a name
+    if [[ "$BRIDGE_CHOICE" =~ ^[0-9]+$ ]]; then
+      if [ "$BRIDGE_CHOICE" -le "${#ALL_BRIDGES[@]}" ] && [ "$BRIDGE_CHOICE" -ge 1 ]; then
+        NETWORK_BRIDGE="${ALL_BRIDGES[$((BRIDGE_CHOICE - 1))]}"
+      else
+        NETWORK_BRIDGE="$DEFAULT_BRIDGE"
+      fi
+    else
+      # Assume they typed the bridge name
+      NETWORK_BRIDGE="$BRIDGE_CHOICE"
+    fi
+  fi
+
+  export NETWORK_BRIDGE
+  success "Using network bridge: $NETWORK_BRIDGE"
+}
+
+function cleanupDNSVMIDs() {
+  doing "Checking for existing DNS VMIDs that need cleanup..."
+  local cleaned=0
+
+  for VMID in "${DNS_VMIDS[@]}"; do
+    # Check if LXC container exists
+    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "pct status $VMID" &>/dev/null; then
+      warn "VMID $VMID exists, destroying for clean deployment"
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "pct stop $VMID 2>/dev/null || true; pct destroy $VMID 2>/dev/null || true"
+      ((cleaned++))
+    fi
+  done
+
+  if [ $cleaned -gt 0 ]; then
+    success "Cleaned up $cleaned existing DNS container(s)"
+  else
+    info "No existing DNS containers found"
+  fi
 }
 
 function checkRequirements() {
@@ -144,21 +861,45 @@ function installSSHKeys() {
 }
 
 function proxmoxPostInstall() {
-  doing "Running Proxmox VE Post-Installation Script..."
-  read -rp "$(question "Do you want to run the Proxmox VE Post-Install script now? This is optional, but highly recommended (y/N): ")" RUN_POST_SCRIPT
-  if [[ "$RUN_POST_SCRIPT" =~ ^[Yy]$ ]]; then
-    doing "Running Proxmox VE Post-Install Script..."
+  # Check if we have cluster nodes loaded
+  if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
+    loadClusterInfo
+  fi
 
+  local node_count=${#CLUSTER_NODES[@]}
+  local node_list=$(IFS=', '; echo "${CLUSTER_NODES[*]}")
+
+  echo
+  info "Proxmox VE Post-Installation Script"
+  info "This script optimizes Proxmox settings, disables enterprise repo, etc."
+  echo
+  if [ "$node_count" -gt 1 ]; then
+    info "Cluster nodes detected: $node_list"
+    read -rp "$(question "Run post-install script on all $node_count cluster nodes? (y/N): ")" RUN_POST_SCRIPT
+  else
+    read -rp "$(question "Run post-install script on $PROXMOX_HOST? (y/N): ")" RUN_POST_SCRIPT
+  fi
+
+  if [[ "$RUN_POST_SCRIPT" =~ ^[Yy]$ ]]; then
     if [ ! -f "$KEY_PATH" ]; then
       error "SSH private key not found at $KEY_PATH"
-      exit 1
+      return 1
     fi
-    
-    sshRun $REMOTE_USER $PROXMOX_HOST 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"'
-    #ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"'
-    success "Completed post-installation on $PROXMOX_HOST.\n"
+
+    for i in "${!CLUSTER_NODES[@]}"; do
+      local node="${CLUSTER_NODES[$i]}"
+      local ip="${CLUSTER_NODE_IPS[$i]}"
+
+      doing "Running Proxmox VE Post-Install Script on $node ($ip)..."
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$ip" \
+        'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"' \
+        && success "Completed post-installation on $node" \
+        || warn "Post-installation may have failed on $node"
+    done
+
+    success "Post-installation complete on all nodes"
   else
-    warn "Skipped running the post-install script.\n"
+    warn "Skipped running the post-install script"
   fi
 }
 
@@ -186,122 +927,218 @@ function deployServices() {
 ############################################################################
 Services Deployment
 
-Next, we will setup critical services for the lab. This includes Technitium
-DNS Server with clustering support, a certificate authority (Step-CA), KASM
-and a Docker Swarm cluster. At this time, you will configure the DNS suffix
-(.lab, .com, .io, lab.io) and the Technitium admin password.
-
-Please make sure that you update your packer.auto.pkvars.hcl and
-terraform.tfvars before starting this process.
+Deploying critical services: Pi-hole DNS with Unbound (DNS-over-TLS),
+Certificate Authority (Step-CA), Kasm, and Docker Swarm cluster.
 #############################################################################
 
 EOF
-  read -n 1 -s -p "$(question "Press any key to continue")"
-  echo
 
+  # Load configuration from cluster-info.json if not already loaded
+  if [ -z "$DNS_POSTFIX" ] && [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  # If still no DNS_POSTFIX, prompt for it
+  if [ -z "$DNS_POSTFIX" ]; then
+    read -rp "$(question "Enter DNS domain suffix (e.g., lab.local): ")" DNS_POSTFIX
+    while [ -z "$DNS_POSTFIX" ]; do
+      warn "DNS domain suffix is required"
+      read -rp "$(question "DNS domain suffix: ")" DNS_POSTFIX
+    done
+  fi
+
+  # Prompt for Pi-hole password (required, no default)
   while true; do
-      # Prompt for values with defaults
-      read -rp "$(question "Enter DNS domain postfix without a period [lab]: ")" DNS_POSTFIX
-      DNS_POSTFIX=${DNS_POSTFIX:-lab}
+    read -rsp "$(question "Enter Pi-hole admin password: ")" PIHOLE_PASSWORD
+    echo ""
+    if [ -z "$PIHOLE_PASSWORD" ]; then
+      warn "Password cannot be empty"
+      continue
+    fi
+    read -rsp "$(question "Confirm Pi-hole admin password: ")" PIHOLE_PASSWORD_CONFIRM
+    echo ""
+    if [ "$PIHOLE_PASSWORD" != "$PIHOLE_PASSWORD_CONFIRM" ]; then
+      warn "Passwords do not match"
+      continue
+    fi
+    break
+  done
 
-      read -rp "$(question "Enter Technitium DNS admin password [changeme123]: ")" TECHNITIUM_PASSWORD
-      TECHNITIUM_PASSWORD=${TECHNITIUM_PASSWORD:-changeme123}
-
-      # Display configuration summary
-      cat <<EOF
+  # Display configuration summary
+  cat <<EOF
 
 ======================================
-Configuration Summary:
+Deployment Configuration:
 --------------------------------------
-
 DNS suffix:               $DNS_POSTFIX
-Technitium admin pass:    $TECHNITIUM_PASSWORD
+Pi-hole admin pass:       $PIHOLE_PASSWORD
 ======================================
 
 EOF
-      # Ask user to confirm
-      read -rp "$(question "Is this correct? [y/N]: ")" CONFIRM
-      echo
-      CONFIRM=${CONFIRM:-N}
 
-      if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-          break
-      fi
+  read -rp "$(question "Proceed with deployment? [Y/n]: ")" CONFIRM
+  CONFIRM=${CONFIRM:-Y}
+  [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
 
-      warn "Let's try again..."
-  done
-
-  # Update the step-ca installation script with new DNS postfix
+  # Update the step-ca installation script with DNS postfix
   if sed --version >/dev/null 2>&1; then
       sed -i "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
   else
       sed -i '' "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
   fi
-  success "Step-CA installation script updated successfully!"
+  success "Step-CA installation script updated"
+
+  # Generate certificates
   generateCertificates
 
-  # Update the technitium installation script with new password
-  if sed --version >/dev/null 2>&1; then
-      sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=\"$TECHNITIUM_PASSWORD\"/" terraform/lxc-technitium/install.sh
-  else
-      sed -i '' "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=\"$TECHNITIUM_PASSWORD\"/" terraform/lxc-technitium/install.sh
+  # Load cluster info if not already loaded
+  if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      loadClusterInfo
+    else
+      detectClusterNodes
+    fi
   fi
-  success "Technitium installation script updated successfully!"
+
+  # Verify all nodes can reach the internet before proceeding
+  if ! checkClusterConnectivity; then
+    error "Cannot proceed without internet connectivity on all nodes."
+    return 1
+  fi
+
+  # Ensure LXC templates are available on all nodes
+  if ! ensureLXCTemplates; then
+    error "Cannot proceed without LXC templates on all nodes."
+    return 1
+  fi
 
   # Checking VMIDs
   doing "Checking if required Proxmox VMIDs currently exist..."
   manageVMIDs "${REQUIRED_VMIDS[@]}"
   success "VMID check complete\n"
 
-  # Technitium doesn't need a pre-built template - Terraform handles installation directly
-  info "Technitium DNS will be installed directly by Terraform (no template needed)"
-  read -n 1 -s -p "$(question "Press any key to continue")"
-  echo
+  # Clean up any existing DNS containers before terraform
+  cleanupDNSVMIDs
 
-  # Build packer templates
-    cat <<EOF
+  # ============================================
+  # PHASE 1: Deploy LXC Containers (DNS, step-ca)
+  # ============================================
+  cat <<EOF
 
 #############################################################################
-Template creation
+LXC Container Deployment
 
-During this section, packer will begin creating the templates required for 
-this lab. Please make sure that you update your packer.auto.pkvars.hcl before
-starting this process.
+Deploying critical infrastructure: DNS servers and Certificate Authority.
+These must be operational before building VM templates.
 #############################################################################
 EOF
-  read -n 1 -s -p "$(question "Press any key to continue")"
-  echo
+  pressAnyKey
+
+  doing "Deploying LXC containers (DNS, step-ca)..."
+  docker compose build terraform >/dev/null 2>&1
+  docker compose run --rm -it terraform init
+
+  if ! docker compose run --rm -it terraform apply \
+    -target=module.dns-main \
+    -target=module.dns-labnet \
+    -target=module.step-ca; then
+    error "Phase 1 failed: LXC container deployment"
+    DEPLOY_PHASE=1
+    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+    DO_ROLLBACK=${DO_ROLLBACK:-Y}
+    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+      rollbackDeployment 1
+    fi
+    return 1
+  fi
+
+  DEPLOY_PHASE=1
+  success "Phase 1 complete: LXC containers deployed"
+
+  # Refresh terraform state to update outputs after targeted apply
+  doing "Refreshing Terraform state to update outputs..."
+  docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet -target=module.step-ca >/dev/null 2>&1 || true
+
+  # Generate hosts.json from terraform output (may be partial during Phase 1)
+  doing "Generating hosts.json from Terraform outputs..."
+  if docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1; then
+    # Check if the output is valid JSON (not an error message)
+    if jq -e '.external' hosts.json >/dev/null 2>&1; then
+      success "hosts.json generated successfully"
+    else
+      warn "hosts.json contains invalid data, recreating from individual outputs..."
+      generateHostsJsonFromModules
+    fi
+  else
+    warn "Could not generate hosts.json from terraform output, using individual module outputs..."
+    generateHostsJsonFromModules
+  fi
+
+  updateDNSRecords
+  updateRootCertificates
+
+  # ============================================
+  # PHASE 2: Build Packer Templates
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+Template Creation
+
+Building VM templates with Packer. DNS and CA are now available.
+Please make sure that you update your packer.auto.pkvars.hcl before starting.
+#############################################################################
+EOF
+  pressAnyKey
 
   doing "Building Packer templates..."
   docker compose build packer >/dev/null 2>&1
   docker compose run --rm -it packer init .
-  if docker compose run --rm -it packer build .; then
-      success "Packer build succeeded"
-  else
-      error "Packer build was not successful, please review the logs"
-      exit 1
+  if ! docker compose run --rm -it packer build .; then
+    error "Phase 2 failed: Packer build was not successful"
+    DEPLOY_PHASE=2
+    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+    DO_ROLLBACK=${DO_ROLLBACK:-Y}
+    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+      rollbackDeployment 2
+    fi
+    return 1
   fi
 
+  DEPLOY_PHASE=2
+  success "Phase 2 complete: Packer templates built"
+
+  # ============================================
+  # PHASE 3: Deploy VMs (docker-swarm, kasm)
+  # ============================================
   cat <<EOF
 
 #############################################################################
-Template deployment
+VM Deployment
 
-During this section, terraform will begin deploying the packer templates and 
-LXC containers required for this lab. Please make sure that you update your
-terraform.tfvars before starting this process.
+Deploying Docker Swarm and Kasm VMs from templates.
 #############################################################################
 EOF
-  read -n 1 -s -p "$(question "Press any key to continue")"
-  echo
+  pressAnyKey
 
-  doing "Deploying terraform templates..."
-  docker compose build terraform >/dev/null 2>&1
-  docker compose run --rm -it terraform init
-  docker compose run --rm -it terraform plan
-  docker compose run --rm -it terraform apply
+  doing "Deploying VMs..."
+  if ! docker compose run --rm -it terraform apply; then
+    error "Phase 3 failed: VM deployment"
+    DEPLOY_PHASE=3
+    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+    DO_ROLLBACK=${DO_ROLLBACK:-Y}
+    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+      rollbackDeployment 3
+    fi
+    return 1
+  fi
+
   docker compose run --rm -it terraform refresh
   docker compose run --rm -it terraform output -json host-records > hosts.json
+
+  DEPLOY_PHASE=3
+  success "Phase 3 complete: VMs deployed"
+  success "Deployment complete!"
 }
 
 # Generic LXC template creation function
@@ -356,16 +1193,6 @@ function createLXCTemplate() {
   doing "Stopping container and converting to template..."
   ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
   success "LXC template '${TEMPLATE_NAME}' created successfully"
-}
-
-# Legacy wrapper for pihole template (kept for backwards compatibility)
-function createPiholeTemplate() {
-  createLXCTemplate 9000 "pihole-template" "./terraform/lxc-pihole/install.sh" "local-lvm" "vmbr0" 2 2048
-}
-
-# Create Technitium DNS template
-function createTechnitiumTemplate() {
-  createLXCTemplate 9001 "technitium-template" "./terraform/lxc-technitium/install.sh" "local-lvm" "vmbr0" 2 1024
 }
 
 function setupDockerSwarm() {
@@ -533,78 +1360,200 @@ function manageVMIDs() {
   done
 }
 
-function updateDNSRecords() {
-  if [ -z "${DNS_POSTFIX}" ]; then
-    read -rp "Enter your DNS suffix: " DNS_POSTFIX
+function generateHostsJsonFromModules() {
+  # Generate hosts.json by querying individual module outputs
+  # This is used when the combined host-records output fails (e.g., during targeted apply)
+  doing "Generating hosts.json from individual module outputs..."
+
+  local EXTERNAL_HOSTS="[]"
+  local INTERNAL_HOSTS="[]"
+
+  # Query terraform state directly using terraform show
+  local TF_STATE
+  TF_STATE=$(docker compose run --rm -T terraform show -json 2>/dev/null) || true
+
+  if [ -n "$TF_STATE" ] && [ "$TF_STATE" != "null" ]; then
+    # Extract dns-main hosts from state (proxmox_lxc resource)
+    local DNS_HOSTS
+    DNS_HOSTS=$(echo "$TF_STATE" | jq -c '
+      [.values.root_module.child_modules[]? |
+       select(.address | startswith("module.dns-main")) |
+       .resources[]? |
+       select(.type == "proxmox_lxc") |
+       {hostname: .values.hostname, ip: .values.network[0].ip}
+      ] // []' 2>/dev/null) || DNS_HOSTS="[]"
+
+    # Extract step-ca hosts from state
+    local STEP_CA_HOSTS
+    STEP_CA_HOSTS=$(echo "$TF_STATE" | jq -c '
+      [.values.root_module.child_modules[]? |
+       select(.address | startswith("module.step-ca")) |
+       .resources[]? |
+       select(.type == "proxmox_lxc") |
+       {hostname: .values.hostname, ip: .values.network[0].ip}
+      ] // []' 2>/dev/null) || STEP_CA_HOSTS="[]"
+
+    # Extract dns-labnet hosts from state (internal)
+    local LABNET_HOSTS
+    LABNET_HOSTS=$(echo "$TF_STATE" | jq -c '
+      [.values.root_module.child_modules[]? |
+       select(.address | startswith("module.dns-labnet")) |
+       .resources[]? |
+       select(.type == "proxmox_lxc") |
+       {hostname: .values.hostname, ip: .values.network[0].ip}
+      ] // []' 2>/dev/null) || LABNET_HOSTS="[]"
+
+    # Combine external hosts
+    EXTERNAL_HOSTS=$(jq -c -n --argjson dns "$DNS_HOSTS" --argjson ca "$STEP_CA_HOSTS" '$dns + $ca')
+    INTERNAL_HOSTS="$LABNET_HOSTS"
   fi
 
-  if [ -z "${TECHNITIUM_PASSWORD:-}" ]; then
-    read -rp "Enter Technitium admin password: " TECHNITIUM_PASSWORD
+  # Create the hosts.json structure
+  jq -n --argjson ext "$EXTERNAL_HOSTS" --argjson int "$INTERNAL_HOSTS" \
+    '{external: $ext, internal: $int}' > hosts.json
+
+  if jq -e '.external | length > 0' hosts.json >/dev/null 2>&1; then
+    success "Generated hosts.json from module state"
+    return 0
+  else
+    warn "No hosts found in terraform state"
+    return 1
   fi
+}
 
-  doing "Reading Proxmox node member map from $PROXMOX_HOST:/etc/pve/.members"
-  local MEMBERS_JSON
-  MEMBERS_JSON="$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "cat /etc/pve/.members")"
+function generateHostsJson() {
+  doing "Generating hosts.json from Terraform output..."
 
-  # Get primary DNS IP from hosts.json
-  local DNS_IP
-  if [ -s hosts.json ]; then
-    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json | cut -d'/' -f1)
-  fi
-
-  if [ -z "$DNS_IP" ]; then
-    read -rp "Enter primary DNS server IP (dns-01): " DNS_IP
-  fi
-
-  doing "Authenticating with Technitium DNS @ $DNS_IP"
-  local TOKEN
-  TOKEN=$(curl -s "http://${DNS_IP}:5380/api/user/login?user=admin&pass=${TECHNITIUM_PASSWORD}" | jq -r '.token')
-
-  if [ -z "$TOKEN" ] || [ "$TOKEN" == "null" ]; then
-    error "Failed to authenticate with Technitium DNS"
+  if [ ! -d "terraform" ]; then
+    warn "terraform directory not found"
     return 1
   fi
 
-  doing "Creating/updating primary zone: ${DNS_POSTFIX}"
-  curl -s "http://${DNS_IP}:5380/api/zones/create?token=${TOKEN}&zone=${DNS_POSTFIX}&type=Primary" > /dev/null
+  # Try to get hosts from Terraform output
+  local TF_OUTPUT
+  TF_OUTPUT=$(docker compose run --rm -T terraform output -json host-records 2>/dev/null) || true
 
-  doing "Adding Proxmox node A records..."
-  while IFS= read -r line; do
-    local name=$(echo "$line" | jq -r '.key')
-    local ip=$(echo "$line" | jq -r '.value.ip')
-    # Add hostname record
-    curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=${name}.${DNS_POSTFIX}&type=A&ipAddress=${ip}&ttl=3600&overwrite=true" > /dev/null
-    echo "  - ${name}.${DNS_POSTFIX} -> ${ip}"
-  done < <(jq -c '.nodelist | to_entries[]' <<<"$MEMBERS_JSON")
-
-  # Add proxmox alias pointing to first node
-  local FIRST_NODE_IP=$(jq -r '.nodelist | to_entries[0].value.ip' <<<"$MEMBERS_JSON")
-  curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=proxmox.${DNS_POSTFIX}&type=A&ipAddress=${FIRST_NODE_IP}&ttl=3600&overwrite=true" > /dev/null
-  echo "  - proxmox.${DNS_POSTFIX} -> ${FIRST_NODE_IP}"
-
-  doing "Adding service A records from hosts.json..."
-  if [ -s hosts.json ]; then
-    while IFS= read -r line; do
-      local hostname=$(echo "$line" | jq -r '.hostname')
-      local ip=$(echo "$line" | jq -r '.ip' | cut -d'/' -f1)
-      curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=${hostname}.${DNS_POSTFIX}&type=A&ipAddress=${ip}&ttl=3600&overwrite=true" > /dev/null
-      echo "  - ${hostname}.${DNS_POSTFIX} -> ${ip}"
-    done < <(jq -c '.external[]' hosts.json)
+  if [ -n "$TF_OUTPUT" ] && [ "$TF_OUTPUT" != "null" ] && jq -e '.external' <<<"$TF_OUTPUT" >/dev/null 2>&1; then
+    echo "$TF_OUTPUT" > hosts.json
+    success "Generated hosts.json from Terraform output"
+    return 0
   fi
 
-  doing "Adding CNAME for ca.${DNS_POSTFIX} -> step-ca.${DNS_POSTFIX}"
-  curl -s "http://${DNS_IP}:5380/api/zones/records/add?token=${TOKEN}&domain=ca.${DNS_POSTFIX}&type=CNAME&cname=step-ca.${DNS_POSTFIX}&ttl=3600&overwrite=true" > /dev/null
+  # Fallback to individual module outputs
+  generateHostsJsonFromModules
+}
 
-  doing "Updating Proxmox's DNS servers..."
-  NODE_NAMES=()
-  while IFS= read -r name; do
-    NODE_NAMES+=("$name")
-  done < <(jq -r '.nodelist | keys[]' <<<"$MEMBERS_JSON")
-  for name in "${NODE_NAMES[@]}"; do
-    sshRun "$REMOTE_USER" "$PROXMOX_HOST" \
-      "pvesh set /nodes/$name/dns -dns1 $DNS_IP -dns2 1.1.1.1 -search $DNS_POSTFIX"
-  done
-  success "Technitium DNS records updated"
+function updateDNSRecords() {
+  # Load configuration from cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    PROXMOX_HOST=$(jq -r '.nodes[0].ip // ""' "$CLUSTER_INFO_FILE")
+
+    # Load cluster nodes if not already loaded
+    if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
+      loadClusterInfo
+    fi
+  fi
+
+  if [ -z "${DNS_POSTFIX}" ]; then
+    read -rp "$(question "Enter your DNS suffix: ")" DNS_POSTFIX
+  fi
+
+  if [ -z "${PROXMOX_HOST}" ]; then
+    read -rp "$(question "Enter Proxmox host IP: ")" PROXMOX_HOST
+  fi
+
+  # Try to generate/update hosts.json from Terraform
+  if [ ! -s hosts.json ]; then
+    generateHostsJson || true
+  fi
+
+  doing "Reading Proxmox node info from cluster-info.json..."
+  local NODE_RECORDS_JSON="[]"
+  local NODE_RECORDS_ALIAS_JSON="[]"
+
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    # Generate Proxmox node records from cluster-info.json
+    NODE_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '[.nodes[] | "\(.ip) \(.name) \(.name).\($suffix)"]' "$CLUSTER_INFO_FILE")"
+    # Create proxmox alias pointing to first node
+    NODE_RECORDS_ALIAS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '[.nodes[0] | "\(.ip) proxmox proxmox.\($suffix)"]' "$CLUSTER_INFO_FILE")"
+
+    echo "  Proxmox nodes:"
+    jq -r '.nodes[] | "    - \(.name).\($suffix) -> \(.ip)"' --arg suffix "$DNS_POSTFIX" "$CLUSTER_INFO_FILE"
+  else
+    warn "cluster-info.json not found, skipping Proxmox node records"
+  fi
+
+  doing "Generating service DNS records from hosts.json..."
+  local EXT_RECORDS_JSON="[]"
+  local DNS_IP=""
+
+  if [ -s hosts.json ]; then
+    EXT_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '(.external // []) | map("\((.ip | split("/")[0])) \(.hostname) \(.hostname)." + $suffix)' hosts.json)"
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json | cut -d'/' -f1)
+
+    echo "  Services:"
+    jq -r --arg suffix "$DNS_POSTFIX" \
+      '(.external // [])[] | "    - \(.hostname).\($suffix) -> \(.ip | split("/")[0])"' hosts.json
+  else
+    warn "hosts.json not found - only Proxmox node records will be added"
+    warn "Run Terraform apply first, or create hosts.json manually"
+  fi
+
+  if [ -z "$DNS_IP" ]; then
+    read -rp "$(question "Enter primary DNS server IP (dns-01): ")" DNS_IP
+  fi
+
+  # Add "dns" alias pointing to dns-01
+  local DNS_ALIAS_JSON
+  DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
+
+  local ALL_DNS_RECORDS_JSON
+  ALL_DNS_RECORDS_JSON="$(jq -c -n \
+    --argjson a "$NODE_RECORDS_JSON" \
+    --argjson b "$EXT_RECORDS_JSON" \
+    --argjson c "$NODE_RECORDS_ALIAS_JSON" \
+    --argjson d "$DNS_ALIAS_JSON" \
+    '$a + $b + $c + $d | unique')"
+
+  local RECORD_COUNT
+  RECORD_COUNT=$(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON")
+
+  echo
+  info "Summary: $RECORD_COUNT A-records to add"
+
+  doing "Updating Pi-hole @ $DNS_IP..."
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+    pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' &&
+    pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'
+  " && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
+
+  # Trigger Nebula-Sync to propagate changes
+  doing "Triggering Nebula-Sync to propagate to replicas..."
+  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o BatchMode=yes "$REMOTE_USER@$DNS_IP" \
+    "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
+    success "Sync triggered"
+  else
+    warn "Nebula-Sync sync failed or not configured - records may need manual sync"
+  fi
+
+  read -rp "$(question "Update Proxmox nodes to use this DNS server? [Y/n]: ")" UPDATE_PROXMOX
+  UPDATE_PROXMOX=${UPDATE_PROXMOX:-Y}
+
+  if [[ "$UPDATE_PROXMOX" =~ ^[Yy]$ ]]; then
+    doing "Updating Proxmox nodes' DNS settings..."
+    for i in "${!CLUSTER_NODES[@]}"; do
+      local node="${CLUSTER_NODES[$i]}"
+      local ip="${CLUSTER_NODE_IPS[$i]}"
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+        "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+      echo "  - $node: DNS set to $DNS_IP"
+    done
+    success "Proxmox DNS settings updated"
+  fi
 }
 
 function updateRootCertificates() {
@@ -698,42 +1647,340 @@ function destroyLab() {
   info "Destruction complete"
 }
 
+function runProxmoxSetupOnAll() {
+  doing "Running Proxmox setup on all cluster nodes..."
+
+  # Build config JSON from cluster-info.json (includes storage and bridge)
+  local CONFIG
+  CONFIG=$(cat "$CLUSTER_INFO_FILE")
+
+  # Cluster-wide setup (run once on primary)
+  local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
+  doing "Running cluster-wide Proxmox setup on ${CLUSTER_NODES[0]} ($PRIMARY_IP)..."
+
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox/setup.sh "root@${PRIMARY_IP}:/tmp/proxmox-setup.sh"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "root@${PRIMARY_IP}" \
+    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'"
+
+  # Per-node setup (run on each node) - pass config for storage/bridge settings
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    doing "Running node setup on $node ($ip)..."
+    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox/setup.sh "root@${ip}:/tmp/proxmox-setup.sh"
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "root@${ip}" \
+      "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup '$CONFIG'"
+  done
+
+  success "Proxmox setup complete on all nodes"
+}
+
+function updateTerraformFromClusterInfo() {
+  doing "Updating terraform.tfvars from cluster configuration..."
+
+  local TFVARS_FILE="terraform/terraform.tfvars"
+
+  # Check if cluster-info.json exists
+  if [ ! -f "$CLUSTER_INFO_FILE" ]; then
+    error "cluster-info.json not found. Run setup again."
+    return 1
+  fi
+
+  # Load values from cluster-info.json
+  local EXT_GW=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE")
+  local DNS_START=$(jq -r '.network.external.dns_start_ip // ""' "$CLUSTER_INFO_FILE")
+  local SVC_START=$(jq -r '.network.external.services_start_ip // ""' "$CLUSTER_INFO_FILE")
+  local INT_CIDR_VAL=$(jq -r '.network.labnet.cidr // ""' "$CLUSTER_INFO_FILE")
+  local INT_GW=$(jq -r '.network.labnet.gateway // ""' "$CLUSTER_INFO_FILE")
+  local DNS_POSTFIX_VAL=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  local BRIDGE_VAL=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
+  local STORAGE_VAL=$(jq -r '.storage.selected // "local-lvm"' "$CLUSTER_INFO_FILE")
+
+  # Copy from example if doesn't exist
+  if [ ! -f "$TFVARS_FILE" ]; then
+    if [ -f "terraform/terraform.tfvars.example" ]; then
+      cp terraform/terraform.tfvars.example "$TFVARS_FILE"
+      info "Created terraform.tfvars from example"
+    else
+      error "terraform.tfvars.example not found"
+      return 1
+    fi
+  fi
+
+  # Helper function for cross-platform sed
+  sed_inplace() {
+    if sed --version >/dev/null 2>&1; then
+      sed -i "$@"
+    else
+      sed -i '' "$@"
+    fi
+  }
+
+  # Update network_gateway_address
+  sed_inplace "s|^network_gateway_address = .*|network_gateway_address = \"$EXT_GW\"|" "$TFVARS_FILE"
+  info "  network_gateway_address = \"$EXT_GW\""
+
+  # Update network_interface_bridge
+  sed_inplace "s|^network_interface_bridge = .*|network_interface_bridge = \"$BRIDGE_VAL\"|" "$TFVARS_FILE"
+  info "  network_interface_bridge = \"$BRIDGE_VAL\""
+
+  # Update lxc_storage
+  if grep -q "^lxc_storage" "$TFVARS_FILE"; then
+    sed_inplace "s|^lxc_storage = .*|lxc_storage = \"$STORAGE_VAL\"|" "$TFVARS_FILE"
+  else
+    echo "" >> "$TFVARS_FILE"
+    echo "lxc_storage = \"$STORAGE_VAL\"" >> "$TFVARS_FILE"
+  fi
+  info "  lxc_storage = \"$STORAGE_VAL\""
+
+  # Update dns_postfix
+  sed_inplace "s|^dns_postfix = .*|dns_postfix = \"$DNS_POSTFIX_VAL\"|" "$TFVARS_FILE"
+  info "  dns_postfix = \"$DNS_POSTFIX_VAL\""
+
+  # Update dns_primary_ipv4
+  sed_inplace "s|^dns_primary_ipv4 = .*|dns_primary_ipv4 = \"$DNS_START\"|" "$TFVARS_FILE"
+  info "  dns_primary_ipv4 = \"$DNS_START\""
+
+  # Update step-ca_eth0_ipv4_cidr (service start IP with /24)
+  local EXT_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
+  local CIDR_MASK=$(echo "$EXT_CIDR_VAL" | grep -oE '/[0-9]+$')
+  sed_inplace "s|^step-ca_eth0_ipv4_cidr = .*|step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\"|" "$TFVARS_FILE"
+  info "  step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\""
+
+  # Build and update proxmox_node_ips map
+  local NODE_IPS_MAP="{\n"
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    [ $i -gt 0 ] && NODE_IPS_MAP+=",\n"
+    NODE_IPS_MAP+="  $node = \"$ip\""
+  done
+  NODE_IPS_MAP+="\n}"
+
+  # Remove existing proxmox_node_ips block and add new
+  sed_inplace '/^proxmox_node_ips/,/^}/d' "$TFVARS_FILE"
+  echo "" >> "$TFVARS_FILE"
+  echo "# Proxmox cluster node IPs (auto-generated by setup.sh)" >> "$TFVARS_FILE"
+  echo -e "proxmox_node_ips = $NODE_IPS_MAP" >> "$TFVARS_FILE"
+  info "  proxmox_node_ips updated"
+
+  # Build DNS main nodes configuration
+  local DNS_MAIN_CONFIG="["
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local hostname="dns-$(printf '%02d' $((i + 1)))"
+    # Calculate IP from DNS_START
+    local base_ip=$(echo "$DNS_START" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+    local start_octet=$(echo "$DNS_START" | grep -oE '[0-9]+$')
+    local ip="${base_ip}$((start_octet + i))${CIDR_MASK}"
+    [ $i -gt 0 ] && DNS_MAIN_CONFIG+=", "
+    DNS_MAIN_CONFIG+="\n  { hostname = \"$hostname\", target_node = \"$node\", ip = \"$ip\", gw = \"$EXT_GW\" }"
+  done
+  DNS_MAIN_CONFIG+="\n]"
+
+  # Remove and rewrite dns_main_nodes
+  sed_inplace '/^dns_main_nodes/,/^\]/d' "$TFVARS_FILE"
+  echo "" >> "$TFVARS_FILE"
+  echo "# DNS cluster nodes - Main cluster (auto-generated)" >> "$TFVARS_FILE"
+  echo -e "dns_main_nodes = $DNS_MAIN_CONFIG" >> "$TFVARS_FILE"
+  info "  dns_main_nodes updated"
+
+  # Build DNS labnet nodes configuration (max 2)
+  if jq -e '.network.labnet.enabled == true' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    local LABNET_DNS_CONFIG="["
+    local labnet_count=$((${#CLUSTER_NODES[@]} < 2 ? ${#CLUSTER_NODES[@]} : 2))
+    local labnet_base=$(echo "$INT_GW" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+    local labnet_mask=$(echo "$INT_CIDR_VAL" | grep -oE '/[0-9]+$')
+
+    for i in $(seq 0 $((labnet_count - 1))); do
+      local node="${CLUSTER_NODES[$i]}"
+      local hostname="labnet-dns-$(printf '%02d' $((i + 1)))"
+      local ip="${labnet_base}$((3 + i))${labnet_mask}"
+      [ $i -gt 0 ] && LABNET_DNS_CONFIG+=", "
+      LABNET_DNS_CONFIG+="\n  { hostname = \"$hostname\", target_node = \"$node\", ip = \"$ip\", gw = \"$INT_GW\" }"
+    done
+    LABNET_DNS_CONFIG+="\n]"
+
+    # Remove and rewrite dns_labnet_nodes
+    sed_inplace '/^dns_labnet_nodes/,/^\]/d' "$TFVARS_FILE"
+    echo "" >> "$TFVARS_FILE"
+    echo "# DNS cluster nodes - Labnet SDN cluster (auto-generated)" >> "$TFVARS_FILE"
+    echo -e "dns_labnet_nodes = $LABNET_DNS_CONFIG" >> "$TFVARS_FILE"
+    info "  dns_labnet_nodes updated"
+  fi
+
+  success "Terraform configuration updated from cluster-info.json"
+}
+
 function runEverything() {
   checkRequirements
   generateSSHKeys
   checkProxmox
   installSSHKeys
+
+  # Check if we have existing cluster info
+  if [ -f "$CLUSTER_INFO_FILE" ] && jq -e '.network' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    read -rp "$(question "Found existing cluster-info.json. Use it? [Y/n]: ")" USE_EXISTING
+    USE_EXISTING=${USE_EXISTING:-Y}
+    if [[ "$USE_EXISTING" =~ ^[Yy]$ ]]; then
+      loadClusterInfo
+    else
+      detectAndSaveCluster
+      configureNetworking
+    fi
+  else
+    # Fresh setup - detect cluster and configure
+    detectAndSaveCluster
+    configureNetworking
+  fi
+
+  # Distribute SSH keys to all cluster nodes
+  distributeSSHKeys
+
+  # Select storage and network bridge (updates cluster-info.json)
+  selectSharedStorage
+  selectNetworkBridge
+
+  # Save storage/bridge selection to cluster-info.json
+  local tmp_file=$(mktemp)
+  jq --arg storage "$TEMPLATE_STORAGE" \
+     --argjson shared "$USE_SHARED_STORAGE" \
+     --arg bridge "$NETWORK_BRIDGE" \
+     '. + {
+       storage: { selected: $storage, is_shared: $shared },
+       network: (.network + { selected_bridge: $bridge })
+     }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+
+  # Update terraform.tfvars from cluster-info.json
+  updateTerraformFromClusterInfo
+
+  # Run Proxmox setup on all nodes
+  runProxmoxSetupOnAll
+
+  # Optional post-install script
   proxmoxPostInstall
-  proxmoxLabInstall
+
+  # Deploy services (LXC, Packer, VMs)
   deployServices
-  updateDNSRecords
-  updateRootCertificates
+
+  # Setup Docker Swarm
   setupDockerSwarm
 }
 
 function runEverythingButSSH() {
   checkRequirements
   checkProxmox
+
+  # Check if we have existing cluster info
+  if [ -f "$CLUSTER_INFO_FILE" ] && jq -e '.network' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    read -rp "$(question "Found existing cluster-info.json. Use it? [Y/n]: ")" USE_EXISTING
+    USE_EXISTING=${USE_EXISTING:-Y}
+    if [[ "$USE_EXISTING" =~ ^[Yy]$ ]]; then
+      loadClusterInfo
+    else
+      detectAndSaveCluster
+      configureNetworking
+    fi
+  else
+    detectAndSaveCluster
+    configureNetworking
+  fi
+
+  # Distribute SSH keys to all cluster nodes (assumes keys exist)
+  if [ -f "$KEY_PATH" ]; then
+    distributeSSHKeys
+  fi
+
+  # Select storage and network bridge
+  selectSharedStorage
+  selectNetworkBridge
+
+  # Save storage/bridge selection to cluster-info.json
+  local tmp_file=$(mktemp)
+  jq --arg storage "$TEMPLATE_STORAGE" \
+     --argjson shared "$USE_SHARED_STORAGE" \
+     --arg bridge "$NETWORK_BRIDGE" \
+     '. + {
+       storage: { selected: $storage, is_shared: $shared },
+       network: (.network + { selected_bridge: $bridge })
+     }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+
+  # Update terraform.tfvars from cluster-info.json
+  updateTerraformFromClusterInfo
+
+  # Run Proxmox setup on all nodes
+  runProxmoxSetupOnAll
+
+  # Optional post-install script
   proxmoxPostInstall
-  proxmoxLabInstall
+
+  # Deploy services
   deployServices
-  updateDNSRecords
-  updateRootCertificates
+
+  # Setup Docker Swarm
   setupDockerSwarm
 }
 
+function manualRollback() {
+  cat <<EOF
+
+#############################################################################
+Manual Rollback
+
+Select the phase to rollback from:
+  1) LXC containers (DNS, step-ca)
+  2) Packer templates
+  3) VMs (docker-swarm, kasm)
+#############################################################################
+
+EOF
+  read -rp "$(question "Enter phase number [1-3]: ")" PHASE
+  case $PHASE in
+    1|2|3) rollbackDeployment "$PHASE";;
+    *) error "Invalid phase";;
+  esac
+}
+
+function showMenu() {
+  echo
+  echo "=========================================="
+  echo "  Proxmox Lab - Main Menu"
+  echo "=========================================="
+  echo
+  echo "  1) New installation"
+  echo "  2) New installation - skip SSH key gen"
+  echo "  3) Deploy services (Terraform)"
+  echo "  4) Deploy Docker Swarm"
+  echo "  5) Build DNS records"
+  echo "  6) Update root certificates"
+  echo "  7) Proxmox post-install (all nodes)"
+  echo "  8) Rollback deployment"
+  echo "  9) Destroy lab"
+  echo "  0) Exit"
+  echo
+}
+
 header
-options=("New installation" "Rerun everything but SSH key gen" "Rerun deploy services" "Deploy Docker Swarm" "Build DNS records" "Update Root Certificates" "Destroy lab" "Exit")
-select opt in "${options[@]}"; do
-  case $REPLY in
+
+while true; do
+  showMenu
+  read -rp "$(question "Select an option [0-9]: ")" choice
+
+  case $choice in
     1) runEverything;;
     2) runEverythingButSSH;;
     3) deployServices;;
     4) setupDockerSwarm;;
     5) updateDNSRecords;;
     6) updateRootCertificates;;
-    7) destroyLab;;
-    8|q|Q) warn "Exiting..."; break;;
-    *) error "Invalid option";;
+    7) proxmoxPostInstall;;
+    8) manualRollback;;
+    9) destroyLab;;
+    0|q|Q) warn "Exiting..."; break;;
+    *) error "Invalid option: $choice";;
   esac
+
+  echo
+  read -rp "Press Enter to continue..."
 done

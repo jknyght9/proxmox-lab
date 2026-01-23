@@ -22,6 +22,7 @@ services:
       - ./packer:/packer # where your packer configs are stored
       - ./packer/.config:/root/.config
       - ./crypto:/crypto:ro # for SSH keys if needed
+      - ./terraform/lxc-step-ca/step-ca/certs:/step-ca-certs:ro # CA certs for packer builds
       - /var/run/docker.sock:/var/run/docker.sock # if using Docker builds
     environment:
       PACKER_LOG: "1"
@@ -45,4 +46,9 @@ services:
     volumes:
       - ./crypto:/crypto:ro
       - ./terraform:/terraform
+      - ./logs:/logs
+    environment:
+      TF_LOG: INFO
+      TF_LOG_PATH: /logs/terraform.log
     network_mode: host
+
