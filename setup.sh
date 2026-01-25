@@ -1596,11 +1596,16 @@ function updateRootCertificates() {
   doing "Installing root CA on all nodes and updating trust"
   for name in "${NODE_IPS[@]}"; do
     echo "  - $name"
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$name" "
+      # Remove any existing proxmox-lab CA certificates first
+      rm -f /usr/local/share/ca-certificates/proxmox-lab*.crt
+      rm -f /etc/ssl/certs/proxmox-lab*.pem
+    "
     scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox-lab-root-ca.crt \
       "$REMOTE_USER@$name:/usr/local/share/ca-certificates/proxmox-lab-root-ca.crt"
     ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$name" "
       set -e
-      update-ca-certificates
+      update-ca-certificates --fresh
       systemctl reload pveproxy || systemctl restart pveproxy
     "
   done
@@ -1614,15 +1619,24 @@ function updateRootCertificates() {
   "
 
   doing "Ordering/renewing certs per node"
+  local first_node=true
   exec 3< <(jq -r '.nodelist | to_entries[] | "\(.key)\t\(.value.ip)"' <<<"$MEMBERS_JSON")
   while IFS=$'\t' read -r name ip <&3; do
     [[ -z "$name" || -z "$ip" ]] && continue
     fqdn="${name}.${DNS_POSTFIX}"
-    pmfqdn="proxmox.${DNS_POSTFIX}"
-    acme_map="account=default,domains=${fqdn};${pmfqdn}"
-    
-    info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
-    
+
+    # Only first node gets the shared proxmox.domain hostname to avoid ACME HTTP-01 conflicts
+    # All nodes still respond to proxmox.domain via DNS round-robin, but only first node's cert includes it
+    if [[ "$first_node" == "true" ]]; then
+      pmfqdn="proxmox.${DNS_POSTFIX}"
+      acme_map="account=default,domains=${fqdn};${pmfqdn}"
+      info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
+      first_node=false
+    else
+      acme_map="account=default,domains=${fqdn}"
+      info "  - $name ($ip) -> $fqdn"
+    fi
+
     ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" "
       set -e
       pvenode config set --acme \"$acme_map\"
