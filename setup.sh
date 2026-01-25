@@ -52,7 +52,7 @@ function success()      { echo -e "${C_GREEN}[✓] $*${C_RESET}"; }
 function error()        { echo -e "${C_RED}[X] $*${C_RESET}"; }
 function warn()         { echo -e "${C_YELLOW}[!] $*${C_RESET}"; }
 function question()     { echo -e "  ${C_YELLOW}[?] $*${C_RESET}"; }
-function sshRun()       { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$1@$2" "$3"; }
+function sshRun()       { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$1@$2" "$3"; }
 function pressAnyKey()  { read -n 1 -s -p "$(question "Press any key to continue")"; echo; }
 
 function rollbackDeployment() {
@@ -95,7 +95,7 @@ function rollbackDeployment() {
 
       # Also clean up any VMIDs that might be orphaned
       for VMID in "${DNS_VMIDS[@]}" 909; do
-        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" \
+        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" \
           "pct stop $VMID 2>/dev/null; pct destroy $VMID 2>/dev/null" 2>/dev/null || true
       done
       warn "LXC containers destroyed."
@@ -166,13 +166,13 @@ function checkClusterConnectivity() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     # Test internet connectivity (try to reach a reliable endpoint)
-    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
       "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
       failed_nodes+=("$node ($ip)")
 
       # Get DNS configuration for this node
       local dns_info
-      dns_info=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      dns_info=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
         "echo 'resolv.conf:'; cat /etc/resolv.conf; echo ''; echo 'pvesh DNS:'; pvesh get /nodes/$node/dns --output-format json 2>/dev/null | jq -r 'to_entries[] | \"  \\(.key): \\(.value)\"'" 2>/dev/null)
       dns_configs+=("=== $node ($ip) ===\n$dns_info")
     else
@@ -265,7 +265,7 @@ function detectAndSaveCluster() {
     # Get current DNS config
     local dns1="" dns2="" search=""
     local dns_json
-    dns_json=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+    dns_json=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
       "pvesh get /nodes/$node/dns --output-format json 2>/dev/null" || echo "{}")
 
     dns1=$(echo "$dns_json" | jq -r '.dns1 // ""')
@@ -274,7 +274,7 @@ function detectAndSaveCluster() {
 
     # Test connectivity
     local connectivity="unknown"
-    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
       "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
       connectivity="ok"
       success "  $node ($ip): Connectivity OK, DNS1=$dns1, DNS2=$dns2"
@@ -314,7 +314,7 @@ function detectAndSaveCluster() {
         local ip="${CLUSTER_NODE_IPS[$idx]}"
 
         doing "  Setting DNS on $node..."
-        ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+        ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
           "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
           success "  $node: DNS updated" || warn "  $node: Failed to update DNS"
       done
@@ -387,9 +387,9 @@ function distributeSSHKeys() {
     fi
 
     doing "  $node ($ip): Installing SSH keys..."
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
       "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
         || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>/dev/null
     success "  $node ($ip): Keys installed"
@@ -558,12 +558,12 @@ function ensureLXCTemplates() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     # Check if template exists on this node
-    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
       "test -f /var/lib/vz/template/cache/${TEMPLATE}" 2>/dev/null; then
       info "  $node: Template already exists"
     else
       doing "  $node: Downloading template..."
-      if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
         "pveam update && pveam download local ${TEMPLATE}" 2>/dev/null; then
         success "  $node: Template downloaded"
       else
@@ -682,7 +682,7 @@ function selectNetworkBridge() {
     local NODE_BRIDGES=()
     while IFS= read -r bridge; do
       [[ -n "$bridge" ]] && NODE_BRIDGES+=("$bridge")
-    done < <(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+    done < <(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
       "pvesh get /nodes/$node/network --output-format json 2>/dev/null" | \
       jq -r '.[] | select(.type == "bridge") | .iface' 2>/dev/null)
 
@@ -747,9 +747,9 @@ function cleanupDNSVMIDs() {
 
   for VMID in "${DNS_VMIDS[@]}"; do
     # Check if LXC container exists
-    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "pct status $VMID" &>/dev/null; then
+    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct status $VMID" &>/dev/null; then
       warn "VMID $VMID exists, destroying for clean deployment"
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "pct stop $VMID 2>/dev/null || true; pct destroy $VMID 2>/dev/null || true"
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct stop $VMID 2>/dev/null || true; pct destroy $VMID 2>/dev/null || true"
       ((cleaned++))
     fi
   done
@@ -843,7 +843,7 @@ function checkProxmox() {
   fi
 
   doing "Testing SSH connection to $REMOTE_USER@$PROXMOX_HOST..."
-  if ! sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$REMOTE_USER@$PROXMOX_HOST" "echo SSH connection successful" >/dev/null 2>&1; then
+  if ! sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$PROXMOX_HOST" "echo SSH connection successful" >/dev/null 2>&1; then
     error "SSH connection failed. Check password or network."
     exit 1
   fi
@@ -891,7 +891,7 @@ function proxmoxPostInstall() {
       local ip="${CLUSTER_NODE_IPS[$i]}"
 
       doing "Running Proxmox VE Post-Install Script on $node ($ip)..."
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$ip" \
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$ip" \
         'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"' \
         && success "Completed post-installation on $node" \
         || warn "Post-installation may have failed on $node"
@@ -905,9 +905,9 @@ function proxmoxPostInstall() {
 
 function proxmoxLabInstall() {
   doing "Running Proxmox VE Lab Install Script..."
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no ./proxmox/setup.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ./proxmox/setup.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
   #sshRun $REMOTE_USER $PROXMOX_HOST 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
   success "Completed the lab installation script on $PROXMOX_HOST\n"
 }
 
@@ -1153,12 +1153,12 @@ function createLXCTemplate() {
   local MEMORY="${7:-2048}"
 
   doing "Creating LXC template: ${TEMPLATE_NAME} (VMID: ${TEMPLATE_VMID})"
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$INSTALL_SCRIPT" "$REMOTE_USER@$PROXMOX_HOST":/root/install.sh
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$INSTALL_SCRIPT" "$REMOTE_USER@$PROXMOX_HOST":/root/install.sh
 
   doing "Creating LXC container ${TEMPLATE_VMID} (${TEMPLATE_NAME})..."
   local OSTEMPLATE=$(sshRun $REMOTE_USER $PROXMOX_HOST "pveam list local | awk '/vztmpl/ {print \$1; exit}'")
   echo $OSTEMPLATE
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "\
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "\
     pct stop ${TEMPLATE_VMID} || true > /dev/null 2>&1 && pct destroy ${TEMPLATE_VMID} || true > /dev/null 2>&1
     pct create ${TEMPLATE_VMID} ${OSTEMPLATE} \
       --storage ${STORAGE} \
@@ -1178,12 +1178,12 @@ function createLXCTemplate() {
     pct reboot ${TEMPLATE_VMID}"
 
   doing "Running installation script..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "\
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "\
     pct push ${TEMPLATE_VMID} /root/install.sh /root/install.sh && \
     pct exec ${TEMPLATE_VMID} -- bash -c 'bash /root/install.sh'" || true
 
   doing "Cleaning container for template..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct exec ${TEMPLATE_VMID} -- bash -c 'apt-get clean && \
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "pct exec ${TEMPLATE_VMID} -- bash -c 'apt-get clean && \
     rm -rf /tmp/* /var/tmp/* /var/log/* /root/.bash_history && \
     truncate -s 0 /etc/machine-id && \
     rm -f /etc/ssh/ssh_host_* && \
@@ -1191,7 +1191,7 @@ function createLXCTemplate() {
     systemctl enable ssh'"
 
   doing "Stopping container and converting to template..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
   success "LXC template '${TEMPLATE_NAME}' created successfully"
 }
 
@@ -1337,7 +1337,7 @@ function manageVMIDs() {
 
   for VMID in "${VMIDS[@]}"; do
     # Check if QEMU VM exists
-    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "qm config $VMID" &>/dev/null; then
+    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "qm config $VMID" &>/dev/null; then
       warn "VMID $VMID is a QEMU VM"
       read -rp "$(question "Do you want to destroy VMID $VMID (y/N)? ")" REPLY
       if [[ "$REPLY" =~ ^[Yy]$ ]]; then
@@ -1346,7 +1346,7 @@ function manageVMIDs() {
       fi
 
     # Check if LXC container exists
-    elif ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "pct config $VMID" &>/dev/null; then
+    elif ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct config $VMID" &>/dev/null; then
       warn "VMID $VMID is an LXC container"
       read -rp "$(question "Do you want to destroy VMID $VMID (y/N)? ")" REPLY
       if [[ "$REPLY" =~ ^[Yy]$ ]]; then
@@ -1528,14 +1528,14 @@ function updateDNSRecords() {
   info "Summary: $RECORD_COUNT A-records to add"
 
   doing "Updating Pi-hole @ $DNS_IP..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
     pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' &&
     pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'
   " && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
 
   # Trigger Nebula-Sync to propagate changes
   doing "Triggering Nebula-Sync to propagate to replicas..."
-  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o BatchMode=yes "$REMOTE_USER@$DNS_IP" \
+  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes "$REMOTE_USER@$DNS_IP" \
     "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
     success "Sync triggered"
   else
@@ -1550,7 +1550,7 @@ function updateDNSRecords() {
     for i in "${!CLUSTER_NODES[@]}"; do
       local node="${CLUSTER_NODES[$i]}"
       local ip="${CLUSTER_NODE_IPS[$i]}"
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" \
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
         "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
       echo "  - $node: DNS set to $DNS_IP"
     done
@@ -1586,7 +1586,7 @@ function updateRootCertificates() {
 
   doing "Reading node list from ${PROXMOX_HOST}:/etc/pve/.members"
   local MEMBERS_JSON
-  MEMBERS_JSON="$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" 'cat /etc/pve/.members')"
+  MEMBERS_JSON="$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" 'cat /etc/pve/.members')"
   local NODE_IPS=()
   while IFS= read -r name; do
     [[ -n "$name" ]] && NODE_IPS+=("$name")
@@ -1602,14 +1602,14 @@ function updateRootCertificates() {
   doing "Installing root CA on all nodes and updating trust"
   for name in "${NODE_IPS[@]}"; do
     echo "  - $name"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$name" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$name" "
       # Remove any existing proxmox-lab CA certificates first
       rm -f /usr/local/share/ca-certificates/proxmox-lab*.crt
       rm -f /etc/ssl/certs/proxmox-lab*.pem
     "
-    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox-lab-root-ca.crt \
+    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox-lab-root-ca.crt \
       "$REMOTE_USER@$name:/usr/local/share/ca-certificates/proxmox-lab-root-ca.crt"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$name" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$name" "
       set -e
       update-ca-certificates --fresh
       systemctl reload pveproxy || systemctl restart pveproxy
@@ -1617,7 +1617,7 @@ function updateRootCertificates() {
   done
 
   doing "Registering ACME account 'default' against Step CA directory"
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "
     # Deactivate existing account if present (needed after CA regeneration)
     pvenode acme account deactivate default 2>/dev/null || true
     rm -f /etc/pve/priv/acme/default 2>/dev/null || true
@@ -1643,7 +1643,7 @@ function updateRootCertificates() {
 
     # Temporarily point proxmox.DOMAIN only to this node for ACME HTTP-01 validation
     doing "    Temporarily setting DNS: ${pmfqdn} -> ${ip}"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
       CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
       # Remove all proxmox entries and add only this node
       UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --arg pm \"$pmfqdn\" --arg ip \"$ip\" '
@@ -1657,7 +1657,7 @@ function updateRootCertificates() {
 
     # Order certificate
     doing "    Ordering certificate for $name"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" "
       set -e
       pvenode config set --acme \"$acme_map\"
       pvenode acme cert order -force
@@ -1675,7 +1675,7 @@ function updateRootCertificates() {
   done
   ROUNDROBIN_ENTRIES="[${ROUNDROBIN_ENTRIES%,}]"  # Remove trailing comma, wrap in array
 
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
     CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
     # Remove all proxmox entries and add all nodes for round-robin
     UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --argjson rr '$ROUNDROBIN_ENTRIES' '
@@ -1770,8 +1770,8 @@ function runProxmoxSetupOnAll() {
   local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
   doing "Running cluster-wide Proxmox setup on ${CLUSTER_NODES[0]} ($PRIMARY_IP)..."
 
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox/setup.sh "root@${PRIMARY_IP}:/tmp/proxmox-setup.sh"
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "root@${PRIMARY_IP}" \
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox/setup.sh "root@${PRIMARY_IP}:/tmp/proxmox-setup.sh"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "root@${PRIMARY_IP}" \
     "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'"
 
   # Per-node setup (run on each node) - pass config for storage/bridge settings
@@ -1780,8 +1780,8 @@ function runProxmoxSetupOnAll() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     doing "Running node setup on $node ($ip)..."
-    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no proxmox/setup.sh "root@${ip}:/tmp/proxmox-setup.sh"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -t "root@${ip}" \
+    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox/setup.sh "root@${ip}:/tmp/proxmox-setup.sh"
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "root@${ip}" \
       "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup '$CONFIG'"
   done
 
