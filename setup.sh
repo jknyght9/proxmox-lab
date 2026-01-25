@@ -1476,12 +1476,14 @@ function updateDNSRecords() {
     # Generate Proxmox node records from cluster-info.json
     NODE_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
       '[.nodes[] | "\(.ip) \(.name) \(.name).\($suffix)"]' "$CLUSTER_INFO_FILE")"
-    # Create proxmox alias pointing to first node
+    # Create proxmox alias pointing to ALL nodes for round-robin DNS
     NODE_RECORDS_ALIAS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
-      '[.nodes[0] | "\(.ip) proxmox proxmox.\($suffix)"]' "$CLUSTER_INFO_FILE")"
+      '[.nodes[] | "\(.ip) proxmox proxmox.\($suffix)"]' "$CLUSTER_INFO_FILE")"
 
     echo "  Proxmox nodes:"
     jq -r '.nodes[] | "    - \(.name).\($suffix) -> \(.ip)"' --arg suffix "$DNS_POSTFIX" "$CLUSTER_INFO_FILE"
+    echo "  Round-robin alias:"
+    jq -r '.nodes[] | "    - proxmox.\($suffix) -> \(.ip)"' --arg suffix "$DNS_POSTFIX" "$CLUSTER_INFO_FILE"
   else
     warn "cluster-info.json not found, skipping Proxmox node records"
   fi
@@ -1618,35 +1620,67 @@ function updateRootCertificates() {
     pvenode acme account register default admin@example.com --directory '$ACME_DIR'
   "
 
-  doing "Ordering/renewing certs per node"
-  local first_node=true
+  doing "Ordering/renewing certs per node (with proxmox.${DNS_POSTFIX} SAN)"
+  local pmfqdn="proxmox.${DNS_POSTFIX}"
+
+  # Build array of all node IPs for round-robin restore later
+  local ALL_NODE_IPS=()
+  while IFS= read -r node_ip; do
+    [[ -n "$node_ip" ]] && ALL_NODE_IPS+=("$node_ip")
+  done < <(jq -r '.nodelist | to_entries[] | .value.ip' <<<"$MEMBERS_JSON")
+
   exec 3< <(jq -r '.nodelist | to_entries[] | "\(.key)\t\(.value.ip)"' <<<"$MEMBERS_JSON")
   while IFS=$'\t' read -r name ip <&3; do
     [[ -z "$name" || -z "$ip" ]] && continue
     fqdn="${name}.${DNS_POSTFIX}"
+    acme_map="account=default,domains=${fqdn};${pmfqdn}"
 
-    # Only first node gets the shared proxmox.domain hostname to avoid ACME HTTP-01 conflicts
-    # All nodes still respond to proxmox.domain via DNS round-robin, but only first node's cert includes it
-    if [[ "$first_node" == "true" ]]; then
-      pmfqdn="proxmox.${DNS_POSTFIX}"
-      acme_map="account=default,domains=${fqdn};${pmfqdn}"
-      info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
-      first_node=false
-    else
-      acme_map="account=default,domains=${fqdn}"
-      info "  - $name ($ip) -> $fqdn"
-    fi
+    info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
 
+    # Temporarily point proxmox.DOMAIN only to this node for ACME HTTP-01 validation
+    doing "    Temporarily setting DNS: ${pmfqdn} -> ${ip}"
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+      CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
+      # Remove all proxmox entries and add only this node
+      UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --arg pm \"$pmfqdn\" --arg ip \"$ip\" '
+        map(select(. | contains(\"proxmox\") | not)) + [\"\(\$ip) proxmox \(\$pm)\"]
+      ')
+      pihole-FTL --config dns.hosts \"\$UPDATED_RECORDS\"
+    " || { warn "Failed to update DNS for $name"; continue; }
+
+    # Brief pause for DNS propagation
+    sleep 2
+
+    # Order certificate
+    doing "    Ordering certificate for $name"
     ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$ip" "
       set -e
       pvenode config set --acme \"$acme_map\"
       pvenode acme cert order -force
     " || { warn "SSH/ACME failed for $name ($ip)"; continue; }
 
+    success "    Certificate issued for $name"
   done
   exec 3<&-
 
-  success "Root CA installed on all nodes; ACME account configured; certificates ordered per node."
+  # Restore round-robin DNS for proxmox.DOMAIN (all nodes)
+  doing "Restoring round-robin DNS for ${pmfqdn}"
+  local ROUNDROBIN_ENTRIES=""
+  for node_ip in "${ALL_NODE_IPS[@]}"; do
+    ROUNDROBIN_ENTRIES="${ROUNDROBIN_ENTRIES}\"${node_ip} proxmox ${pmfqdn}\","
+  done
+  ROUNDROBIN_ENTRIES="[${ROUNDROBIN_ENTRIES%,}]"  # Remove trailing comma, wrap in array
+
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$DNS_IP" "
+    CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
+    # Remove all proxmox entries and add all nodes for round-robin
+    UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --argjson rr '$ROUNDROBIN_ENTRIES' '
+      map(select(. | contains(\"proxmox\") | not)) + \$rr
+    ')
+    pihole-FTL --config dns.hosts \"\$UPDATED_RECORDS\"
+  " || warn "Failed to restore round-robin DNS"
+
+  success "Root CA installed on all nodes; ACME certs issued; round-robin DNS restored."
 }
 
 function regenerateCA() {
