@@ -1757,25 +1757,133 @@ function regenerateCA() {
 }
 
 function destroyLab() {
+  warn "This will DESTROY all lab infrastructure and remove all configurations."
+  warn "This action cannot be undone."
+  echo
+  read -rp "$(question "Are you sure? Type 'destroy' to confirm: ")" CONFIRM
+  if [[ "$CONFIRM" != "destroy" ]]; then
+    info "Destruction cancelled"
+    return 0
+  fi
+
   checkProxmox
-  doing "Destroying lab..."
+
+  # Load cluster info for multi-node cleanup
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    loadClusterInfo 2>/dev/null || true
+  fi
+
+  # 1. Terraform destroy
+  doing "Destroying Terraform infrastructure..."
   manageVMIDs "${REQUIRED_VMIDS[@]}"
   if docker compose run --rm -it terraform destroy; then
-    success "Destruction complete.\n"
-  else 
-    error "An error occurred during lab destruction"
-    exit 1
+    success "Terraform destruction complete"
+  else
+    warn "Terraform destroy had errors - continuing with cleanup"
   fi
-  sshRun $REMOTE_USER $PROXMOX_HOST 'bash /root/setup.sh destroy || true'
-  sshRun $REMOTE_USER $PROXMOX_HOST 'pvesh set /nodes/pve/dns -dns1 1.1.1.1 -search domain.local'
-  sshRun $REMOTE_USER $PROXMOX_HOST 'rm /usr/local/share/ca-certificates/proxmox-lab*.crt || true && update-ca-certificates -v'
-  sshRun $REMOTE_USER $PROXMOX_HOST 'pvenode acme account deactivate default > /dev/null &2>1 || true'
-  sshRun $REMOTE_USER $PROXMOX_HOST 'rm /etc/pve/priv/acme/default > /dev/null &2>1 || true'
-  rm -r packer/packer-outputs
-  rm -r terraform/lxc-step-ca/step-ca
-  rm hosts.json
-  rm proxmox-lab-root-ca.crt
-  info "Destruction complete"
+
+  # 2. Clean ALL cluster nodes (not just primary)
+  doing "Cleaning Proxmox nodes..."
+  if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    for i in "${!CLUSTER_NODE_IPS[@]}"; do
+      local node_ip="${CLUSTER_NODE_IPS[$i]}"
+      local node_name="${CLUSTER_NODES[$i]}"
+
+      info "  Cleaning $node_name ($node_ip)..."
+
+      # Run proxmox/setup.sh destroy on each node
+      sshRun $REMOTE_USER "$node_ip" 'bash /root/setup.sh destroy 2>/dev/null || true'
+
+      # Remove CA certificates
+      sshRun $REMOTE_USER "$node_ip" 'rm -f /usr/local/share/ca-certificates/proxmox-lab*.crt && update-ca-certificates 2>/dev/null || true'
+
+      # Reset DNS
+      sshRun $REMOTE_USER "$node_ip" 'echo "nameserver 1.1.1.1" > /etc/resolv.conf'
+
+      # Deactivate ACME account (only needs to run once - cluster-wide, done on primary)
+      if [ "$i" -eq 0 ]; then
+        sshRun $REMOTE_USER "$node_ip" 'pvenode acme account deactivate default 2>/dev/null || true'
+        sshRun $REMOTE_USER "$node_ip" 'rm -f /etc/pve/priv/acme/default 2>/dev/null || true'
+      fi
+    done
+  else
+    # Fallback to primary host only if cluster info not available
+    info "  Cleaning $PROXMOX_HOST (primary)..."
+    sshRun $REMOTE_USER $PROXMOX_HOST 'bash /root/setup.sh destroy 2>/dev/null || true'
+    sshRun $REMOTE_USER $PROXMOX_HOST 'rm -f /usr/local/share/ca-certificates/proxmox-lab*.crt && update-ca-certificates 2>/dev/null || true'
+    sshRun $REMOTE_USER $PROXMOX_HOST 'echo "nameserver 1.1.1.1" > /etc/resolv.conf'
+    sshRun $REMOTE_USER $PROXMOX_HOST 'pvenode acme account deactivate default 2>/dev/null || true'
+    sshRun $REMOTE_USER $PROXMOX_HOST 'rm -f /etc/pve/priv/acme/default 2>/dev/null || true'
+  fi
+
+  # 3. Clean local files
+  doing "Cleaning local files..."
+  rm -rf packer/packer-outputs 2>/dev/null || true
+  rm -rf terraform/lxc-step-ca/step-ca 2>/dev/null || true
+  rm -rf terraform/vm-docker-swarm/rendered 2>/dev/null || true
+  rm -rf terraform/vm-kasm/rendered 2>/dev/null || true
+  rm -f hosts.json 2>/dev/null || true
+  rm -f cluster-info.json 2>/dev/null || true
+  rm -f proxmox-lab-root-ca.crt 2>/dev/null || true
+  rm -f kasm_nginx.crt 2>/dev/null || true
+  info "  Standard files cleaned"
+
+  # Optionally clean terraform state (with confirmation)
+  if [ -f "terraform/terraform.tfstate" ] || [ -d "terraform/.terraform" ]; then
+    echo
+    read -rp "$(question "Remove Terraform state files? This cannot be undone. [y/N]: ")" REMOVE_STATE
+    if [[ "$REMOVE_STATE" =~ ^[Yy]$ ]]; then
+      rm -f terraform/terraform.tfstate 2>/dev/null || true
+      rm -f terraform/terraform.tfstate.backup 2>/dev/null || true
+      rm -rf terraform/.terraform 2>/dev/null || true
+      rm -f terraform/.terraform.lock.hcl 2>/dev/null || true
+      info "  Terraform state cleaned"
+    fi
+  fi
+
+  # Optionally clean SSH keys (with confirmation)
+  if [ -d "crypto" ]; then
+    echo
+    read -rp "$(question "Remove SSH keys? You'll need to regenerate them. [y/N]: ")" REMOVE_KEYS
+    if [[ "$REMOVE_KEYS" =~ ^[Yy]$ ]]; then
+      rm -rf crypto/ 2>/dev/null || true
+      info "  SSH keys cleaned"
+    fi
+  fi
+
+  # 4. Verify cleanup
+  echo
+  doing "Verifying cleanup..."
+  local HAS_ORPHANS=false
+
+  if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
+
+    # Check for orphaned VMs
+    local ORPHANED_VMS
+    ORPHANED_VMS=$(sshRun $REMOTE_USER "$PRIMARY_IP" 'qm list 2>/dev/null | grep -E "(docker|kasm|dns|step-ca)" || true')
+    if [ -n "$ORPHANED_VMS" ]; then
+      warn "Orphaned VMs detected:"
+      echo "$ORPHANED_VMS"
+      HAS_ORPHANS=true
+    fi
+
+    # Check for orphaned LXCs
+    local ORPHANED_LXCS
+    ORPHANED_LXCS=$(sshRun $REMOTE_USER "$PRIMARY_IP" 'pct list 2>/dev/null | grep -E "(dns|step-ca)" || true')
+    if [ -n "$ORPHANED_LXCS" ]; then
+      warn "Orphaned LXC containers detected:"
+      echo "$ORPHANED_LXCS"
+      HAS_ORPHANS=true
+    fi
+  fi
+
+  if [ "$HAS_ORPHANS" = false ]; then
+    info "  No orphaned resources detected"
+  fi
+
+  echo
+  success "Lab destruction complete"
 }
 
 function runProxmoxSetupOnAll() {
@@ -2082,13 +2190,11 @@ function showMenu() {
   echo "  1) New installation"
   echo "  2) New installation - skip SSH key gen"
   echo "  3) Deploy services (Terraform)"
-  echo "  4) Deploy Docker Swarm"
-  echo "  5) Build DNS records"
-  echo "  6) Update root certificates"
-  echo "  7) Proxmox post-install (all nodes)"
-  echo "  8) Regenerate CA"
-  echo "  9) Rollback deployment"
-  echo "  10) Destroy lab"
+  echo "  4) Build DNS records"
+  echo "  5) Regenerate CA"
+  echo "  6) Update Proxmox root certificates"
+  echo "  7) Rollback deployment"
+  echo "  8) Destroy lab"
   echo "  0) Exit"
   echo
 }
@@ -2097,19 +2203,17 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-10]: ")" choice
+  read -rp "$(question "Select an option [0-8]: ")" choice
 
   case $choice in
     1) runEverything;;
     2) runEverythingButSSH;;
     3) deployServices;;
-    4) setupDockerSwarm;;
-    5) updateDNSRecords;;
+    4) updateDNSRecords;;
+    5) regenerateCA;;
     6) updateRootCertificates;;
-    7) proxmoxPostInstall;;
-    8) regenerateCA;;
-    9) manualRollback;;
-    10) destroyLab;;
+    7) manualRollback;;
+    8) destroyLab;;
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
   esac

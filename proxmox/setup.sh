@@ -411,6 +411,11 @@ function destroyLab() {
 
   echo "[-] Deleting userdata..."
   find /var/lib/vz/snippets -iname "*.yaml" -delete 2>/dev/null || true
+
+  echo "[-] Removing Hashicorp user and permissions..."
+  pveum user delete hashicorp@pam 2>/dev/null || true
+  pveum role delete HashicorpBuild 2>/dev/null || true
+
   echo -e "[+] Done\n"
 }
 
