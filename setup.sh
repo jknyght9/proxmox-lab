@@ -1659,9 +1659,10 @@ function updateRootCertificates() {
   while IFS=$'\t' read -r name ip <&3; do
     [[ -z "$name" || -z "$ip" ]] && continue
     fqdn="${name}.${DNS_POSTFIX}"
-    acme_map="account=default,domains=${fqdn};${pmfqdn}"
+    # Include IP address as SAN so accessing by IP doesn't show cert warnings
+    acme_map="account=default,domains=${fqdn};${pmfqdn};${ip}"
 
-    info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
+    info "  - $name ($ip) -> $fqdn, ${pmfqdn}, ${ip}"
 
     # Temporarily point proxmox.DOMAIN only to this node for ACME HTTP-01 validation
     # Build complete record set with only this node's proxmox entry
