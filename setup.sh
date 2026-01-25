@@ -1627,6 +1627,28 @@ function updateRootCertificates() {
   doing "Ordering/renewing certs per node (with proxmox.${DNS_POSTFIX} SAN)"
   local pmfqdn="proxmox.${DNS_POSTFIX}"
 
+  # Build base DNS records (without proxmox entries) from hosts.json and cluster-info.json
+  # This avoids reading from pihole-FTL which returns non-JSON format
+  local BASE_RECORDS="[]"
+
+  # Add node records from cluster-info.json (pve01, pve02, pve03 - but not proxmox alias)
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    BASE_RECORDS=$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '[.nodes[] | "\(.ip) \(.name) \(.name).\($suffix)"]' "$CLUSTER_INFO_FILE")
+  fi
+
+  # Add service records from hosts.json
+  if [ -s hosts.json ]; then
+    local SERVICE_RECORDS
+    SERVICE_RECORDS=$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '(.external // []) | map("\(.ip | split("/")[0]) \(.hostname) \(.hostname).\($suffix)")' hosts.json)
+    # Add dns alias
+    local DNS_ALIAS
+    DNS_ALIAS=$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')
+    BASE_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --argjson svc "$SERVICE_RECORDS" --argjson dns "$DNS_ALIAS" \
+      '$base + $svc + $dns | unique')
+  fi
+
   # Build array of all node IPs for round-robin restore later
   local ALL_NODE_IPS=()
   while IFS= read -r node_ip; do
@@ -1642,15 +1664,14 @@ function updateRootCertificates() {
     info "  - $name ($ip) -> $fqdn (+ ${pmfqdn})"
 
     # Temporarily point proxmox.DOMAIN only to this node for ACME HTTP-01 validation
+    # Build complete record set with only this node's proxmox entry
     doing "    Temporarily setting DNS: ${pmfqdn} -> ${ip}"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
-      CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
-      # Remove all proxmox entries and add only this node
-      UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --arg pm \"$pmfqdn\" --arg ip \"$ip\" '
-        map(select(. | contains(\"proxmox\") | not)) + [\"\(\$ip) proxmox \(\$pm)\"]
-      ')
-      pihole-FTL --config dns.hosts \"\$UPDATED_RECORDS\"
-    " || { warn "Failed to update DNS for $name"; continue; }
+    local TEMP_RECORDS
+    TEMP_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --arg ip "$ip" --arg pm "$pmfqdn" \
+      '$base + ["\($ip) proxmox \($pm)"]')
+
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" \
+      "pihole-FTL --config dns.hosts '$TEMP_RECORDS'" || { warn "Failed to update DNS for $name"; continue; }
 
     # Brief pause for DNS propagation
     sleep 2
@@ -1669,20 +1690,17 @@ function updateRootCertificates() {
 
   # Restore round-robin DNS for proxmox.DOMAIN (all nodes)
   doing "Restoring round-robin DNS for ${pmfqdn}"
-  local ROUNDROBIN_ENTRIES=""
+  local ROUNDROBIN_ENTRIES="[]"
   for node_ip in "${ALL_NODE_IPS[@]}"; do
-    ROUNDROBIN_ENTRIES="${ROUNDROBIN_ENTRIES}\"${node_ip} proxmox ${pmfqdn}\","
+    ROUNDROBIN_ENTRIES=$(jq -c -n --argjson arr "$ROUNDROBIN_ENTRIES" --arg ip "$node_ip" --arg pm "$pmfqdn" \
+      '$arr + ["\($ip) proxmox \($pm)"]')
   done
-  ROUNDROBIN_ENTRIES="[${ROUNDROBIN_ENTRIES%,}]"  # Remove trailing comma, wrap in array
 
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
-    CURRENT_RECORDS=\$(pihole-FTL --config dns.hosts)
-    # Remove all proxmox entries and add all nodes for round-robin
-    UPDATED_RECORDS=\$(echo \"\$CURRENT_RECORDS\" | jq -c --argjson rr '$ROUNDROBIN_ENTRIES' '
-      map(select(. | contains(\"proxmox\") | not)) + \$rr
-    ')
-    pihole-FTL --config dns.hosts \"\$UPDATED_RECORDS\"
-  " || warn "Failed to restore round-robin DNS"
+  local FINAL_RECORDS
+  FINAL_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --argjson rr "$ROUNDROBIN_ENTRIES" '$base + $rr')
+
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" \
+    "pihole-FTL --config dns.hosts '$FINAL_RECORDS'" || warn "Failed to restore round-robin DNS"
 
   success "Root CA installed on all nodes; ACME certs issued; round-robin DNS restored."
 }
