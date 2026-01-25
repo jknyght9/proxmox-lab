@@ -1572,9 +1572,13 @@ function updateRootCertificates() {
 
   if [ -s hosts.json ]; then
     CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
   fi
   if [[ -z "$CA_IP" || "$CA_IP" == "null" ]]; then
     read -rp "Enter CA IP address: " CA_IP
+  fi
+  if [[ -z "$DNS_IP" || "$DNS_IP" == "null" ]]; then
+    read -rp "Enter primary DNS server IP (dns-01): " DNS_IP
   fi
 
   local CA_URL="https://$CA_IP/roots.pem"
