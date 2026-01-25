@@ -1600,7 +1600,10 @@ function updateRootCertificates() {
 
   doing "Registering ACME account 'default' against Step CA directory"
   ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$REMOTE_USER@$PROXMOX_HOST" "
-    pvenode acme account register default admin@example.com --directory '$ACME_DIR' || true
+    # Deactivate existing account if present (needed after CA regeneration)
+    pvenode acme account deactivate default 2>/dev/null || true
+    rm -f /etc/pve/priv/acme/default 2>/dev/null || true
+    pvenode acme account register default admin@example.com --directory '$ACME_DIR'
   "
 
   doing "Ordering/renewing certs per node"
@@ -1623,6 +1626,56 @@ function updateRootCertificates() {
   exec 3<&-
 
   success "Root CA installed on all nodes; ACME account configured; certificates ordered per node."
+}
+
+function regenerateCA() {
+  warn "This will DESTROY the existing Certificate Authority and generate new credentials."
+  warn "All existing certificates signed by this CA will become INVALID."
+  echo
+  read -rp "$(question "Are you sure you want to regenerate the CA? [y/N]: ")" CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    info "CA regeneration cancelled"
+    return 0
+  fi
+
+  # Wipe local CA files
+  doing "Wiping local CA files..."
+  rm -rf terraform/lxc-step-ca/step-ca/config
+  rm -rf terraform/lxc-step-ca/step-ca/certs
+  rm -rf terraform/lxc-step-ca/step-ca/secrets
+  mkdir -p terraform/lxc-step-ca/step-ca
+
+  # Regenerate certificates locally
+  doing "Regenerating CA certificates..."
+  docker compose run --rm -e FORCE_REGENERATE=1 step-ca
+  success "CA certificates regenerated locally"
+
+  # Check if step-ca LXC exists and offer to redeploy
+  if [ -f hosts.json ]; then
+    CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    if [ -n "$CA_IP" ] && [ "$CA_IP" != "null" ]; then
+      read -rp "$(question "Redeploy step-ca LXC container with new certificates? [Y/n]: ")" REDEPLOY
+      REDEPLOY=${REDEPLOY:-Y}
+      if [[ "$REDEPLOY" =~ ^[Yy]$ ]]; then
+        doing "Redeploying step-ca LXC container..."
+        docker compose run --rm -it terraform apply \
+          -target=module.step-ca \
+          -replace="module.step-ca.proxmox_lxc.step-ca"
+        success "step-ca LXC redeployed"
+      fi
+    fi
+  fi
+
+  success "CA regeneration complete"
+
+  # Update root certificates on Proxmox nodes
+  read -rp "$(question "Update root certificates on Proxmox nodes now? [Y/n]: ")" UPDATE_CERTS
+  UPDATE_CERTS=${UPDATE_CERTS:-Y}
+  if [[ "$UPDATE_CERTS" =~ ^[Yy]$ ]]; then
+    updateRootCertificates
+  else
+    info "Remember to run 'Update root certificates' to install the new CA on Proxmox nodes"
+  fi
 }
 
 function destroyLab() {
@@ -1955,8 +2008,9 @@ function showMenu() {
   echo "  5) Build DNS records"
   echo "  6) Update root certificates"
   echo "  7) Proxmox post-install (all nodes)"
-  echo "  8) Rollback deployment"
-  echo "  9) Destroy lab"
+  echo "  8) Regenerate CA"
+  echo "  9) Rollback deployment"
+  echo "  10) Destroy lab"
   echo "  0) Exit"
   echo
 }
@@ -1965,7 +2019,7 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-9]: ")" choice
+  read -rp "$(question "Select an option [0-10]: ")" choice
 
   case $choice in
     1) runEverything;;
@@ -1975,8 +2029,9 @@ while true; do
     5) updateDNSRecords;;
     6) updateRootCertificates;;
     7) proxmoxPostInstall;;
-    8) manualRollback;;
-    9) destroyLab;;
+    8) regenerateCA;;
+    9) manualRollback;;
+    10) destroyLab;;
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
   esac
