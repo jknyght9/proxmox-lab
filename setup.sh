@@ -1557,14 +1557,21 @@ function updateDNSRecords() {
 }
 
 function updateRootCertificates() {
+  # Load configuration from cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    PROXMOX_HOST=$(jq -r '.nodes[0].ip // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  # Fallback prompts only if not in cluster-info.json
   if [ -z "${DNS_POSTFIX}" ]; then
     read -rp "Enter your DNS suffix: " DNS_POSTFIX
   fi
 
   if [ -s hosts.json ]; then
-    CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json | cut -d'/' -f1)
+    CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
   fi
-  if [[ -z "$CA_IP" ]]; then
+  if [[ -z "$CA_IP" || "$CA_IP" == "null" ]]; then
     read -rp "Enter CA IP address: " CA_IP
   fi
 
