@@ -1054,18 +1054,16 @@ function refreshHostsJsonFromProxmox() {
   local vm_prefix="${1:-nomad}"
   local vmid_start="${2:-905}"
   local vmid_end="${3:-907}"
+  local max_wait="${4:-120}"  # Max seconds to wait for guest agent
 
   doing "Refreshing hosts.json with actual VM IPs from Proxmox..."
-
-  # Wait for VMs to be fully booted and guest agent ready
-  info "Waiting for VMs to boot and guest agent to be ready..."
-  sleep 15
 
   # Query each Proxmox node for VM IPs
   local updated_hosts=()
   for vmid in $(seq $vmid_start $vmid_end); do
     local vm_name=""
     local vm_ip=""
+    local found_node_ip=""
 
     # Try each node to find the VM
     for node_ip in "${CLUSTER_NODE_IPS[@]}"; do
@@ -1076,27 +1074,36 @@ function refreshHostsJsonFromProxmox() {
 
       if [ -n "$vm_config" ]; then
         vm_name=$(echo "$vm_config" | grep "^name:" | awk '{print $2}')
-
-        # Try to get IP from QEMU guest agent (retry a few times)
-        local retries=5
-        while [ $retries -gt 0 ]; do
-          vm_ip=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
-            "$REMOTE_USER@$node_ip" "qm guest cmd $vmid network-get-interfaces 2>/dev/null | jq -r '.[].\"ip-addresses\"[]? | select(.\"ip-address-type\"==\"ipv4\" and (.\"ip-address\" | startswith(\"10.\"))) | .\"ip-address\"' 2>/dev/null | head -1" || echo "")
-
-          if [ -n "$vm_ip" ]; then
-            break
-          fi
-          ((retries--))
-          sleep 3
-        done
-
-        if [ -n "$vm_name" ] && [ -n "$vm_ip" ]; then
-          info "Found $vm_name ($vmid) on $node_ip: $vm_ip"
-          updated_hosts+=("{\"hostname\":\"$vm_name\",\"ip\":\"$vm_ip\"}")
-        fi
+        found_node_ip="$node_ip"
         break
       fi
     done
+
+    # If VM found, wait for guest agent to be ready
+    if [ -n "$vm_name" ] && [ -n "$found_node_ip" ]; then
+      info "Waiting for QEMU guest agent on $vm_name ($vmid)..."
+      local elapsed=0
+      local interval=5
+
+      while [ $elapsed -lt $max_wait ]; do
+        vm_ip=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+          "$REMOTE_USER@$found_node_ip" "qm guest cmd $vmid network-get-interfaces 2>/dev/null | jq -r '.[].\"ip-addresses\"[]? | select(.\"ip-address-type\"==\"ipv4\" and (.\"ip-address\" | startswith(\"10.\"))) | .\"ip-address\"' 2>/dev/null | head -1" || echo "")
+
+        if [ -n "$vm_ip" ]; then
+          success "Found $vm_name ($vmid): $vm_ip"
+          updated_hosts+=("{\"hostname\":\"$vm_name\",\"ip\":\"$vm_ip\"}")
+          break
+        fi
+
+        printf "  Waiting for guest agent... (%ds/%ds)\r" "$elapsed" "$max_wait"
+        sleep $interval
+        elapsed=$((elapsed + interval))
+      done
+
+      if [ -z "$vm_ip" ]; then
+        warn "Timeout waiting for guest agent on $vm_name ($vmid)"
+      fi
+    fi
   done
 
   # Update hosts.json with the new IPs
@@ -3406,10 +3413,31 @@ EOF
     docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1 || true
   fi
 
-  # Check if docker-template exists
+  # Check if docker-template exists, offer to build if missing
   if ! ensureTemplate 9001 "docker-template"; then
-    error "Kasm requires the docker-template. Run option 3 (Deploy all services) first."
-    return 1
+    echo
+    warn "docker-template (VM 9001) is required but not found."
+    read -rp "$(question "Build docker-template now? [Y/n]: ")" BUILD_TEMPLATE
+    if [[ "$BUILD_TEMPLATE" =~ ^[Nn]$ ]]; then
+      info "Cannot deploy Kasm without docker-template."
+      return 1
+    fi
+
+    # Update Packer config with storage settings
+    updatePackerStorageConfig
+
+    # Build docker template only
+    doing "Building docker-template with Packer..."
+    docker compose build packer >/dev/null 2>&1
+    docker compose run --rm -it packer init .
+    if ! docker compose run --rm -it packer build -only=ubuntu-docker.proxmox-clone.ubuntu-docker .; then
+      error "Packer build failed for docker-template"
+      return 1
+    fi
+    success "docker-template built"
+
+    # Migrate to shared storage if needed
+    migrateTemplateToSharedStorage 9001
   fi
 
   # ============================================

@@ -71,16 +71,17 @@ resource "proxmox_vm_qemu" "kasm" {
     slot        = "scsi0"
     size        = each.value.disk_size
     type        = "disk"
-    storage     = each.value.target_storage
+    storage     = var.vm_storage
   }
 
   disk {
     slot        = "ide2"
     type        = "cloudinit"
-    storage     = each.value.target_storage
+    storage     = var.vm_storage
   }
 
   ciuser        = "labadmin"
+  ipconfig0     = "ip=dhcp"
   sshkeys       = file("/crypto/lab-deploy.pub")
   cicustom      = "user=local:snippets/${each.value.name}-user-data.yml"
 
