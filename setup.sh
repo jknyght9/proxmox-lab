@@ -13,8 +13,6 @@ KEY_NAME="lab-deploy"
 KEY_PATH="$CRYPTO_DIR/$KEY_NAME"
 PUBKEY_PATH="$KEY_PATH.pub"
 REMOTE_USER="root"
-REQUIRED_VMIDS=(903 904 905 906 907 908 909 910 911 912 913 9000 9001 9002 9100 9200)
-DNS_VMIDS=(910 911 912 920 921)
 
 # Cluster-related globals (populated by detectAndSaveCluster or loadClusterInfo)
 CLUSTER_INFO_FILE="cluster-info.json"
@@ -52,7 +50,7 @@ function success()      { echo -e "${C_GREEN}[✓] $*${C_RESET}"; }
 function error()        { echo -e "${C_RED}[X] $*${C_RESET}"; }
 function warn()         { echo -e "${C_YELLOW}[!] $*${C_RESET}"; }
 function question()     { echo -e "  ${C_YELLOW}[?] $*${C_RESET}"; }
-function sshRun()       { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$1@$2" "$3"; }
+function sshRun()       { ssh -i $KEY_PATH -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 "$1@$2" "$3"; }
 function pressAnyKey()  { read -n 1 -s -p "$(question "Press any key to continue")"; echo; }
 
 function rollbackDeployment() {
@@ -66,7 +64,7 @@ function rollbackDeployment() {
       # Phase 3 failed: Destroy VMs only, keep LXC infrastructure
       doing "Rolling back Phase 3: Destroying VMs..."
       docker compose run --rm terraform destroy \
-        -target=module.docker \
+        -target=module.nomad \
         -target=module.kasm \
         -auto-approve 2>/dev/null || true
       warn "VMs destroyed. LXC infrastructure (DNS, step-ca) preserved."
@@ -93,9 +91,9 @@ function rollbackDeployment() {
         -target=module.step-ca \
         -auto-approve 2>/dev/null || true
 
-      # Also clean up any VMIDs that might be orphaned
-      for VMID in "${DNS_VMIDS[@]}" 909; do
-        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" \
+      # Also clean up any LXC VMIDs that might be orphaned (dns + step-ca)
+      for VMID in 902 909 910 911 912 920 921 922; do
+        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
           "pct stop $VMID 2>/dev/null; pct destroy $VMID 2>/dev/null" 2>/dev/null || true
       done
       warn "LXC containers destroyed."
@@ -166,13 +164,13 @@ function checkClusterConnectivity() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     # Test internet connectivity (try to reach a reliable endpoint)
-    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
       "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
       failed_nodes+=("$node ($ip)")
 
       # Get DNS configuration for this node
       local dns_info
-      dns_info=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+      dns_info=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
         "echo 'resolv.conf:'; cat /etc/resolv.conf; echo ''; echo 'pvesh DNS:'; pvesh get /nodes/$node/dns --output-format json 2>/dev/null | jq -r 'to_entries[] | \"  \\(.key): \\(.value)\"'" 2>/dev/null)
       dns_configs+=("=== $node ($ip) ===\n$dns_info")
     else
@@ -265,7 +263,7 @@ function detectAndSaveCluster() {
     # Get current DNS config
     local dns1="" dns2="" search=""
     local dns_json
-    dns_json=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+    dns_json=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
       "pvesh get /nodes/$node/dns --output-format json 2>/dev/null" || echo "{}")
 
     dns1=$(echo "$dns_json" | jq -r '.dns1 // ""')
@@ -274,7 +272,7 @@ function detectAndSaveCluster() {
 
     # Test connectivity
     local connectivity="unknown"
-    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 "$REMOTE_USER@$ip" \
       "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
       connectivity="ok"
       success "  $node ($ip): Connectivity OK, DNS1=$dns1, DNS2=$dns2"
@@ -314,7 +312,7 @@ function detectAndSaveCluster() {
         local ip="${CLUSTER_NODE_IPS[$idx]}"
 
         doing "  Setting DNS on $node..."
-        ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+        ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
           "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
           success "  $node: DNS updated" || warn "  $node: Failed to update DNS"
       done
@@ -366,7 +364,13 @@ function loadClusterInfo() {
     INT_GATEWAY=$(jq -r '.network.labnet.gateway // ""' "$CLUSTER_INFO_FILE")
     DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
     NETWORK_BRIDGE=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
-    TEMPLATE_STORAGE=$(jq -r '.storage.selected // "local-lvm"' "$CLUSTER_INFO_FILE")
+  fi
+
+  # Load storage config if present
+  if jq -e '.storage' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    TEMPLATE_STORAGE=$(jq -r '.storage.selected // ""' "$CLUSTER_INFO_FILE")
+    TEMPLATE_STORAGE_TYPE=$(jq -r '.storage.type // "lvm"' "$CLUSTER_INFO_FILE")
+    USE_SHARED_STORAGE=$(jq -r '.storage.is_shared // false' "$CLUSTER_INFO_FILE")
   fi
 
   success "Loaded ${#CLUSTER_NODES[@]} nodes from cluster info"
@@ -387,9 +391,9 @@ function distributeSSHKeys() {
     fi
 
     doing "  $node ($ip): Installing SSH keys..."
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
+    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
       "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
         || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>/dev/null
     success "  $node ($ip): Keys installed"
@@ -558,12 +562,12 @@ function ensureLXCTemplates() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     # Check if template exists on this node
-    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+    if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
       "test -f /var/lib/vz/template/cache/${TEMPLATE}" 2>/dev/null; then
       info "  $node: Template already exists"
     else
       doing "  $node: Downloading template..."
-      if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+      if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
         "pveam update && pveam download local ${TEMPLATE}" 2>/dev/null; then
         success "  $node: Template downloaded"
       else
@@ -589,12 +593,14 @@ function selectSharedStorage() {
   if [ -f "$CLUSTER_INFO_FILE" ]; then
     local EXISTING_STORAGE
     EXISTING_STORAGE=$(jq -r '.storage.selected // ""' "$CLUSTER_INFO_FILE")
+    TEMPLATE_STORAGE_TYPE=$(jq -r '.storage.type // "lvm"' "$CLUSTER_INFO_FILE")
     if [ -n "$EXISTING_STORAGE" ] && [ "$EXISTING_STORAGE" != "null" ]; then
       TEMPLATE_STORAGE="$EXISTING_STORAGE"
       USE_SHARED_STORAGE=$(jq -r '.storage.is_shared // false' "$CLUSTER_INFO_FILE")
       export TEMPLATE_STORAGE
+      export TEMPLATE_STORAGE_TYPE
       export USE_SHARED_STORAGE
-      success "Using configured storage: $TEMPLATE_STORAGE (shared: $USE_SHARED_STORAGE)"
+      success "Using configured storage: $TEMPLATE_STORAGE ($TEMPLATE_STORAGE_TYPE, shared: $USE_SHARED_STORAGE)"
       return 0
     fi
   fi
@@ -605,54 +611,96 @@ function selectSharedStorage() {
   local STORAGE_JSON
   STORAGE_JSON=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pvesh get /storage --output-format json")
 
-  # Find shared storage (type: rbd, cephfs, nfs, etc.)
-  local SHARED_STORES=()
-  while IFS= read -r store; do
-    [[ -n "$store" ]] && SHARED_STORES+=("$store")
-  done < <(echo "$STORAGE_JSON" | jq -r '.[] | select(.shared == 1 and (.content | contains("images"))) | .storage')
+  # Build arrays of storage info (name, type, shared)
+  local STORAGE_NAMES=()
+  local STORAGE_TYPES=()
+  local STORAGE_SHARED=()
 
-  if [ ${#SHARED_STORES[@]} -gt 0 ]; then
+  # For clusters: only show shared storage that supports VM images
+  # For single-node: show all storage that supports VM images
+  local JQ_FILTER
+  if [ "$IS_CLUSTER" = "true" ]; then
+    JQ_FILTER='.[] | select(.shared == 1 and (.content | contains("images")))'
+  else
+    JQ_FILTER='.[] | select(.content | contains("images"))'
+  fi
+
+  while IFS='|' read -r name type shared; do
+    if [[ -n "$name" ]]; then
+      STORAGE_NAMES+=("$name")
+      STORAGE_TYPES+=("${type:-unknown}")
+      STORAGE_SHARED+=("$shared")
+    fi
+  done < <(echo "$STORAGE_JSON" | jq -r "$JQ_FILTER | \"\(.storage)|\(.type // \"unknown\")|\(.shared // 0)\"")
+
+  if [ ${#STORAGE_NAMES[@]} -gt 0 ]; then
     echo
-    info "Storage Selection"
-    info "Shared storage detected - recommended for clusters"
+    info "Storage Selection for VM Templates"
+    if [ "$IS_CLUSTER" = "true" ]; then
+      info "Multi-node cluster detected - showing shared storage only"
+    fi
     echo
-    info "Available shared storage:"
-    for i in "${!SHARED_STORES[@]}"; do
-      echo "    $((i + 1)). ${SHARED_STORES[$i]} (shared)"
+    info "Available storage:"
+    for i in "${!STORAGE_NAMES[@]}"; do
+      local shared_label=""
+      if [ "${STORAGE_SHARED[$i]}" = "1" ]; then
+        shared_label="[shared]"
+      else
+        shared_label="[local]"
+      fi
+      echo "    $((i + 1)). ${STORAGE_NAMES[$i]} (${STORAGE_TYPES[$i]}) $shared_label"
     done
-    echo "    $((${#SHARED_STORES[@]} + 1)). local-lvm (per-node)"
     echo
 
-    local DEFAULT_STORE="${SHARED_STORES[0]}"
-    read -rp "$(question "Select storage [$DEFAULT_STORE]: ")" STORAGE_CHOICE
-    STORAGE_CHOICE=${STORAGE_CHOICE:-$DEFAULT_STORE}
+    local DEFAULT_STORE="${STORAGE_NAMES[0]}"
+    read -rp "$(question "Select storage [1]: ")" STORAGE_CHOICE
+    STORAGE_CHOICE=${STORAGE_CHOICE:-1}
 
     # Check if user entered a number or a name
     if [[ "$STORAGE_CHOICE" =~ ^[0-9]+$ ]]; then
-      if [ "$STORAGE_CHOICE" -le "${#SHARED_STORES[@]}" ] && [ "$STORAGE_CHOICE" -ge 1 ]; then
-        TEMPLATE_STORAGE="${SHARED_STORES[$((STORAGE_CHOICE - 1))]}"
-        USE_SHARED_STORAGE=true
+      local idx=$((STORAGE_CHOICE - 1))
+      if [ "$idx" -ge 0 ] && [ "$idx" -lt "${#STORAGE_NAMES[@]}" ]; then
+        TEMPLATE_STORAGE="${STORAGE_NAMES[$idx]}"
+        TEMPLATE_STORAGE_TYPE="${STORAGE_TYPES[$idx]}"
+        USE_SHARED_STORAGE=$([ "${STORAGE_SHARED[$idx]}" = "1" ] && echo true || echo false)
       else
-        TEMPLATE_STORAGE="local-lvm"
-        USE_SHARED_STORAGE=false
+        error "Invalid selection"
+        return 1
       fi
-    elif [ "$STORAGE_CHOICE" = "local-lvm" ]; then
-      TEMPLATE_STORAGE="local-lvm"
-      USE_SHARED_STORAGE=false
     else
-      # Assume they typed the storage name
-      TEMPLATE_STORAGE="$STORAGE_CHOICE"
-      USE_SHARED_STORAGE=true
+      # Assume they typed the storage name - look it up
+      local found=false
+      for i in "${!STORAGE_NAMES[@]}"; do
+        if [ "${STORAGE_NAMES[$i]}" = "$STORAGE_CHOICE" ]; then
+          TEMPLATE_STORAGE="${STORAGE_NAMES[$i]}"
+          TEMPLATE_STORAGE_TYPE="${STORAGE_TYPES[$i]}"
+          USE_SHARED_STORAGE=$([ "${STORAGE_SHARED[$i]}" = "1" ] && echo true || echo false)
+          found=true
+          break
+        fi
+      done
+      if [ "$found" = false ]; then
+        error "Storage '$STORAGE_CHOICE' not found"
+        return 1
+      fi
     fi
   else
-    warn "No shared storage found. Using local-lvm (templates must exist on each node)"
-    TEMPLATE_STORAGE="local-lvm"
-    USE_SHARED_STORAGE=false
+    if [ "$IS_CLUSTER" = "true" ]; then
+      error "No shared storage found! Multi-node clusters require shared storage (NFS, Ceph, etc.)"
+      error "Please configure shared storage in Proxmox before continuing."
+      return 1
+    else
+      warn "No VM-compatible storage found. Using local-lvm"
+      TEMPLATE_STORAGE="local-lvm"
+      TEMPLATE_STORAGE_TYPE="lvm"
+      USE_SHARED_STORAGE=false
+    fi
   fi
 
   export TEMPLATE_STORAGE
+  export TEMPLATE_STORAGE_TYPE
   export USE_SHARED_STORAGE
-  success "Using storage: $TEMPLATE_STORAGE (shared: $USE_SHARED_STORAGE)"
+  success "Using storage: $TEMPLATE_STORAGE ($TEMPLATE_STORAGE_TYPE, shared: $USE_SHARED_STORAGE)"
 }
 
 function selectNetworkBridge() {
@@ -682,7 +730,7 @@ function selectNetworkBridge() {
     local NODE_BRIDGES=()
     while IFS= read -r bridge; do
       [[ -n "$bridge" ]] && NODE_BRIDGES+=("$bridge")
-    done < <(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+    done < <(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
       "pvesh get /nodes/$node/network --output-format json 2>/dev/null" | \
       jq -r '.[] | select(.type == "bridge") | .iface' 2>/dev/null)
 
@@ -741,24 +789,598 @@ function selectNetworkBridge() {
   success "Using network bridge: $NETWORK_BRIDGE"
 }
 
-function cleanupDNSVMIDs() {
-  doing "Checking for existing DNS VMIDs that need cleanup..."
-  local cleaned=0
+# ============================================
+# Deployment Helper Functions
+# ============================================
 
-  for VMID in "${DNS_VMIDS[@]}"; do
-    # Check if LXC container exists
-    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct status $VMID" &>/dev/null; then
-      warn "VMID $VMID exists, destroying for clean deployment"
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct stop $VMID 2>/dev/null || true; pct destroy $VMID 2>/dev/null || true"
-      ((cleaned++))
+# Ensures cluster context is loaded (cluster-info.json, PROXMOX_HOST set)
+function ensureClusterContext() {
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    loadClusterInfo
+    if [ -z "$PROXMOX_HOST" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+      PROXMOX_HOST="${CLUSTER_NODE_IPS[0]}"
+    fi
+    return 0
+  else
+    error "No cluster-info.json found. Run full deployment first."
+    return 1
+  fi
+}
+
+# Ensures shared storage is selected for multi-node clusters
+function ensureSharedStorage() {
+  if [ -z "$TEMPLATE_STORAGE" ]; then
+    selectSharedStorage || return 1
+  fi
+
+  # For clusters, verify shared storage is selected
+  if [ "$IS_CLUSTER" = "true" ] && [ "$USE_SHARED_STORAGE" != "true" ]; then
+    warn "Multi-node cluster requires shared storage. Current: $TEMPLATE_STORAGE (local)"
+    warn "You need to select shared storage (NFS, Ceph, etc.)"
+    echo
+
+    # Clear existing storage config to force re-selection
+    TEMPLATE_STORAGE=""
+    TEMPLATE_STORAGE_TYPE=""
+    USE_SHARED_STORAGE=""
+
+    # Remove storage from cluster-info.json to allow re-selection
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      local tmp_file=$(mktemp)
+      jq 'del(.storage)' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+    fi
+
+    # Now run storage selection (won't skip because we cleared it)
+    selectSharedStorage || return 1
+
+    # Save the new storage config
+    local tmp_file=$(mktemp)
+    jq --arg storage "$TEMPLATE_STORAGE" \
+       --arg storage_type "${TEMPLATE_STORAGE_TYPE:-lvm}" \
+       --argjson shared "$USE_SHARED_STORAGE" \
+       '. + { storage: { selected: $storage, type: $storage_type, is_shared: $shared } }' \
+       "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+  fi
+
+  info "Using storage: $TEMPLATE_STORAGE ($TEMPLATE_STORAGE_TYPE)"
+}
+
+# Verifies DNS and CA are deployed and accessible
+function ensureCriticalServices() {
+  if [ ! -f "hosts.json" ]; then
+    error "hosts.json not found. Deploy critical services first (option 4)."
+    return 1
+  fi
+
+  local DNS_IP CA_IP
+  DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+
+  if [ -z "$DNS_IP" ] || [ "$DNS_IP" = "null" ]; then
+    error "DNS not deployed. Run option 4 (Deploy critical services) first."
+    return 1
+  fi
+
+  if [ -z "$CA_IP" ] || [ "$CA_IP" = "null" ]; then
+    error "CA not deployed. Run option 4 (Deploy critical services) first."
+    return 1
+  fi
+
+  doing "Verifying critical services..."
+  success "DNS ($DNS_IP) and CA ($CA_IP) found"
+  return 0
+}
+
+# Verifies a Packer template exists
+# Parameters: vmid, template_name
+function ensureTemplate() {
+  local vmid="$1"
+  local template_name="$2"
+
+  doing "Checking for $template_name (VM $vmid)..."
+  if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+       "$REMOTE_USER@$PROXMOX_HOST" "qm config $vmid" &>/dev/null; then
+    error "$template_name (VM $vmid) not found!"
+    return 1
+  fi
+  success "$template_name found"
+  return 0
+}
+
+# Updates Packer config with current storage settings
+function updatePackerStorageConfig() {
+  local config="packer/packer.auto.pkrvars.hcl"
+  if [ -f "$config" ]; then
+    doing "Updating Packer storage config..."
+    grep -v "^template_storage" "$config" > "${config}.tmp" || true
+    mv "${config}.tmp" "$config"
+    echo "template_storage = \"$TEMPLATE_STORAGE\"" >> "$config"
+    echo "template_storage_type = \"$TEMPLATE_STORAGE_TYPE\"" >> "$config"
+    success "Packer config updated: storage=$TEMPLATE_STORAGE, type=$TEMPLATE_STORAGE_TYPE"
+  else
+    warn "Packer config not found at $config"
+  fi
+}
+
+# Migrates a template disk to the appropriate storage based on deployment type
+# Parameters: vmid
+# NOTE: Packer proxmox-clone builder does NOT support specifying target storage for cloned disks.
+#       Adding a "disks" block in Packer ADDS a new disk instead of configuring the cloned disk.
+#       This function must be called AFTER Packer build to move the disk to the correct storage.
+#       - For clusters: moves to selected shared storage (TEMPLATE_STORAGE)
+#       - For single-node: moves to local-lvm
+function migrateTemplateToSharedStorage() {
+  local vmid="$1"
+
+  # Determine target storage based on deployment type
+  local target_storage
+  if [ "$IS_CLUSTER" = "true" ] && [ "$USE_SHARED_STORAGE" = "true" ]; then
+    target_storage="$TEMPLATE_STORAGE"
+  else
+    target_storage="local-lvm"
+  fi
+
+  doing "Checking template $vmid disk location..."
+
+  # Get current disk storage (format: "storage:volume,options")
+  local disk_line
+  disk_line=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+    "qm config $vmid 2>/dev/null | grep -E '^scsi0:'" || echo "")
+
+  if [ -z "$disk_line" ]; then
+    warn "Template $vmid not found or has no scsi0 disk, skipping migration"
+    return 0
+  fi
+
+  # Extract storage name (everything after "scsi0: " and before ":")
+  local current_storage
+  current_storage=$(echo "$disk_line" | sed 's/^scsi0: *//' | cut -d: -f1)
+
+  info "Current disk storage: $current_storage"
+  info "Target storage: $target_storage"
+
+  if [ "$current_storage" = "$target_storage" ]; then
+    success "Template $vmid disk already on $target_storage"
+    return 0
+  fi
+
+  doing "Moving template $vmid disk from $current_storage to $target_storage..."
+
+  # Move the disk to target storage (--delete 1 removes the source after copy)
+  local move_output
+  move_output=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+    "qm move_disk $vmid scsi0 $target_storage --delete 1 2>&1")
+  local move_result=$?
+
+  if [ $move_result -eq 0 ]; then
+    success "Template $vmid disk migrated to $target_storage"
+
+    # Verify the move succeeded
+    local new_disk_line
+    new_disk_line=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+      "qm config $vmid 2>/dev/null | grep -E '^scsi0:'" || echo "")
+    local new_storage
+    new_storage=$(echo "$new_disk_line" | sed 's/^scsi0: *//' | cut -d: -f1)
+
+    if [ "$new_storage" = "$target_storage" ]; then
+      success "Verified: disk is now on $target_storage"
+    else
+      warn "Verification failed: disk appears to still be on $new_storage"
+    fi
+  else
+    error "Failed to migrate template $vmid disk to $target_storage"
+    error "Output: $move_output"
+    return 1
+  fi
+  return 0
+}
+
+# Removes an existing template VM if it exists
+# Parameters: vmid, template_name
+function removeTemplateIfExists() {
+  local vmid="$1"
+  local template_name="${2:-template}"
+
+  doing "Checking for existing $template_name (VM $vmid)..."
+  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+    "qm config $vmid" &>/dev/null; then
+    warn "$template_name (VM $vmid) already exists, removing..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+      "qm destroy $vmid --purge" || true
+    success "Existing template removed"
+  fi
+}
+
+# Generic function for deploying Nomad jobs
+# Parameters: job_name, job_file, [storage_path]
+function deployNomadJob() {
+  local job_name="$1"
+  local job_file="$2"
+  local storage_path="${3:-}"
+  local VM_USER="labadmin"
+
+  ensureClusterContext || return 1
+
+  # Get first Nomad node IP from hosts.json
+  local NOMAD_IP
+  NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+
+  if [ -z "$NOMAD_IP" ] || [ "$NOMAD_IP" = "null" ]; then
+    error "No Nomad nodes found in hosts.json. Deploy Nomad first (option 5)."
+    return 1
+  fi
+
+  if [ ! -f "$job_file" ]; then
+    error "Job file not found: $job_file"
+    return 1
+  fi
+
+  doing "Deploying $job_name to Nomad cluster..."
+
+  # Create storage directory if specified
+  if [ -n "$storage_path" ]; then
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$VM_USER@$NOMAD_IP" \
+      "sudo mkdir -p $storage_path" || true
+  fi
+
+  # Render template with environment variables
+  export DNS_POSTFIX
+  envsubst '${DNS_POSTFIX}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
+
+  # Copy to Nomad node
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER@$NOMAD_IP:/tmp/${job_name}.nomad.hcl"
+
+  # Run the job
+  if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$VM_USER@$NOMAD_IP" \
+    "nomad job run /tmp/${job_name}.nomad.hcl"; then
+    error "Failed to deploy $job_name"
+    return 1
+  fi
+
+  # Wait for deployment and show status
+  doing "Waiting for $job_name deployment..."
+  sleep 5
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$VM_USER@$NOMAD_IP" \
+    "nomad job status $job_name | head -25"
+
+  success "$job_name deployed successfully!"
+  return 0
+}
+
+# Refreshes hosts.json with actual VM IPs from Proxmox QEMU guest agent
+# This resolves DHCP IP mismatches after VM deployment
+function refreshHostsJsonFromProxmox() {
+  local vm_prefix="${1:-nomad}"
+  local vmid_start="${2:-905}"
+  local vmid_end="${3:-907}"
+
+  doing "Refreshing hosts.json with actual VM IPs from Proxmox..."
+
+  # Wait for VMs to be fully booted and guest agent ready
+  info "Waiting for VMs to boot and guest agent to be ready..."
+  sleep 15
+
+  # Query each Proxmox node for VM IPs
+  local updated_hosts=()
+  for vmid in $(seq $vmid_start $vmid_end); do
+    local vm_name=""
+    local vm_ip=""
+
+    # Try each node to find the VM
+    for node_ip in "${CLUSTER_NODE_IPS[@]}"; do
+      # Check if VM exists on this node
+      local vm_config
+      vm_config=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+        "$REMOTE_USER@$node_ip" "qm config $vmid 2>/dev/null" || echo "")
+
+      if [ -n "$vm_config" ]; then
+        vm_name=$(echo "$vm_config" | grep "^name:" | awk '{print $2}')
+
+        # Try to get IP from QEMU guest agent (retry a few times)
+        local retries=5
+        while [ $retries -gt 0 ]; do
+          vm_ip=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+            "$REMOTE_USER@$node_ip" "qm guest cmd $vmid network-get-interfaces 2>/dev/null | jq -r '.[].\"ip-addresses\"[]? | select(.\"ip-address-type\"==\"ipv4\" and (.\"ip-address\" | startswith(\"10.\"))) | .\"ip-address\"' 2>/dev/null | head -1" || echo "")
+
+          if [ -n "$vm_ip" ]; then
+            break
+          fi
+          ((retries--))
+          sleep 3
+        done
+
+        if [ -n "$vm_name" ] && [ -n "$vm_ip" ]; then
+          info "Found $vm_name ($vmid) on $node_ip: $vm_ip"
+          updated_hosts+=("{\"hostname\":\"$vm_name\",\"ip\":\"$vm_ip\"}")
+        fi
+        break
+      fi
+    done
+  done
+
+  # Update hosts.json with the new IPs
+  if [ ${#updated_hosts[@]} -gt 0 ]; then
+    # Read existing hosts.json
+    local existing_external
+    existing_external=$(jq -c '[.external[] | select(.hostname | startswith("'$vm_prefix'") | not)]' hosts.json 2>/dev/null || echo "[]")
+
+    local existing_internal
+    existing_internal=$(jq -c '.internal // []' hosts.json 2>/dev/null || echo "[]")
+
+    # Combine existing non-VM hosts with new VM hosts
+    local new_hosts_json
+    new_hosts_json=$(printf '%s\n' "${updated_hosts[@]}" | jq -s '.')
+
+    # Merge and write back
+    jq -n --argjson existing "$existing_external" \
+          --argjson new "$new_hosts_json" \
+          --argjson internal "$existing_internal" \
+          '{external: ($existing + $new), internal: $internal}' > hosts.json
+
+    success "hosts.json updated with actual VM IPs"
+    jq -r '.external[] | select(.hostname | startswith("'$vm_prefix'")) | "  - \(.hostname): \(.ip)"' hosts.json
+  else
+    warn "No VM IPs found via guest agent. hosts.json not updated."
+    return 1
+  fi
+}
+
+# ============================================
+# End Deployment Helper Functions
+# ============================================
+
+# Comprehensive cluster-wide resource purge
+# Scans all Proxmox nodes for project VMs/LXCs and offers to destroy them
+function purgeClusterResources() {
+  local AUTO_PURGE=false
+  local PURGE_TERRAFORM=true
+  local LXC_ONLY=false
+  local INCLUDE_TEMPLATES=false
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --auto) AUTO_PURGE=true; shift ;;
+      --no-terraform) PURGE_TERRAFORM=false; shift ;;
+      --lxc-only) LXC_ONLY=true; shift ;;
+      --include-templates) INCLUDE_TEMPLATES=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  doing "Scanning all cluster nodes for existing project resources..."
+
+  # Ensure cluster info is loaded
+  if [ ${#CLUSTER_NODE_IPS[@]} -eq 0 ]; then
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      loadClusterInfo
+    else
+      error "No cluster information available. Run setup first."
+      return 1
+    fi
+  fi
+
+  # Define project VMID ranges
+  # LXC containers
+  local LXC_VMIDS=(
+    902         # step-ca (legacy)
+    909         # step-ca
+    910 911 912 # dns-main (dns-01, dns-02, dns-03)
+    920 921 922 # dns-labnet (labnet-dns-01, labnet-dns-02, labnet-dns-03)
+  )
+
+  # QEMU VMs (excluding Packer templates - handled separately)
+  local VM_VMIDS=(
+    903 904           # docker-swarm managers
+    905 906 907       # nomad cluster
+    908 930           # kasm
+  )
+
+  # Packer templates (separate so user can choose)
+  local TEMPLATE_VMIDS=(
+    9001              # docker-template
+    9002              # nomad-template
+  )
+
+  # Collect findings
+  local FOUND_LXC=()
+  local FOUND_VM=()
+  local FOUND_TEMPLATES=()
+  local FOUND_NODES=()
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    info "  Scanning $node ($ip)..."
+
+    # Check LXC containers
+    for vmid in "${LXC_VMIDS[@]}"; do
+      if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+         "$REMOTE_USER@$ip" "pct status $vmid" &>/dev/null 2>&1; then
+        local name
+        name=$(ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+               "$REMOTE_USER@$ip" "pct config $vmid 2>/dev/null | grep -oP 'hostname: \K.*'" 2>/dev/null || echo "unknown")
+        FOUND_LXC+=("$vmid|$node|$ip|$name")
+      fi
+    done
+
+    # Check QEMU VMs (skip if --lxc-only)
+    if [ "$LXC_ONLY" != "true" ]; then
+      for vmid in "${VM_VMIDS[@]}"; do
+        if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+           "$REMOTE_USER@$ip" "qm status $vmid" &>/dev/null 2>&1; then
+          local name
+          name=$(ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+                 "$REMOTE_USER@$ip" "qm config $vmid 2>/dev/null | grep -oP 'name: \K.*'" 2>/dev/null || echo "unknown")
+          FOUND_VM+=("$vmid|$node|$ip|$name")
+        fi
+      done
+
+      # Check Packer templates (only add if not already found - shared storage means one copy)
+      for vmid in "${TEMPLATE_VMIDS[@]}"; do
+        # Skip if we already found this template on another node
+        local already_found=false
+        if [ ${#FOUND_TEMPLATES[@]} -gt 0 ]; then
+          for entry in "${FOUND_TEMPLATES[@]}"; do
+            [[ "$entry" == "$vmid|"* ]] && already_found=true && break
+          done
+        fi
+        [ "$already_found" = true ] && continue
+
+        if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+           "$REMOTE_USER@$ip" "qm status $vmid" &>/dev/null 2>&1; then
+          local name
+          name=$(ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+                 "$REMOTE_USER@$ip" "qm config $vmid 2>/dev/null | grep -oP 'name: \K.*'" 2>/dev/null || echo "unknown")
+          FOUND_TEMPLATES+=("$vmid|$node|$ip|$name")
+        fi
+      done
     fi
   done
 
-  if [ $cleaned -gt 0 ]; then
-    success "Cleaned up $cleaned existing DNS container(s)"
-  else
-    info "No existing DNS containers found"
+  # Report findings
+  local total_found=$(( ${#FOUND_LXC[@]} + ${#FOUND_VM[@]} ))
+  local total_with_templates=$(( total_found + ${#FOUND_TEMPLATES[@]} ))
+
+  if [ $total_with_templates -eq 0 ]; then
+    success "No existing project resources found on cluster"
+    return 0
   fi
+
+  echo
+  warn "Found $total_with_templates existing project resource(s):"
+  echo
+
+  if [ ${#FOUND_LXC[@]} -gt 0 ]; then
+    echo "  LXC Containers:"
+    printf "  %-8s %-12s %-15s %s\n" "VMID" "Node" "IP" "Hostname"
+    printf "  %-8s %-12s %-15s %s\n" "----" "----" "--" "--------"
+    for entry in "${FOUND_LXC[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      printf "  %-8s %-12s %-15s %s\n" "$vmid" "$node" "$ip" "$name"
+    done
+    echo
+  fi
+
+  if [ ${#FOUND_VM[@]} -gt 0 ]; then
+    echo "  QEMU VMs:"
+    printf "  %-8s %-12s %-15s %s\n" "VMID" "Node" "IP" "Name"
+    printf "  %-8s %-12s %-15s %s\n" "----" "----" "--" "----"
+    for entry in "${FOUND_VM[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      printf "  %-8s %-12s %-15s %s\n" "$vmid" "$node" "$ip" "$name"
+    done
+    echo
+  fi
+
+  if [ ${#FOUND_TEMPLATES[@]} -gt 0 ]; then
+    echo "  Packer Templates:"
+    printf "  %-8s %-12s %-15s %s\n" "VMID" "Node" "IP" "Name"
+    printf "  %-8s %-12s %-15s %s\n" "----" "----" "--" "----"
+    for entry in "${FOUND_TEMPLATES[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      printf "  %-8s %-12s %-15s %s\n" "$vmid" "$node" "$ip" "$name"
+    done
+    echo
+  fi
+
+  # Confirm purge of LXC/VMs
+  local do_purge=false
+  if [ "$AUTO_PURGE" = true ]; then
+    do_purge=true
+  else
+    if [ $total_found -gt 0 ]; then
+      read -rp "$(question "Destroy LXC containers and VMs? [y/N]: ")" confirm
+      [[ "$confirm" =~ ^[Yy]$ ]] && do_purge=true
+    fi
+  fi
+
+  # Prompt for template removal (separate decision)
+  local do_purge_templates=false
+  if [ ${#FOUND_TEMPLATES[@]} -gt 0 ]; then
+    if [ "$INCLUDE_TEMPLATES" = true ]; then
+      do_purge_templates=true
+    elif [ "$AUTO_PURGE" != true ]; then
+      read -rp "$(question "Also remove Packer templates (9001, 9002)? These take time to rebuild. [y/N]: ")" confirm_templates
+      [[ "$confirm_templates" =~ ^[Yy]$ ]] && do_purge_templates=true
+    fi
+  fi
+
+  if [ "$do_purge" = false ] && [ "$do_purge_templates" = false ]; then
+    warn "Skipping purge. Existing resources may cause deployment conflicts."
+    return 1
+  fi
+
+  # Purge LXC containers
+  if [ "$do_purge" = true ] && [ ${#FOUND_LXC[@]} -gt 0 ]; then
+    doing "Destroying LXC containers..."
+    for entry in "${FOUND_LXC[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      info "  Destroying LXC $vmid ($name) on $node..."
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        "$REMOTE_USER@$ip" "pct stop $vmid 2>/dev/null || true; pct destroy $vmid --purge 2>/dev/null || pct destroy $vmid 2>/dev/null || true"
+    done
+  fi
+
+  # Purge QEMU VMs
+  if [ "$do_purge" = true ] && [ ${#FOUND_VM[@]} -gt 0 ]; then
+    doing "Destroying QEMU VMs..."
+    for entry in "${FOUND_VM[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      info "  Destroying VM $vmid ($name) on $node..."
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        "$REMOTE_USER@$ip" "qm stop $vmid 2>/dev/null || true; qm destroy $vmid --purge 2>/dev/null || qm destroy $vmid 2>/dev/null || true"
+    done
+  fi
+
+  # Purge Packer templates
+  if [ "$do_purge_templates" = true ] && [ ${#FOUND_TEMPLATES[@]} -gt 0 ]; then
+    doing "Destroying Packer templates..."
+    for entry in "${FOUND_TEMPLATES[@]}"; do
+      IFS='|' read -r vmid node ip name <<< "$entry"
+      info "  Destroying template $vmid ($name) on $node..."
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        "$REMOTE_USER@$ip" "qm stop $vmid 2>/dev/null || true; qm destroy $vmid --purge 2>/dev/null || qm destroy $vmid 2>/dev/null || true"
+    done
+  fi
+
+  # Clean Terraform state
+  if [ "$PURGE_TERRAFORM" = true ] && [ "$do_purge" = true ]; then
+    doing "Cleaning Terraform state..."
+    (
+      cd terraform
+      # Remove all tracked resources from state
+      docker compose run --rm terraform state list 2>/dev/null | while read -r resource; do
+        docker compose run --rm terraform state rm "$resource" 2>/dev/null || true
+      done
+    ) 2>/dev/null || true
+    info "  Terraform state cleared"
+  fi
+
+  # Clear hosts.json entries for destroyed resources
+  if [ "$do_purge" = true ] && [ -f "hosts.json" ]; then
+    doing "Cleaning hosts.json..."
+    # Keep only entries that weren't destroyed
+    local tmp_hosts
+    tmp_hosts=$(mktemp)
+    jq '{
+      external: [.external[] | select(.hostname | test("^(dns-|nomad|docker|kasm|step-ca)") | not)],
+      internal: [.internal[] | select(.hostname | test("^(labnet-dns-)") | not)]
+    }' hosts.json > "$tmp_hosts" 2>/dev/null && mv "$tmp_hosts" hosts.json || rm -f "$tmp_hosts"
+  fi
+
+  # Report what was purged
+  local purged_count=0
+  [ "$do_purge" = true ] && purged_count=$total_found
+  [ "$do_purge_templates" = true ] && purged_count=$((purged_count + ${#FOUND_TEMPLATES[@]}))
+
+  if [ $purged_count -gt 0 ]; then
+    success "Purged $purged_count resource(s) from cluster"
+    [ "$do_purge_templates" = true ] && info "  (including Packer templates)"
+  fi
+  echo
 }
 
 function checkRequirements() {
@@ -843,7 +1465,7 @@ function checkProxmox() {
   fi
 
   doing "Testing SSH connection to $REMOTE_USER@$PROXMOX_HOST..."
-  if ! sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$REMOTE_USER@$PROXMOX_HOST" "echo SSH connection successful" >/dev/null 2>&1; then
+  if ! sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 "$REMOTE_USER@$PROXMOX_HOST" "echo SSH connection successful" >/dev/null 2>&1; then
     error "SSH connection failed. Check password or network."
     exit 1
   fi
@@ -891,7 +1513,7 @@ function proxmoxPostInstall() {
       local ip="${CLUSTER_NODE_IPS[$i]}"
 
       doing "Running Proxmox VE Post-Install Script on $node ($ip)..."
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$ip" \
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$ip" \
         'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"' \
         && success "Completed post-installation on $node" \
         || warn "Post-installation may have failed on $node"
@@ -905,9 +1527,9 @@ function proxmoxPostInstall() {
 
 function proxmoxLabInstall() {
   doing "Running Proxmox VE Lab Install Script..."
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ./proxmox/setup.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ./proxmox/setup.sh "$REMOTE_USER@$PROXMOX_HOST":/root/
   #sshRun $REMOTE_USER $PROXMOX_HOST 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
   success "Completed the lab installation script on $PROXMOX_HOST\n"
 }
 
@@ -921,17 +1543,23 @@ function generateCertificates() {
   success "Certificate generation complete.\n"
 }
 
-function deployServices() {
+function deployAllServices() {
   cat <<EOF
 
 ############################################################################
-Services Deployment
+Full Services Deployment
 
-Deploying critical services: Pi-hole DNS with Unbound (DNS-over-TLS),
-Certificate Authority (Step-CA), Kasm, and Docker Swarm cluster.
+Deploying all services: Pi-hole DNS with Unbound (DNS-over-TLS),
+Certificate Authority (Step-CA), Nomad cluster, and Kasm Workspaces.
 #############################################################################
 
 EOF
+
+  # Check for and purge existing resources before deployment
+  if ! purgeClusterResources; then
+    read -rp "$(question "Continue deployment anyway? Resources may conflict. [y/N]: ")" confirm
+    [[ ! "$confirm" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
+  fi
 
   # Load configuration from cluster-info.json if not already loaded
   if [ -z "$DNS_POSTFIX" ] && [ -f "$CLUSTER_INFO_FILE" ]; then
@@ -947,7 +1575,286 @@ EOF
     done
   fi
 
-  # Prompt for Pi-hole password (required, no default)
+  # Check if DNS is already deployed (skip password prompt if so)
+  local DNS_ALREADY_DEPLOYED=false
+  if [ -f "hosts.json" ]; then
+    local DNS_IP
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    if [ -n "$DNS_IP" ] && [ "$DNS_IP" != "null" ]; then
+      DNS_ALREADY_DEPLOYED=true
+      info "DNS already deployed at $DNS_IP"
+    fi
+  fi
+
+  # Only prompt for Pi-hole password if DNS is not already deployed
+  if [ "$DNS_ALREADY_DEPLOYED" = "false" ]; then
+    while true; do
+      read -rsp "$(question "Enter Pi-hole admin password: ")" PIHOLE_PASSWORD
+      echo ""
+      if [ -z "$PIHOLE_PASSWORD" ]; then
+        warn "Password cannot be empty"
+        continue
+      fi
+      read -rsp "$(question "Confirm Pi-hole admin password: ")" PIHOLE_PASSWORD_CONFIRM
+      echo ""
+      if [ "$PIHOLE_PASSWORD" != "$PIHOLE_PASSWORD_CONFIRM" ]; then
+        warn "Passwords do not match"
+        continue
+      fi
+      break
+    done
+
+    # Display configuration summary
+    cat <<EOF
+
+======================================
+Deployment Configuration:
+--------------------------------------
+DNS suffix:               $DNS_POSTFIX
+Pi-hole admin pass:       $PIHOLE_PASSWORD
+======================================
+
+EOF
+
+    read -rp "$(question "Proceed with deployment? [Y/n]: ")" CONFIRM
+    CONFIRM=${CONFIRM:-Y}
+    [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
+  else
+    # DNS exists, use existing password from terraform.tfvars
+    if [ -f "terraform/terraform.tfvars" ]; then
+      PIHOLE_PASSWORD=$(grep "^pihole_admin_password" terraform/terraform.tfvars | cut -d'"' -f2)
+    fi
+    info "Using existing DNS deployment, skipping password prompt"
+  fi
+
+  # Load cluster info if not already loaded
+  if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      loadClusterInfo
+    else
+      detectClusterNodes
+    fi
+  fi
+
+  # Skip LXC deployment if DNS and CA already exist
+  if [ "$DNS_ALREADY_DEPLOYED" = "true" ]; then
+    info "Skipping LXC deployment - DNS and CA already deployed"
+    info "Proceeding directly to Packer/VM phases..."
+    DEPLOY_PHASE=1
+  else
+    # Update the step-ca installation script with DNS postfix
+    if sed --version >/dev/null 2>&1; then
+        sed -i "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
+    else
+        sed -i '' "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
+    fi
+    success "Step-CA installation script updated"
+
+    # Generate certificates
+    generateCertificates
+
+    # Verify all nodes can reach the internet before proceeding
+    if ! checkClusterConnectivity; then
+      error "Cannot proceed without internet connectivity on all nodes."
+      return 1
+    fi
+
+    # Ensure LXC templates are available on all nodes
+    if ! ensureLXCTemplates; then
+      error "Cannot proceed without LXC templates on all nodes."
+      return 1
+    fi
+
+    # ============================================
+    # PHASE 1: Deploy LXC Containers (DNS, step-ca)
+    # ============================================
+    cat <<EOF
+
+#############################################################################
+LXC Container Deployment
+
+Deploying critical infrastructure: DNS servers and Certificate Authority.
+These must be operational before building VM templates.
+#############################################################################
+EOF
+    pressAnyKey
+
+    doing "Deploying LXC containers (DNS, step-ca)..."
+    docker compose build terraform >/dev/null 2>&1
+    docker compose run --rm -it terraform init
+
+    if ! docker compose run --rm -it terraform apply \
+      -target=module.dns-main \
+      -target=module.dns-labnet \
+      -target=module.step-ca; then
+      error "Phase 1 failed: LXC container deployment"
+      DEPLOY_PHASE=1
+      read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+      DO_ROLLBACK=${DO_ROLLBACK:-Y}
+      if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+        rollbackDeployment 1
+      fi
+      return 1
+    fi
+
+    DEPLOY_PHASE=1
+    success "Phase 1 complete: LXC containers deployed"
+
+    # Refresh terraform state to update outputs after targeted apply
+    doing "Refreshing Terraform state to update outputs..."
+    docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet -target=module.step-ca >/dev/null 2>&1 || true
+
+    # Generate hosts.json from terraform output (may be partial during Phase 1)
+    doing "Generating hosts.json from Terraform outputs..."
+    if docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1; then
+      # Check if the output is valid JSON (not an error message)
+      if jq -e '.external' hosts.json >/dev/null 2>&1; then
+        success "hosts.json generated successfully"
+      else
+        warn "hosts.json contains invalid data, recreating from individual outputs..."
+        generateHostsJsonFromModules
+      fi
+    else
+      warn "Could not generate hosts.json from terraform output, using individual module outputs..."
+      generateHostsJsonFromModules
+    fi
+
+    updateDNSRecords
+    updateRootCertificates
+  fi  # End of DNS_ALREADY_DEPLOYED=false block
+
+  # Storage selection for multi-node clusters
+  ensureSharedStorage || return 1
+  updatePackerStorageConfig
+
+  # Check if templates already exist
+  local TEMPLATES_EXIST=false
+  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+       "$REMOTE_USER@$PROXMOX_HOST" "qm config 9001" &>/dev/null && \
+     ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+       "$REMOTE_USER@$PROXMOX_HOST" "qm config 9002" &>/dev/null; then
+    TEMPLATES_EXIST=true
+  fi
+
+  # ============================================
+  # PHASE 2: Build Packer Templates
+  # ============================================
+  if [ "$TEMPLATES_EXIST" = "true" ] && [ "$DNS_ALREADY_DEPLOYED" = "true" ]; then
+    info "Skipping Packer build - templates already exist (9001, 9002)"
+    DEPLOY_PHASE=2
+  else
+    cat <<EOF
+
+#############################################################################
+Template Creation
+
+Building VM templates with Packer. DNS and CA are now available.
+#############################################################################
+EOF
+    pressAnyKey
+
+    # Check for existing templates and remove them
+    removeTemplateIfExists 9001 "docker-template"
+    removeTemplateIfExists 9002 "nomad-template"
+
+    doing "Building Packer templates..."
+    docker compose build packer >/dev/null 2>&1
+    docker compose run --rm -it packer init .
+    if ! docker compose run --rm -it packer build .; then
+      error "Phase 2 failed: Packer build was not successful"
+      DEPLOY_PHASE=2
+      read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+      DO_ROLLBACK=${DO_ROLLBACK:-Y}
+      if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+        rollbackDeployment 2
+      fi
+      return 1
+    fi
+
+    DEPLOY_PHASE=2
+    success "Phase 2 complete: Packer templates built"
+
+    # Migrate template disks to shared storage for multi-node cloning
+    migrateTemplateToSharedStorage 9001
+    migrateTemplateToSharedStorage 9002
+  fi  # End of TEMPLATES_EXIST=false block
+
+  # ============================================
+  # PHASE 3: Deploy VMs (nomad, kasm)
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+VM Deployment
+
+Deploying Nomad cluster and Kasm VMs from templates.
+#############################################################################
+EOF
+  pressAnyKey
+
+  doing "Deploying VMs..."
+  if ! docker compose run --rm -it terraform apply; then
+    error "Phase 3 failed: VM deployment"
+    DEPLOY_PHASE=3
+    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+    DO_ROLLBACK=${DO_ROLLBACK:-Y}
+    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+      rollbackDeployment 3
+    fi
+    return 1
+  fi
+
+  DEPLOY_PHASE=3
+  success "Phase 3 complete: VMs deployed"
+
+  # Terraform outputs often have stale IPs for DHCP VMs
+  # Query Proxmox directly via QEMU guest agent for actual IPs
+  refreshHostsJsonFromProxmox "nomad" 905 907
+  refreshHostsJsonFromProxmox "kasm" 930 930 || true  # Kasm is optional, don't fail if not deployed
+
+  # Update DNS records with actual IPs
+  updateDNSRecords
+
+  # Configure Nomad cluster (GlusterFS + cluster formation)
+  setupNomadCluster
+
+  success "Deployment complete!"
+}
+
+# Deploy only critical services (DNS and CA) - no VMs
+function deployCriticalServicesOnly() {
+  cat <<EOF
+
+############################################################################
+Critical Services Deployment
+
+Deploying critical infrastructure only: Pi-hole DNS with Unbound (DNS-over-TLS)
+and Certificate Authority (Step-CA). No VMs will be deployed.
+#############################################################################
+
+EOF
+
+  # Check for and purge existing LXC resources before deployment
+  if ! purgeClusterResources --lxc-only; then
+    read -rp "$(question "Continue deployment anyway? Resources may conflict. [y/N]: ")" confirm
+    [[ ! "$confirm" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
+  fi
+
+  # Load configuration from cluster-info.json if not already loaded
+  if [ -z "$DNS_POSTFIX" ] && [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  # If still no DNS_POSTFIX, prompt for it
+  if [ -z "$DNS_POSTFIX" ]; then
+    read -rp "$(question "Enter DNS domain suffix (e.g., lab.local): ")" DNS_POSTFIX
+    while [ -z "$DNS_POSTFIX" ]; do
+      warn "DNS domain suffix is required"
+      read -rp "$(question "DNS domain suffix: ")" DNS_POSTFIX
+    done
+  fi
+
+  # Prompt for Pi-hole password
   while true; do
     read -rsp "$(question "Enter Pi-hole admin password: ")" PIHOLE_PASSWORD
     echo ""
@@ -971,12 +1878,12 @@ EOF
 Deployment Configuration:
 --------------------------------------
 DNS suffix:               $DNS_POSTFIX
-Pi-hole admin pass:       $PIHOLE_PASSWORD
+Pi-hole admin pass:       [set]
 ======================================
 
 EOF
 
-  read -rp "$(question "Proceed with deployment? [Y/n]: ")" CONFIRM
+  read -rp "$(question "Proceed with critical services deployment? [Y/n]: ")" CONFIRM
   CONFIRM=${CONFIRM:-Y}
   [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
 
@@ -1000,7 +1907,7 @@ EOF
     fi
   fi
 
-  # Verify all nodes can reach the internet before proceeding
+  # Verify all nodes can reach the internet
   if ! checkClusterConnectivity; then
     error "Cannot proceed without internet connectivity on all nodes."
     return 1
@@ -1012,24 +1919,13 @@ EOF
     return 1
   fi
 
-  # Checking VMIDs
-  doing "Checking if required Proxmox VMIDs currently exist..."
-  manageVMIDs "${REQUIRED_VMIDS[@]}"
-  success "VMID check complete\n"
-
-  # Clean up any existing DNS containers before terraform
-  cleanupDNSVMIDs
-
-  # ============================================
-  # PHASE 1: Deploy LXC Containers (DNS, step-ca)
-  # ============================================
+  # Deploy LXC containers (DNS, step-ca)
   cat <<EOF
 
 #############################################################################
 LXC Container Deployment
 
 Deploying critical infrastructure: DNS servers and Certificate Authority.
-These must be operational before building VM templates.
 #############################################################################
 EOF
   pressAnyKey
@@ -1042,8 +1938,7 @@ EOF
     -target=module.dns-main \
     -target=module.dns-labnet \
     -target=module.step-ca; then
-    error "Phase 1 failed: LXC container deployment"
-    DEPLOY_PHASE=1
+    error "LXC container deployment failed"
     read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
     DO_ROLLBACK=${DO_ROLLBACK:-Y}
     if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
@@ -1052,93 +1947,40 @@ EOF
     return 1
   fi
 
-  DEPLOY_PHASE=1
-  success "Phase 1 complete: LXC containers deployed"
+  success "LXC containers deployed"
 
-  # Refresh terraform state to update outputs after targeted apply
-  doing "Refreshing Terraform state to update outputs..."
+  # Refresh terraform state
+  doing "Refreshing Terraform state..."
   docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet -target=module.step-ca >/dev/null 2>&1 || true
 
-  # Generate hosts.json from terraform output (may be partial during Phase 1)
-  doing "Generating hosts.json from Terraform outputs..."
+  # Generate hosts.json
+  doing "Generating hosts.json..."
   if docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1; then
-    # Check if the output is valid JSON (not an error message)
     if jq -e '.external' hosts.json >/dev/null 2>&1; then
-      success "hosts.json generated successfully"
+      success "hosts.json generated"
     else
-      warn "hosts.json contains invalid data, recreating from individual outputs..."
+      warn "hosts.json contains invalid data, recreating..."
       generateHostsJsonFromModules
     fi
   else
-    warn "Could not generate hosts.json from terraform output, using individual module outputs..."
+    warn "Could not generate hosts.json, using module outputs..."
     generateHostsJsonFromModules
   fi
 
   updateDNSRecords
   updateRootCertificates
 
-  # ============================================
-  # PHASE 2: Build Packer Templates
-  # ============================================
+  success "Critical services deployment complete!"
+
   cat <<EOF
 
 #############################################################################
-Template Creation
+Critical Services Deployed
 
-Building VM templates with Packer. DNS and CA are now available.
-Please make sure that you update your packer.auto.pkvars.hcl before starting.
+DNS servers and Certificate Authority are now running.
+You can now deploy Nomad (option 5), Kasm (option 6), or both.
 #############################################################################
 EOF
-  pressAnyKey
-
-  doing "Building Packer templates..."
-  docker compose build packer >/dev/null 2>&1
-  docker compose run --rm -it packer init .
-  if ! docker compose run --rm -it packer build .; then
-    error "Phase 2 failed: Packer build was not successful"
-    DEPLOY_PHASE=2
-    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
-    DO_ROLLBACK=${DO_ROLLBACK:-Y}
-    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
-      rollbackDeployment 2
-    fi
-    return 1
-  fi
-
-  DEPLOY_PHASE=2
-  success "Phase 2 complete: Packer templates built"
-
-  # ============================================
-  # PHASE 3: Deploy VMs (docker-swarm, kasm)
-  # ============================================
-  cat <<EOF
-
-#############################################################################
-VM Deployment
-
-Deploying Docker Swarm and Kasm VMs from templates.
-#############################################################################
-EOF
-  pressAnyKey
-
-  doing "Deploying VMs..."
-  if ! docker compose run --rm -it terraform apply; then
-    error "Phase 3 failed: VM deployment"
-    DEPLOY_PHASE=3
-    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
-    DO_ROLLBACK=${DO_ROLLBACK:-Y}
-    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
-      rollbackDeployment 3
-    fi
-    return 1
-  fi
-
-  docker compose run --rm -it terraform refresh
-  docker compose run --rm -it terraform output -json host-records > hosts.json
-
-  DEPLOY_PHASE=3
-  success "Phase 3 complete: VMs deployed"
-  success "Deployment complete!"
 }
 
 # Generic LXC template creation function
@@ -1153,12 +1995,12 @@ function createLXCTemplate() {
   local MEMORY="${7:-2048}"
 
   doing "Creating LXC template: ${TEMPLATE_NAME} (VMID: ${TEMPLATE_VMID})"
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$INSTALL_SCRIPT" "$REMOTE_USER@$PROXMOX_HOST":/root/install.sh
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$INSTALL_SCRIPT" "$REMOTE_USER@$PROXMOX_HOST":/root/install.sh
 
   doing "Creating LXC container ${TEMPLATE_VMID} (${TEMPLATE_NAME})..."
   local OSTEMPLATE=$(sshRun $REMOTE_USER $PROXMOX_HOST "pveam list local | awk '/vztmpl/ {print \$1; exit}'")
   echo $OSTEMPLATE
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "\
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" "\
     pct stop ${TEMPLATE_VMID} || true > /dev/null 2>&1 && pct destroy ${TEMPLATE_VMID} || true > /dev/null 2>&1
     pct create ${TEMPLATE_VMID} ${OSTEMPLATE} \
       --storage ${STORAGE} \
@@ -1178,12 +2020,12 @@ function createLXCTemplate() {
     pct reboot ${TEMPLATE_VMID}"
 
   doing "Running installation script..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "\
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" "\
     pct push ${TEMPLATE_VMID} /root/install.sh /root/install.sh && \
     pct exec ${TEMPLATE_VMID} -- bash -c 'bash /root/install.sh'" || true
 
   doing "Cleaning container for template..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "pct exec ${TEMPLATE_VMID} -- bash -c 'apt-get clean && \
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" "pct exec ${TEMPLATE_VMID} -- bash -c 'apt-get clean && \
     rm -rf /tmp/* /var/tmp/* /var/log/* /root/.bash_history && \
     truncate -s 0 /etc/machine-id && \
     rm -f /etc/ssh/ssh_host_* && \
@@ -1191,78 +2033,84 @@ function createLXCTemplate() {
     systemctl enable ssh'"
 
   doing "Stopping container and converting to template..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" "pct stop ${TEMPLATE_VMID} && pct template ${TEMPLATE_VMID} && pct set ${TEMPLATE_VMID} -ostype debian"
   success "LXC template '${TEMPLATE_NAME}' created successfully"
 }
 
-function setupDockerSwarm() {
-  BRICK="/gluster/volume1"
-  VOL="swarm-data"
+function setupNomadCluster() {
+  BRICK="/data/gluster/nomad-data"
+  VOL="nomad-data"
   MOUNTPOINT="/srv/gluster/${VOL}"
-  SSH_USERNAME=$(jq -r '.[] | select(.build | contains("docker")) | .ssh_username' packer/packer-outputs/template-credentials.json)
-  
-  doing "Setting up docker swarm"
+  # Use labadmin user for Nomad VMs (set by cloud-init)
+  local VM_USER="labadmin"
+
+  doing "Setting up Nomad cluster"
   NODE_IPS=()
   while IFS= read -r ip; do
     [[ -n "$ip" ]] && NODE_IPS+=("$ip")
   done < <(
-    jq -r '.external[] | select(.hostname | contains("docker")) | .ip' hosts.json \
+    jq -r '.external[] | select(.hostname | contains("nomad")) | .ip' hosts.json \
     | sed 's:/.*$::'
   )
-  
+
   if ((${#NODE_IPS[@]} < 1)); then
-    echo "No hosts found to configure."
-    exit 1
+    echo "No Nomad hosts found to configure."
+    return 1
+  fi
+
+  if ((${#NODE_IPS[@]} < 3)); then
+    warn "Expected 3 Nomad nodes, found ${#NODE_IPS[@]}. Some operations may fail."
   fi
 
   MGR="${NODE_IPS[0]}"
-  ND1="${NODE_IPS[1]}"
-  ND2="${NODE_IPS[2]}"
+  ND1="${NODE_IPS[1]:-$MGR}"
+  ND2="${NODE_IPS[2]:-$MGR}"
 
-  # doing "Ensuring GlusterFS is running on nodes"
-  # for ip in "${NODE_IPS[@]}"; do
-  #   sshRun "$ip" "systemctl enable --now glusterd || systemctl enable --now glusterfsd || true"
-  #   sshRun "$ip" "mkdir -p '$BRICK'"
-  # done 
+  # Verify connectivity to all nodes first
+  doing "Verifying SSH connectivity to Nomad nodes..."
+  for ip in "${NODE_IPS[@]}"; do
+    if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 "$VM_USER@$ip" "hostname" &>/dev/null; then
+      error "Cannot connect to $ip as $VM_USER"
+      return 1
+    fi
+    info "  Connected to $ip"
+  done
 
-  # Probe peers
+  # Create brick directories on all nodes first
+  doing "Creating brick directories on all nodes..."
+  for ip in "${NODE_IPS[@]}"; do
+    sshRun "$VM_USER" "$ip" "sudo mkdir -p $BRICK && sudo mkdir -p $MOUNTPOINT"
+  done
+
+  # Probe peers for GlusterFS
   for peer in "${NODE_IPS[@]}"; do
-    if ! sshRun "$REMOTE_USER" "$MGR" "gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then 
+    if ! sshRun "$VM_USER" "$MGR" "sudo gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then
       doing "Probing peer $peer"
-      sshRun "$REMOTE_USER" "$MGR" "gluster peer probe $peer"
-    else 
+      sshRun "$VM_USER" "$MGR" "sudo gluster peer probe $peer"
+    else
       info "$peer is already in pool"
     fi
   done
 
   sleep 2
 
-  # # Wait for connections
-  # for peer in "${NODE_IPS[@]}"; do
-  #   until sshRun "$REMOTE_USER" "$MGR" "gluster peer status | grep -A1 -w '$peer' | grep -q Connected"; do
-  #     sleep 2
-  #   done
-  # done
-
-  # sleep 2
-
-  # Create and start volume
+  # Create and start GlusterFS volume
   BRICKS="$MGR:$BRICK $ND1:$BRICK $ND2:$BRICK"
-  if ! sshRun "$REMOTE_USER" "$MGR" "gluster volume info $VOL >/dev/null 2>&1"; then
+  if ! sshRun "$VM_USER" "$MGR" "sudo gluster volume info $VOL >/dev/null 2>&1"; then
     doing "Creating volume $VOL"
-    sshRun "$REMOTE_USER" "$MGR" "gluster volume create $VOL replica 3 $BRICKS force"
+    sshRun "$VM_USER" "$MGR" "sudo gluster volume create $VOL replica 3 $BRICKS force"
   else
     info "Volume $VOL exists"
   fi
 
-  if ! sshRun "$REMOTE_USER" "$MGR" "gluster volume status $VOL >/dev/null 2>&1"; then
+  if ! sshRun "$VM_USER" "$MGR" "sudo gluster volume status $VOL >/dev/null 2>&1"; then
     doing "Starting volume $VOL"
-    sshRun "$REMOTE_USER" "$MGR" "gluster volume start $VOL"
+    sshRun "$VM_USER" "$MGR" "sudo gluster volume start $VOL"
   fi
 
   sleep 2
 
-  # Set recommended options
+  # Set recommended GlusterFS options
   for opt in \
     "cluster.quorum-type auto" \
     "cluster.self-heal-daemon on" \
@@ -1272,92 +2120,97 @@ function setupDockerSwarm() {
     "performance.client-io-threads on" \
     "network.ping-timeout 10"
   do
-    sshRun "$REMOTE_USER" "$MGR" "gluster volume set $VOL $opt || true"
+    sshRun "$VM_USER" "$MGR" "sudo gluster volume set $VOL $opt || true"
   done
 
   sleep 2
 
-  # Mount with fstab
-  PREF="$MGR"
-  BACKUPS=$(printf ",backupvolfile-server=%s" "$ND1" "$ND2")
+  # Mount with fstab on all nodes
   for ip in "${NODE_IPS[@]}"; do
-    doing "Mounting on $ip"
-    sshRun "$REMOTE_USER" "$ip" "mkdir -p '$MOUNTPOINT'"
-    sshRun "$REMOTE_USER" "$ip" "sed -i \"/:${VOL}[[:space:]]/d\" /etc/fstab"
-    sshRun "$REMOTE_USER" "$ip" "echo '${PREF}:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev${BACKUPS} 0 0' | tee -a /etc/fstab >/dev/null"
-    sshRun "$REMOTE_USER" "$ip" "mount -a || mount.glusterfs ${PREF}:/${VOL} ${MOUNTPOINT}"
+    doing "Mounting GlusterFS on $ip"
+    sshRun "$VM_USER" "$ip" "sudo mkdir -p '$MOUNTPOINT'"
+    # Add fstab entry if not present
+    sshRun "$VM_USER" "$ip" "grep -q ':/${VOL}' /etc/fstab || echo 'localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null"
+    # Mount if not already mounted
+    sshRun "$VM_USER" "$ip" "mountpoint -q '$MOUNTPOINT' || sudo mount -t glusterfs localhost:/${VOL} ${MOUNTPOINT}"
   done
 
   sleep 2
 
-  # Verify
-  sshRun "$REMOTE_USER" "$MGR" "gluster volume info $VOL"
-  sshRun "$REMOTE_USER" "$MGR" "gluster volume status $VOL"
-  sshRun "$REMOTE_USER" "$MGR" "gluster volume heal $VOL info || true"
+  # Restart Nomad now that GlusterFS is mounted
+  doing "Starting Nomad on all nodes..."
+  for ip in "${NODE_IPS[@]}"; do
+    sshRun "$VM_USER" "$ip" "sudo systemctl restart nomad"
+  done
+
+  sleep 2
+
+  # Verify GlusterFS
+  sshRun "$VM_USER" "$MGR" "sudo gluster volume info $VOL"
+  sshRun "$VM_USER" "$MGR" "sudo gluster volume status $VOL"
+  sshRun "$VM_USER" "$MGR" "sudo gluster volume heal $VOL info || true"
 
   success "GlusterFS '$VOL' up on: ${NODE_IPS[*]}"
   info "Mounted at ${MOUNTPOINT} on each node."
 
-  NODES=("${NODE_IPS[@]:1}")
+  # Wait for Nomad cluster to form (servers auto-join via cloud-init config)
+  doing "Waiting for Nomad cluster to form..."
+  sleep 10
 
-  info "Manager Primary: $MGR"
-  info "Managers: ${NODES[*]:-<none>}"
-
-  doing "Initializing docker swarm primary manager $MGR"
-  sshRun "$REMOTE_USER" "$MGR" "docker swarm init --advertise-addr $MGR || true"
-  MANAGER_TOKEN=$(sshRun "$REMOTE_USER" "$MGR" "docker swarm join-token -q manager")
-  WORKER_TOKEN=$(sshRun "$REMOTE_USER" "$MGR" "docker swarm join-token -q worker")
-
-  sleep 2
-  
-  doing "Adding additional nodes to swarm"
-  for ip in "${NODES[@]}"; do
-    info "Manager join: $ip"
-    sshRun "$REMOTE_USER" "$ip" "sudo docker swarm join --token $MANAGER_TOKEN $MGR:2377 || true"
+  local retries=30
+  local count=0
+  while [ $count -lt $retries ]; do
+    SERVER_COUNT=$(sshRun "$VM_USER" "$MGR" "nomad server members 2>/dev/null | grep -c alive || echo 0")
+    if [ "$SERVER_COUNT" -eq 3 ]; then
+      success "Nomad cluster formed with 3 server members"
+      break
+    fi
+    ((count++))
+    info "Waiting for Nomad servers to join... ($count/$retries) - $SERVER_COUNT/3 servers alive"
+    sleep 5
   done
 
-  sleep 2
+  if [ $count -eq $retries ]; then
+    warn "Nomad cluster may not be fully formed. Please check manually."
+  fi
 
-  doing "Adding Portainer to swarm"
-  PORTAINER_DIR=${BRICK}/portainer
-  PORTAINER_FILE=${PORTAINER_DIR}/portainer-agent-stack.yml
-  PORTAINER_SERVICE_DIR=${BRICK}/services/portainer
+  # Verify Nomad cluster health
+  doing "Verifying Nomad cluster health"
+  sshRun "$VM_USER" "$MGR" "nomad server members"
+  sshRun "$VM_USER" "$MGR" "nomad node status"
 
-  sshRun "$REMOTE_USER" "$MGR" "mkdir -p ${PORTAINER_DIR} ${PORTAINER_SERVICE_DIR} \
-    && curl -L https://downloads.portainer.io/ce-lts/portainer-agent-stack.yml -o ${PORTAINER_FILE} \
-    && sed -i 's|portainer_data:/data|/gluster/volume1/services/portainer:/data|' ${PORTAINER_FILE} \
-    && docker stack deploy -c ${PORTAINER_FILE} portainer \
-    && docker node ls \
-    && docker service ls \
-    && gluster pool list"
+  success "Nomad cluster setup complete!"
+  info "Access Nomad UI at: http://${MGR}:4646"
 }
 
-function manageVMIDs() {
-  local VMIDS=("$@")
+function deployTraefikOnly() {
+  cat <<EOF
 
-  for VMID in "${VMIDS[@]}"; do
-    # Check if QEMU VM exists
-    if ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "qm config $VMID" &>/dev/null; then
-      warn "VMID $VMID is a QEMU VM"
-      read -rp "$(question "Do you want to destroy VMID $VMID (y/N)? ")" REPLY
-      if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" "qm stop $VMID || true && qm destroy $VMID || true"
-        success "QEMU VM $VMID destroyed."
-      fi
+############################################################################
+Traefik Load Balancer Deployment
 
-    # Check if LXC container exists
-    elif ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "pct config $VMID" &>/dev/null; then
-      warn "VMID $VMID is an LXC container"
-      read -rp "$(question "Do you want to destroy VMID $VMID (y/N)? ")" REPLY
-      if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-        ssh -i "$KEY_PATH" "$REMOTE_USER@$PROXMOX_HOST" "pct stop $VMID || true && pct destroy $VMID || true"
-        success "LXC container $VMID destroyed."
-      fi
+Deploying Traefik as a Nomad system job for load balancing and service discovery.
+Assumes Nomad cluster is already running.
+#############################################################################
 
-    else
-      info "VMID $VMID does not exist"
-    fi
-  done
+EOF
+
+  # Deploy Traefik using the generic Nomad job deployer
+  if ! deployNomadJob "traefik" "nomad/jobs/traefik.nomad.hcl" "/srv/gluster/nomad-data/traefik"; then
+    return 1
+  fi
+
+  # Get Nomad IP for display
+  local NOMAD_IP
+  NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+
+  echo
+  info "Dashboard: http://$NOMAD_IP:8081/dashboard/"
+  info "HTTP:      http://$NOMAD_IP:80"
+  info "HTTPS:     https://$NOMAD_IP:443"
+
+  # Update DNS records for traefik
+  updateDNSRecords
 }
 
 function generateHostsJsonFromModules() {
@@ -1528,14 +2381,14 @@ function updateDNSRecords() {
   info "Summary: $RECORD_COUNT A-records to add"
 
   doing "Updating Pi-hole @ $DNS_IP..."
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" "
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$DNS_IP" "
     pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' &&
     pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'
   " && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
 
   # Trigger Nebula-Sync to propagate changes
   doing "Triggering Nebula-Sync to propagate to replicas..."
-  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes "$REMOTE_USER@$DNS_IP" \
+  if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes "$REMOTE_USER@$DNS_IP" \
     "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
     success "Sync triggered"
   else
@@ -1550,7 +2403,7 @@ function updateDNSRecords() {
     for i in "${!CLUSTER_NODES[@]}"; do
       local node="${CLUSTER_NODES[$i]}"
       local ip="${CLUSTER_NODE_IPS[$i]}"
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" \
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
         "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
       echo "  - $node: DNS set to $DNS_IP"
     done
@@ -1586,7 +2439,7 @@ function updateRootCertificates() {
 
   doing "Reading node list from ${PROXMOX_HOST}:/etc/pve/.members"
   local MEMBERS_JSON
-  MEMBERS_JSON="$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" 'cat /etc/pve/.members')"
+  MEMBERS_JSON="$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" 'cat /etc/pve/.members')"
   local NODE_IPS=()
   while IFS= read -r name; do
     [[ -n "$name" ]] && NODE_IPS+=("$name")
@@ -1602,22 +2455,30 @@ function updateRootCertificates() {
   doing "Installing root CA on all nodes and updating trust"
   for name in "${NODE_IPS[@]}"; do
     echo "  - $name"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$name" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$name" "
       # Remove any existing proxmox-lab CA certificates first
       rm -f /usr/local/share/ca-certificates/proxmox-lab*.crt
       rm -f /etc/ssl/certs/proxmox-lab*.pem
     "
-    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox-lab-root-ca.crt \
+    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR proxmox-lab-root-ca.crt \
       "$REMOTE_USER@$name:/usr/local/share/ca-certificates/proxmox-lab-root-ca.crt"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$name" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$name" "
       set -e
       update-ca-certificates --fresh
       systemctl reload pveproxy || systemctl restart pveproxy
     "
   done
 
+  # Configure all nodes to use Pi-hole as DNS (required for ACME hostname resolution)
+  doing "Configuring DNS on all nodes to use Pi-hole ($DNS_IP)"
+  for node_ip in "${NODE_IPS[@]}"; do
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$node_ip" \
+      "echo 'nameserver ${DNS_IP}' > /etc/resolv.conf && echo 'search ${DNS_POSTFIX}' >> /etc/resolv.conf" \
+      || warn "Failed to configure DNS on $node_ip"
+  done
+
   doing "Registering ACME account 'default' against Step CA directory"
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$PROXMOX_HOST" "
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" "
     # Deactivate existing account if present (needed after CA regeneration)
     pvenode acme account deactivate default 2>/dev/null || true
     rm -f /etc/pve/priv/acme/default 2>/dev/null || true
@@ -1671,7 +2532,7 @@ function updateRootCertificates() {
     TEMP_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --arg ip "$ip" --arg pm "$pmfqdn" \
       '$base + ["\($ip) proxmox \($pm)"]')
 
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" \
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$DNS_IP" \
       "pihole-FTL --config dns.hosts '$TEMP_RECORDS'" || { warn "Failed to update DNS for $name"; continue; }
 
     # Brief pause for DNS propagation
@@ -1679,8 +2540,10 @@ function updateRootCertificates() {
 
     # Order certificate
     doing "    Ordering certificate for $name"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$ip" "
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" "
       set -e
+      # Clear any stale ACME config before setting new domains
+      pvenode config set --delete acme 2>/dev/null || true
       pvenode config set --acme \"$acme_map\"
       pvenode acme cert order -force
     " || { warn "SSH/ACME failed for $name ($ip)"; continue; }
@@ -1700,7 +2563,7 @@ function updateRootCertificates() {
   local FINAL_RECORDS
   FINAL_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --argjson rr "$ROUNDROBIN_ENTRIES" '$base + $rr')
 
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$REMOTE_USER@$DNS_IP" \
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$DNS_IP" \
     "pihole-FTL --config dns.hosts '$FINAL_RECORDS'" || warn "Failed to restore round-robin DNS"
 
   success "Root CA installed on all nodes; ACME certs issued; round-robin DNS restored."
@@ -1756,6 +2619,152 @@ function regenerateCA() {
   fi
 }
 
+# Complete purge - reset nodes to pre-install state
+function purgeEntireDeployment() {
+  cat <<EOF
+
+############################################################################
+Complete Deployment Purge
+
+This will COMPLETELY remove all lab infrastructure and reset Proxmox nodes
+to their pre-install state:
+
+  - All VMs and LXC containers
+  - Cloud-init snippets
+  - ACME certificates
+  - Step-CA root certificate from trust store
+  - DNS configuration
+  - Hashicorp API user
+  - SSH keys (removed last)
+  - Local configuration files
+
+This action cannot be undone.
+#############################################################################
+
+EOF
+
+  read -rp "$(question "Are you sure? Type 'PURGE' to confirm: ")" CONFIRM
+  if [[ "$CONFIRM" != "PURGE" ]]; then
+    info "Purge cancelled"
+    return 0
+  fi
+
+  # Load cluster info for multi-node cleanup
+  if ! ensureClusterContext; then
+    warn "No cluster info found. Attempting to proceed with single node..."
+    if [ -z "$PROXMOX_HOST" ]; then
+      read -rp "$(question "Enter Proxmox host IP: ")" PROXMOX_HOST
+    fi
+    CLUSTER_NODES=("$PROXMOX_HOST")
+    CLUSTER_NODE_IPS=("$PROXMOX_HOST")
+  fi
+
+  echo
+  warn "Starting complete deployment purge..."
+  echo
+
+  # Step 1: Purge all VMs and LXC containers
+  doing "Step 1/8: Purging all VMs and LXC containers..."
+  purgeClusterResources --auto || true
+
+  # Step 2: Remove cloud-init snippets
+  doing "Step 2/8: Removing cloud-init snippets..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Cleaning snippets on $node..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
+      "rm -rf /var/lib/vz/snippets/*-user-data.yml 2>/dev/null" || true
+  done
+  success "Cloud-init snippets removed"
+
+  # Step 3: Remove ACME certificates
+  doing "Step 3/8: Removing ACME certificates..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Removing ACME config on $node..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
+      "pvenode config set --delete acme 2>/dev/null; pvenode acme account deactivate 2>/dev/null" || true
+  done
+  success "ACME certificates removed"
+
+  # Step 4: Remove step-ca root cert from trust store
+  doing "Step 4/8: Removing step-ca root certificate from trust store..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Removing CA cert on $node..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
+      "rm -f /usr/local/share/ca-certificates/step-ca-root.crt 2>/dev/null; update-ca-certificates 2>/dev/null" || true
+  done
+  success "Step-CA root certificate removed"
+
+  # Step 5: Reset node DNS configuration
+  doing "Step 5/8: Resetting DNS configuration..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Resetting DNS on $node..."
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
+      "sed -i 's/^nameserver .*/nameserver 1.1.1.1/' /etc/resolv.conf 2>/dev/null" || true
+  done
+  success "DNS configuration reset"
+
+  # Step 6: Remove hashicorp API user
+  doing "Step 6/8: Removing hashicorp API user..."
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${CLUSTER_NODE_IPS[0]}" \
+    "pveum user delete hashicorp@pam 2>/dev/null; pveum token delete hashicorp@pam hashicorp-token 2>/dev/null" || true
+  success "Hashicorp API user removed"
+
+  # Step 7: Clean local files
+  doing "Step 7/8: Cleaning local configuration files..."
+  rm -f hosts.json 2>/dev/null || true
+  # Remove auto-generated sections from terraform.tfvars (keep manual config)
+  if [ -f "terraform/terraform.tfvars" ]; then
+    sed -i.bak '/# Proxmox cluster node IPs (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed -i.bak '/# DNS cluster nodes - Main cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed -i.bak '/# DNS cluster nodes - Labnet SDN cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    rm -f terraform/terraform.tfvars.bak 2>/dev/null || true
+  fi
+  # Remove storage config from cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local tmp=$(mktemp)
+    jq 'del(.storage)' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
+  fi
+  # Clean packer storage settings
+  if [ -f "packer/packer.auto.pkrvars.hcl" ]; then
+    grep -v "^template_storage" packer/packer.auto.pkrvars.hcl > packer/packer.auto.pkrvars.hcl.tmp 2>/dev/null || true
+    mv packer/packer.auto.pkrvars.hcl.tmp packer/packer.auto.pkrvars.hcl 2>/dev/null || true
+  fi
+  # Clean terraform state
+  docker compose run --rm -T terraform state list 2>/dev/null | while read -r resource; do
+    docker compose run --rm -T terraform state rm "$resource" 2>/dev/null || true
+  done
+  success "Local files cleaned"
+
+  # Step 8: Remove SSH keys (LAST - we need SSH for all previous steps!)
+  doing "Step 8/8: Removing SSH keys from nodes..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Removing SSH key on $node..."
+    # Get the public key content to remove from authorized_keys
+    if [ -f "${KEY_PATH}.pub" ]; then
+      local pubkey
+      pubkey=$(cat "${KEY_PATH}.pub")
+      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
+        "grep -v '$pubkey' /root/.ssh/authorized_keys > /tmp/ak_tmp && mv /tmp/ak_tmp /root/.ssh/authorized_keys" 2>/dev/null || true
+    fi
+  done
+  success "SSH keys removed from nodes"
+
+  echo
+  success "Complete deployment purge finished!"
+  warn "You may want to delete the local crypto/ directory if you no longer need the SSH keys."
+  warn "You may also want to delete cluster-info.json to start fresh."
+}
+
 function destroyLab() {
   warn "This will DESTROY all lab infrastructure and remove all configurations."
   warn "This action cannot be undone."
@@ -1775,7 +2784,6 @@ function destroyLab() {
 
   # 1. Terraform destroy
   doing "Destroying Terraform infrastructure..."
-  manageVMIDs "${REQUIRED_VMIDS[@]}"
   if docker compose run --rm -it terraform destroy; then
     success "Terraform destruction complete"
   else
@@ -1897,8 +2905,8 @@ function runProxmoxSetupOnAll() {
   local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
   doing "Running cluster-wide Proxmox setup on ${CLUSTER_NODES[0]} ($PRIMARY_IP)..."
 
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox/setup.sh "root@${PRIMARY_IP}:/tmp/proxmox-setup.sh"
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "root@${PRIMARY_IP}" \
+  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR proxmox/setup.sh "root@${PRIMARY_IP}:/tmp/proxmox-setup.sh"
+  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "root@${PRIMARY_IP}" \
     "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'"
 
   # Per-node setup (run on each node) - pass config for storage/bridge settings
@@ -1907,8 +2915,8 @@ function runProxmoxSetupOnAll() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     doing "Running node setup on $node ($ip)..."
-    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null proxmox/setup.sh "root@${ip}:/tmp/proxmox-setup.sh"
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t "root@${ip}" \
+    scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR proxmox/setup.sh "root@${ip}:/tmp/proxmox-setup.sh"
+    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "root@${ip}" \
       "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup '$CONFIG'"
   done
 
@@ -1972,6 +2980,16 @@ function updateTerraformFromClusterInfo() {
     echo "lxc_storage = \"$STORAGE_VAL\"" >> "$TFVARS_FILE"
   fi
   info "  lxc_storage = \"$STORAGE_VAL\""
+
+  # Update vm_storage (for VM disks - should match template storage)
+  if grep -q "^vm_storage" "$TFVARS_FILE"; then
+    sed_inplace "s|^vm_storage = .*|vm_storage = \"$STORAGE_VAL\"|" "$TFVARS_FILE"
+  else
+    echo "" >> "$TFVARS_FILE"
+    echo "# VM storage (should match template storage for fast cloning)" >> "$TFVARS_FILE"
+    echo "vm_storage = \"$STORAGE_VAL\"" >> "$TFVARS_FILE"
+  fi
+  info "  vm_storage = \"$STORAGE_VAL\""
 
   # Update dns_postfix
   sed_inplace "s|^dns_postfix = .*|dns_postfix = \"$DNS_POSTFIX_VAL\"|" "$TFVARS_FILE"
@@ -2084,10 +3102,11 @@ function runEverything() {
   # Save storage/bridge selection to cluster-info.json
   local tmp_file=$(mktemp)
   jq --arg storage "$TEMPLATE_STORAGE" \
+     --arg storage_type "${TEMPLATE_STORAGE_TYPE:-lvm}" \
      --argjson shared "$USE_SHARED_STORAGE" \
      --arg bridge "$NETWORK_BRIDGE" \
      '. + {
-       storage: { selected: $storage, is_shared: $shared },
+       storage: { selected: $storage, type: $storage_type, is_shared: $shared },
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
 
@@ -2101,10 +3120,10 @@ function runEverything() {
   proxmoxPostInstall
 
   # Deploy services (LXC, Packer, VMs)
-  deployServices
+  deployAllServices
 
-  # Setup Docker Swarm
-  setupDockerSwarm
+  # Setup Nomad cluster
+  setupNomadCluster
 }
 
 function runEverythingButSSH() {
@@ -2138,10 +3157,11 @@ function runEverythingButSSH() {
   # Save storage/bridge selection to cluster-info.json
   local tmp_file=$(mktemp)
   jq --arg storage "$TEMPLATE_STORAGE" \
+     --arg storage_type "${TEMPLATE_STORAGE_TYPE:-lvm}" \
      --argjson shared "$USE_SHARED_STORAGE" \
      --arg bridge "$NETWORK_BRIDGE" \
      '. + {
-       storage: { selected: $storage, is_shared: $shared },
+       storage: { selected: $storage, type: $storage_type, is_shared: $shared },
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
 
@@ -2155,30 +3175,290 @@ function runEverythingButSSH() {
   proxmoxPostInstall
 
   # Deploy services
-  deployServices
+  deployAllServices
 
-  # Setup Docker Swarm
-  setupDockerSwarm
+  # Setup Nomad cluster
+  setupNomadCluster
 }
 
 function manualRollback() {
   cat <<EOF
 
 #############################################################################
-Manual Rollback
+Rollback Service Deployment (Terraform)
 
-Select the phase to rollback from:
-  1) LXC containers (DNS, step-ca)
-  2) Packer templates
-  3) VMs (docker-swarm, kasm)
+  1) Rollback LXC containers (DNS, CA)
+  2) Rollback VMs (Nomad, Kasm)
+  0) Back to main menu
 #############################################################################
 
 EOF
-  read -rp "$(question "Enter phase number [1-3]: ")" PHASE
-  case $PHASE in
-    1|2|3) rollbackDeployment "$PHASE";;
-    *) error "Invalid phase";;
+
+  read -rp "$(question "Select option [0-2]: ")" OPTION
+  case $OPTION in
+    0)
+      SKIP_PAUSE=true
+      return 0
+      ;;
+    1)
+      echo
+      warn "This will DESTROY the following LXC containers:"
+      echo "  - DNS cluster (dns-01, dns-02, dns-03)"
+      echo "  - Labnet DNS cluster (labnet-dns-01, labnet-dns-02)"
+      echo "  - Step-CA (Certificate Authority)"
+      echo
+      read -rp "$(question "Are you sure you want to proceed? [y/N]: ")" CONFIRM
+      if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        info "Operation cancelled"
+        return 0
+      fi
+
+      doing "Destroying LXC containers (DNS, step-ca)..."
+      docker compose run --rm terraform destroy \
+        -target=module.dns-main \
+        -target=module.dns-labnet \
+        -target=module.step-ca \
+        -auto-approve 2>/dev/null || true
+      success "LXC containers destroyed"
+      ;;
+    2)
+      echo
+      warn "This will DESTROY the following VMs:"
+      echo "  - Nomad cluster (nomad01, nomad02, nomad03)"
+      echo "  - Kasm Workspaces (kasm01)"
+      echo
+      read -rp "$(question "Are you sure you want to proceed? [y/N]: ")" CONFIRM
+      if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        info "Operation cancelled"
+        return 0
+      fi
+
+      doing "Destroying VMs (Nomad, Kasm)..."
+      docker compose run --rm terraform destroy \
+        -target=module.nomad \
+        -target=module.kasm \
+        -auto-approve 2>/dev/null || true
+      success "VMs destroyed"
+
+      # Ask about Packer templates (only relevant when destroying VMs)
+      echo
+      read -rp "$(question "Also remove Packer templates (9001, 9002)? These take time to rebuild. [y/N]: ")" REMOVE_TEMPLATES
+      if [[ "$REMOVE_TEMPLATES" =~ ^[Yy]$ ]]; then
+        # Load cluster context if needed
+        if [ -z "$PROXMOX_HOST" ]; then
+          if [ -f "$CLUSTER_INFO_FILE" ]; then
+            loadClusterInfo
+            if [ -z "$PROXMOX_HOST" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+              PROXMOX_HOST="${CLUSTER_NODE_IPS[0]}"
+            fi
+          fi
+        fi
+
+        if [ -z "$PROXMOX_HOST" ]; then
+          error "Cannot determine Proxmox host. Cluster info not found."
+          return 1
+        fi
+
+        doing "Removing Packer templates from shared storage..."
+        removeTemplateIfExists 9001 "docker-template"
+        removeTemplateIfExists 9002 "nomad-template"
+        success "Packer templates removed"
+      else
+        info "Packer templates preserved"
+      fi
+      ;;
+    *)
+      error "Invalid option"
+      return 1
+      ;;
   esac
+}
+
+function deployNomadOnly() {
+  cat <<EOF
+
+############################################################################
+Nomad Cluster Deployment
+
+This will build the Nomad Packer template and deploy Nomad VMs.
+Assumes DNS and step-ca are already deployed.
+#############################################################################
+
+EOF
+
+  # Load cluster context
+  ensureClusterContext || return 1
+
+  # Verify critical services are deployed
+  ensureCriticalServices || return 1
+
+  # Ensure shared storage is selected for clusters
+  ensureSharedStorage || return 1
+
+  # Verify hosts.json exists (needed for DNS records)
+  if [ ! -f "hosts.json" ]; then
+    warn "hosts.json not found, generating from Terraform..."
+    docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1 || true
+  fi
+
+  # ============================================
+  # Build Nomad Packer Template Only
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+Building Nomad Template
+
+Building only the Nomad VM template with Packer.
+#############################################################################
+EOF
+  pressAnyKey
+
+  # Remove existing template if present
+  removeTemplateIfExists 9002 "nomad-template"
+
+  # Update Packer config with storage settings
+  updatePackerStorageConfig
+
+  doing "Building Nomad Packer template..."
+  docker compose build packer >/dev/null 2>&1
+  docker compose run --rm -it packer init .
+  if ! docker compose run --rm -it packer build -only=ubuntu-nomad.proxmox-clone.ubuntu-nomad .; then
+    error "Packer build failed for Nomad template"
+    return 1
+  fi
+  success "Nomad template built"
+
+  # Migrate template disk to shared storage for multi-node cloning
+  migrateTemplateToSharedStorage 9002
+
+  # ============================================
+  # Deploy Nomad VMs
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+Deploying Nomad VMs
+
+Deploying Nomad cluster VMs from template.
+#############################################################################
+EOF
+  pressAnyKey
+
+  doing "Deploying Nomad VMs..."
+  docker compose run --rm -it terraform init
+  if ! docker compose run --rm -it terraform apply -target=module.nomad; then
+    error "Terraform apply failed for Nomad module"
+    return 1
+  fi
+
+  success "Nomad VMs deployed"
+
+  # Terraform outputs often have stale IPs for DHCP VMs
+  # Query Proxmox directly via QEMU guest agent for actual IPs
+  refreshHostsJsonFromProxmox "nomad" 905 907
+
+  # Update DNS records with actual IPs
+  updateDNSRecords
+
+  # ============================================
+  # Configure Nomad Cluster
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+Configuring Nomad Cluster
+
+Setting up GlusterFS and verifying Nomad cluster formation.
+#############################################################################
+EOF
+  pressAnyKey
+
+  setupNomadCluster
+
+  success "Nomad cluster deployment complete!"
+}
+
+function deployKasmOnly() {
+  cat <<EOF
+
+############################################################################
+Kasm Workspaces Deployment (Skip LXC)
+
+This will deploy Kasm Workspaces VM from the docker-template.
+Assumes DNS and step-ca are already deployed.
+#############################################################################
+
+EOF
+
+  # Load cluster context
+  ensureClusterContext || return 1
+
+  # Verify critical services are deployed
+  ensureCriticalServices || return 1
+
+  # Ensure shared storage is selected for clusters
+  ensureSharedStorage || return 1
+
+  # Verify hosts.json exists (needed for DNS records)
+  if [ ! -f "hosts.json" ]; then
+    warn "hosts.json not found, generating from Terraform..."
+    docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1 || true
+  fi
+
+  # Check if docker-template exists
+  if ! ensureTemplate 9001 "docker-template"; then
+    error "Kasm requires the docker-template. Run option 3 (Deploy all services) first."
+    return 1
+  fi
+
+  # ============================================
+  # Deploy Kasm VM
+  # ============================================
+  cat <<EOF
+
+#############################################################################
+Deploying Kasm Workspaces
+
+Deploying Kasm VM from docker-template.
+#############################################################################
+EOF
+  pressAnyKey
+
+  doing "Deploying Kasm VM..."
+  docker compose run --rm -it terraform init
+  if ! docker compose run --rm -it terraform apply -target=module.kasm; then
+    error "Terraform apply failed for Kasm module"
+    return 1
+  fi
+
+  success "Kasm VM deployed"
+
+  # Terraform outputs often have stale IPs for DHCP VMs
+  # Query Proxmox directly via QEMU guest agent for actual IPs
+  refreshHostsJsonFromProxmox "kasm" 930 930
+
+  # Update DNS records with actual IPs
+  updateDNSRecords
+
+  # Get Kasm IP
+  KASM_IP=$(jq -r '.external[] | select(.hostname == "kasm01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+
+  cat <<EOF
+
+#############################################################################
+Kasm Deployment Complete!
+
+Kasm Workspaces has been deployed. Access the admin console at:
+  https://kasm.${DNS_POSTFIX}/
+
+Or directly at: https://${KASM_IP}/
+
+Default admin credentials are set via kasm_admin_password in terraform.tfvars.
+#############################################################################
+EOF
+
+  success "Kasm deployment complete!"
 }
 
 function showMenu() {
@@ -2189,12 +3469,17 @@ function showMenu() {
   echo
   echo "  1) New installation"
   echo "  2) New installation - skip SSH key gen"
-  echo "  3) Deploy services (Terraform)"
-  echo "  4) Build DNS records"
-  echo "  5) Regenerate CA"
-  echo "  6) Update Proxmox root certificates"
-  echo "  7) Rollback deployment"
-  echo "  8) Destroy lab"
+  echo "  3) Deploy all services (DNS, CA, Nomad, Kasm)"
+  echo "  4) Deploy critical services only (DNS, CA)"
+  echo "  5) Deploy Nomad only"
+  echo "  6) Deploy Kasm only"
+  echo "  7) Deploy Traefik load balancer"
+  echo "  8) Build DNS records"
+  echo "  9) Regenerate CA"
+  echo " 10) Update Proxmox root certificates"
+  echo " 11) Rollback service deployment (Terraform)"
+  echo " 12) Purge service deployment (Emergency)"
+  echo " 13) Purge entire deployment"
   echo "  0) Exit"
   echo
 }
@@ -2203,21 +3488,31 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-8]: ")" choice
+  read -rp "$(question "Select an option [0-13]: ")" choice
 
   case $choice in
     1) runEverything;;
     2) runEverythingButSSH;;
-    3) deployServices;;
-    4) updateDNSRecords;;
-    5) regenerateCA;;
-    6) updateRootCertificates;;
-    7) manualRollback;;
-    8) destroyLab;;
+    3) deployAllServices;;
+    4) deployCriticalServicesOnly;;
+    5) deployNomadOnly;;
+    6) deployKasmOnly;;
+    7) deployTraefikOnly;;
+    8) updateDNSRecords;;
+    9) regenerateCA;;
+    10) updateRootCertificates;;
+    11) manualRollback;;
+    12) purgeClusterResources;;
+    13) purgeEntireDeployment;;
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
   esac
 
-  echo
-  read -rp "Press Enter to continue..."
+  # Skip pause if returning from submenu
+  if [ "${SKIP_PAUSE:-false}" = "true" ]; then
+    SKIP_PAUSE=false
+  else
+    echo
+    read -rp "Press Enter to continue..."
+  fi
 done

@@ -1,4 +1,4 @@
-source "proxmox-clone" "ubuntu-docker" {
+source "proxmox-clone" "ubuntu-nomad" {
   task_timeout             = "5m"
   proxmox_url              = var.proxmox_url
   node                     = var.proxmox_node
@@ -6,8 +6,8 @@ source "proxmox-clone" "ubuntu-docker" {
   token                    = var.proxmox_token_secret
   insecure_skip_tls_verify = true
 
-  vm_id                    = var.docker_vmid
-  vm_name                  = var.docker_name
+  vm_id                    = var.nomad_vmid
+  vm_name                  = var.nomad_name
 
   clone_vm_id              = 9999
   ssh_username             = var.ssh_username
@@ -25,5 +25,5 @@ source "proxmox-clone" "ubuntu-docker" {
     bridge                 = "vmbr0"
   }
 
-  tags                     = "linux;packer;template;vm"
+  tags                     = "linux;packer;template;vm;nomad"
 }

@@ -1,0 +1,66 @@
+variable "dns_postfix" {
+  type = string
+}
+
+variable "proxmox_api_url" {
+  type = string
+}
+
+variable "proxmox_bridge" {
+  type = string
+}
+
+variable "ssh_public_key_file" {
+  type = string
+}
+
+variable "nomad_datacenter" {
+  type    = string
+  default = "dc1"
+}
+
+variable "nomad_region" {
+  type    = string
+  default = "global"
+}
+
+variable "gluster_mount_path" {
+  type    = string
+  default = "/srv/gluster/nomad-data"
+}
+
+variable "node_ip_map" {
+  type        = map(string)
+  default     = {}
+  description = "Map of Proxmox node names to their IP addresses for snippet uploads"
+}
+
+variable "dns_primary_ip" {
+  type        = string
+  default     = ""
+  description = "Primary DNS server IP (Pi-hole). If empty, uses DHCP-provided DNS."
+}
+
+variable "vm_storage" {
+  type        = string
+  description = "Storage for VM disks (should match template storage)"
+  default     = "local-lvm"
+}
+
+variable "vm_configs" {
+  type = map(object({
+    vm_id          = number
+    name           = string
+    cores          = number
+    memory         = number
+    disk_size      = string
+    vm_state       = string
+    target_node    = string
+    target_storage = string
+  }))
+  default = {
+    "nomad01" = { vm_id = 905, name = "nomad01", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
+    "nomad02" = { vm_id = 906, name = "nomad02", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve02", target_storage = "ceph-pool-01" }
+    "nomad03" = { vm_id = 907, name = "nomad03", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
+  }
+}

@@ -1,6 +1,6 @@
 output "hosts" {
   value = {
-    docker     = try(module.docker.docker-hosts, {})
+    nomad      = try(module.nomad.nomad-hosts, {})
     kasm       = try(module.kasm.kasm-hosts, {})
     dns-main   = try(module.dns-main.dns-hosts, {})
     dns-labnet = try(module.dns-labnet.dns-hosts, {})
@@ -12,7 +12,7 @@ output "host-records" {
   value = {
     external = flatten([
       for group_hosts in [
-        try(module.docker.docker-hosts, {}),
+        try(module.nomad.nomad-hosts, {}),
         try(module.kasm.kasm-hosts, {}),
         try(module.dns-main.dns-hosts, {}),
         try(module.step-ca.step-ca-hosts, {})

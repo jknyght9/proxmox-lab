@@ -100,7 +100,13 @@ variable step-ca_eth0_ipv4_cidr {
   type = string
   description = "IPv4 address with CIDR notation for Step CA"
 }
-variable "ssh_public_key_file" { 
-  type = string 
+variable "ssh_public_key_file" {
+  type = string
   default = "/crypto/lab-deploy.pub"
+}
+
+variable "vm_storage" {
+  type        = string
+  description = "Storage for VM disks (should match template storage for fast cloning)"
+  default     = "local-lvm"
 }

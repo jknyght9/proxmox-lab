@@ -1,12 +1,16 @@
-module "docker" {
+module "nomad" {
+  depends_on = [module.dns-main]
   providers = {
     proxmox = proxmox
   }
-  dns_postfix = var.dns_postfix
-  proxmox_api_url = var.proxmox_api_url
-  proxmox_bridge = var.network_interface_bridge
-  source = "./vm-docker-swarm"
+  dns_postfix         = var.dns_postfix
+  dns_primary_ip      = var.dns_primary_ipv4
+  proxmox_api_url     = var.proxmox_api_url
+  proxmox_bridge      = var.network_interface_bridge
+  node_ip_map         = local.node_ip_map
+  source              = "./vm-nomad"
   ssh_public_key_file = var.ssh_public_key_file
+  vm_storage          = var.vm_storage
 }
 
 # Main DNS cluster (one node per Proxmox cluster node, on external network)
@@ -64,11 +68,12 @@ module "step-ca" {
 }
 
 module "kasm" {
-  dns_postfix = var.dns_postfix
+  dns_postfix         = var.dns_postfix
   kasm_admin_password = var.kasm_admin_password
-  kasm_version = var.kasm_version
-  proxmox_api_url = var.proxmox_api_url
-  proxmox_bridge = var.network_interface_bridge
-  source = "./vm-kasm"
+  kasm_version        = var.kasm_version
+  proxmox_api_url     = var.proxmox_api_url
+  proxmox_bridge      = var.network_interface_bridge
+  source              = "./vm-kasm"
   ssh_public_key_file = var.ssh_public_key_file
+  vm_storage          = var.vm_storage
 }

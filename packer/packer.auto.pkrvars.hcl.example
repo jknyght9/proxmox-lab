@@ -12,3 +12,9 @@ ssh_private_key_file = "/crypto/lab-deploy" #DO NOT CHANGE
 
 # DNS config
 dns_postfix = "mylab.lan"
+
+# Storage for Packer templates
+# For multi-node clusters, use shared storage (nfs, ceph, etc.)
+# For single-node, "local" or "local-lvm" is fine
+template_storage = "local"
+template_storage_type = "lvm"  # Options: nfs, rbd, lvm, cephfs, dir

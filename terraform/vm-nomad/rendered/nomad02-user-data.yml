@@ -1,0 +1,134 @@
+#cloud-config
+hostname: nomad02
+manage_etc_hosts: true
+
+users:
+  - name: labadmin
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILNAUM5f3wscdzKVRswjztwAs8plOHhN7f9qvM5vXl57 lab-deploy
+
+  - name: root
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILNAUM5f3wscdzKVRswjztwAs8plOHhN7f9qvM5vXl57 lab-deploy
+
+
+packages: [curl, jq, socat, ca-certificates]
+
+write_files:
+  - path: /etc/nomad.d/nomad.hcl
+    permissions: '0644'
+    content: |
+      datacenter = "dc1"
+      region     = "global"
+      data_dir   = "/opt/nomad/data"
+      bind_addr  = "0.0.0.0"
+
+      advertise {
+        http = "{{ GetPrivateIP }}:4646"
+        rpc  = "{{ GetPrivateIP }}:4647"
+        serf = "{{ GetPrivateIP }}:4648"
+      }
+
+      server {
+        enabled          = true
+        bootstrap_expect = 3
+
+        server_join {
+          retry_join     = ["nomad01.jdclabs.lan","nomad02.jdclabs.lan","nomad03.jdclabs.lan"]
+          retry_max      = 10
+          retry_interval = "15s"
+        }
+      }
+
+      client {
+        enabled = true
+
+        host_volume "gluster-data" {
+          path      = "/srv/gluster/nomad-data"
+          read_only = false
+        }
+      }
+
+      plugin "docker" {
+        config {
+          allow_privileged = true
+          volumes {
+            enabled = true
+          }
+        }
+      }
+
+      consul {
+        auto_advertise   = false
+        server_auto_join = false
+        client_auto_join = false
+      }
+
+  - path: /root/nomad-cert-install.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      mkdir -p /etc/nomad.d/tls
+      /root/.acme.sh/acme.sh --set-default-ca --server https://ca.jdclabs.lan/acme/acme/directory
+      FQDNS="nomad02.jdclabs.lan nomad02.jdclabs.lan"
+      SAN_ARGS=""
+      for s in $FQDNS; do
+        echo "$s" | grep -q "\." && [ "$s" != "nomad02.jdclabs.lan" ] && SAN_ARGS="$SAN_ARGS -d $s"
+      done
+      echo "$SAN_ARGS" > /root/.san_args
+      /root/.acme.sh/acme.sh --issue --alpn -d nomad02.jdclabs.lan $(cat /root/.san_args)
+      /root/.acme.sh/acme.sh --install-cert -d nomad02.jdclabs.lan \
+        --key-file       /etc/nomad.d/tls/nomad.key \
+        --fullchain-file /etc/nomad.d/tls/nomad.crt
+
+runcmd:
+  - mkdir -p /opt/nomad/data
+  - chown -R nomad:nomad /opt/nomad || true
+  - |
+    # Configure systemd-resolved to use Pi-hole as primary DNS
+    bash -lc '
+      resolvectl dns eth0 10.1.50.3 1.1.1.1
+      resolvectl domain eth0 jdclabs.lan
+      # Make DNS config persistent via netplan
+      mkdir -p /etc/netplan
+      cat > /etc/netplan/99-dns-override.yaml <<EOF
+    network:
+      version: 2
+      ethernets:
+        eth0:
+          dhcp4: true
+          dhcp4-overrides:
+            use-dns: false
+          nameservers:
+            addresses: [10.1.50.3, 1.1.1.1]
+            search: [jdclabs.lan]
+    EOF
+      netplan apply 2>/dev/null || true
+    '
+  - |
+    bash -lc '
+      systemctl enable --now systemd-timesyncd || true
+      systemctl restart systemd-timesyncd || true
+    '
+  - |
+    bash -lc '
+      echo "[time] waiting for NTP sync..."
+      for i in {1..30}; do
+        if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -qi yes; then
+          timedatectl status || true
+          break
+        fi
+        sleep 2
+      done
+    '
+  - |
+    bash -lc '
+      export HOME=/root; cd /root; echo "HOME=$HOME PWD=$PWD"
+      command -v ~/.acme.sh/acme.sh >/dev/null || (curl -fsSL https://get.acme.sh | sh -s email=admin@jdclabs.lan)
+    '
+  # Only enable nomad - setup.sh will start it after GlusterFS is configured
+  - systemctl enable nomad
