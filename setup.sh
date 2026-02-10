@@ -1048,6 +1048,130 @@ function deployNomadJob() {
   return 0
 }
 
+# Check if Traefik is deployed as a Nomad job
+function isTraefikDeployed() {
+  local nomad_ip
+  nomad_ip=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+
+  [ -z "$nomad_ip" ] && return 1
+
+  local status
+  status=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+    "labadmin@$nomad_ip" "nomad job status traefik 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
+
+  [ "$status" -gt 0 ]
+}
+
+# Display a summary of all deployed resources with access URLs and credential locations
+function displayDeploymentSummary() {
+  if [ ! -f "hosts.json" ]; then
+    warn "hosts.json not found - cannot display deployment summary"
+    return 1
+  fi
+
+  # Load DNS_POSTFIX if not set
+  if [ -z "$DNS_POSTFIX" ] && [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  echo
+  echo "=============================================================================="
+  echo "  DEPLOYED RESOURCES SUMMARY"
+  echo "=============================================================================="
+  echo
+
+  local has_resources=false
+
+  # Pi-hole DNS servers
+  local dns_hosts
+  dns_hosts=$(jq -r '.external[] | select(.hostname | startswith("dns-")) | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
+  if [ -n "$dns_hosts" ]; then
+    has_resources=true
+    echo "  Pi-hole DNS"
+    echo "  -----------"
+    while IFS=: read -r hostname ip; do
+      ip_clean=$(echo "$ip" | cut -d'/' -f1)
+      printf "    %-10s %-15s http://%s/admin   %s.%s\n" "$hostname:" "$ip_clean" "$ip_clean" "$hostname" "${DNS_POSTFIX:-local}"
+    done <<< "$dns_hosts"
+    echo "    Ports: 53/UDP (DNS), 80/HTTP (Admin)"
+    echo "    Credentials: terraform/terraform.tfvars (pihole_admin_password)"
+    echo
+  fi
+
+  # Step-CA (Certificate Authority)
+  local ca_host
+  ca_host=$(jq -r '.external[] | select(.hostname == "step-ca") | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
+  if [ -n "$ca_host" ]; then
+    has_resources=true
+    local hostname ip ip_clean
+    hostname=$(echo "$ca_host" | cut -d: -f1)
+    ip=$(echo "$ca_host" | cut -d: -f2)
+    ip_clean=$(echo "$ip" | cut -d'/' -f1)
+    echo "  Step-CA (Certificate Authority)"
+    echo "  --------------------------------"
+    printf "    %-10s %-15s https://ca.%s\n" "$hostname:" "$ip_clean" "${DNS_POSTFIX:-local}"
+    echo "    ACME:    https://ca.${DNS_POSTFIX:-local}/acme/acme/directory"
+    echo "    Roots:   https://ca.${DNS_POSTFIX:-local}/roots.pem"
+    echo "    Credentials: terraform/terraform.tfvars (step-ca_root_password)"
+    echo
+  fi
+
+  # Nomad Cluster
+  local nomad_hosts
+  nomad_hosts=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
+  if [ -n "$nomad_hosts" ]; then
+    has_resources=true
+    echo "  Nomad Cluster"
+    echo "  -------------"
+    while IFS=: read -r hostname ip; do
+      ip_clean=$(echo "$ip" | cut -d'/' -f1)
+      printf "    %-10s %-15s http://%s:4646   %s.%s\n" "$hostname:" "$ip_clean" "$ip_clean" "$hostname" "${DNS_POSTFIX:-local}"
+    done <<< "$nomad_hosts"
+    echo "    Credentials: No authentication required"
+    echo
+  fi
+
+  # Kasm Workspaces
+  local kasm_host
+  kasm_host=$(jq -r '.external[] | select(.hostname | startswith("kasm")) | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
+  if [ -n "$kasm_host" ]; then
+    has_resources=true
+    local hostname ip ip_clean
+    hostname=$(echo "$kasm_host" | cut -d: -f1)
+    ip=$(echo "$kasm_host" | cut -d: -f2)
+    ip_clean=$(echo "$ip" | cut -d'/' -f1)
+    echo "  Kasm Workspaces"
+    echo "  ---------------"
+    printf "    %-10s %-15s https://%s       kasm.%s\n" "$hostname:" "$ip_clean" "$ip_clean" "${DNS_POSTFIX:-local}"
+    echo "    Credentials: terraform/terraform.tfvars (kasm_admin_password)"
+    echo
+  fi
+
+  # Traefik (check Nomad job status)
+  if isTraefikDeployed 2>/dev/null; then
+    has_resources=true
+    local nomad_ip
+    nomad_ip=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+    echo "  Traefik (Load Balancer)"
+    echo "  -----------------------"
+    echo "    Dashboard: http://$nomad_ip:8081/dashboard/"
+    echo "    HTTP:      Port 80"
+    echo "    HTTPS:     Port 443"
+    echo "    Credentials: No authentication required"
+    echo
+  fi
+
+  if [ "$has_resources" = "false" ]; then
+    warn "No deployed resources found"
+    return 1
+  fi
+
+  echo "------------------------------------------------------------------------------"
+  echo "  Domain: ${DNS_POSTFIX:-not set}"
+  echo "  Credentials: terraform/terraform.tfvars"
+  echo "=============================================================================="
+}
+
 # Refreshes hosts.json with actual VM IPs from Proxmox QEMU guest agent
 # This resolves DHCP IP mismatches after VM deployment
 function refreshHostsJsonFromProxmox() {
@@ -1171,8 +1295,8 @@ function purgeClusterResources() {
   # Define project VMID ranges
   # LXC containers
   local LXC_VMIDS=(
-    902         # step-ca (legacy)
-    909         # step-ca
+    902         # step-ca
+    909         # legacy (kept for cleanup of old deployments)
     910 911 912 # dns-main (dns-01, dns-02, dns-03)
     920 921 922 # dns-labnet (labnet-dns-01, labnet-dns-02, labnet-dns-03)
   )
@@ -1582,14 +1706,38 @@ EOF
     done
   fi
 
-  # Check if DNS is already deployed (skip password prompt if so)
+  # Check if DNS and CA are actually deployed (verify containers exist on Proxmox)
   local DNS_ALREADY_DEPLOYED=false
   if [ -f "hosts.json" ]; then
     local DNS_IP
     DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
     if [ -n "$DNS_IP" ] && [ "$DNS_IP" != "null" ]; then
-      DNS_ALREADY_DEPLOYED=true
-      info "DNS already deployed at $DNS_IP"
+      # Verify the LXC container actually exists on Proxmox (VMID 910 = dns-01, 902 = step-ca)
+      doing "Verifying DNS and CA containers exist on Proxmox..."
+      local dns_exists=false
+      local ca_exists=false
+
+      # Check across all cluster nodes for the containers
+      for node_ip in "${CLUSTER_NODE_IPS[@]}"; do
+        if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+           "$REMOTE_USER@$node_ip" "pct status 910" &>/dev/null; then
+          dns_exists=true
+        fi
+        if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=5 \
+           "$REMOTE_USER@$node_ip" "pct status 902" &>/dev/null; then
+          ca_exists=true
+        fi
+      done
+
+      if [ "$dns_exists" = "true" ] && [ "$ca_exists" = "true" ]; then
+        DNS_ALREADY_DEPLOYED=true
+        success "DNS ($DNS_IP) and CA containers verified on Proxmox"
+      else
+        warn "hosts.json has DNS/CA entries but containers not found on Proxmox"
+        warn "Will redeploy LXC containers..."
+        # Clean stale hosts.json entries
+        rm -f hosts.json
+      fi
     fi
   fi
 
@@ -1825,6 +1973,8 @@ EOF
   # Configure Nomad cluster (GlusterFS + cluster formation)
   setupNomadCluster
 
+  displayDeploymentSummary
+
   success "Deployment complete!"
 }
 
@@ -1977,17 +2127,10 @@ EOF
   updateDNSRecords
   updateRootCertificates
 
+  displayDeploymentSummary
+
   success "Critical services deployment complete!"
-
-  cat <<EOF
-
-#############################################################################
-Critical Services Deployed
-
-DNS servers and Certificate Authority are now running.
-You can now deploy Nomad (option 5), Kasm (option 6), or both.
-#############################################################################
-EOF
+  info "You can now deploy Nomad (option 5), Kasm (option 6), or both."
 }
 
 # Generic LXC template creation function
@@ -2211,13 +2354,12 @@ EOF
   local NOMAD_IP
   NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
 
-  echo
-  info "Dashboard: http://$NOMAD_IP:8081/dashboard/"
-  info "HTTP:      http://$NOMAD_IP:80"
-  info "HTTPS:     https://$NOMAD_IP:443"
-
   # Update DNS records for traefik
   updateDNSRecords
+
+  displayDeploymentSummary
+
+  success "Traefik deployment complete!"
 }
 
 function generateHostsJsonFromModules() {
@@ -2483,6 +2625,28 @@ function updateRootCertificates() {
       "echo 'nameserver ${DNS_IP}' > /etc/resolv.conf && echo 'search ${DNS_POSTFIX}' >> /etc/resolv.conf" \
       || warn "Failed to configure DNS on $node_ip"
   done
+
+  # Verify DNS resolution works before proceeding with ACME
+  doing "Verifying DNS resolution for ca.${DNS_POSTFIX}..."
+  local dns_ok=false
+  for attempt in $(seq 1 10); do
+    local resolved_ip
+    resolved_ip=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+      "dig +short ca.${DNS_POSTFIX} 2>/dev/null | head -1" || echo "")
+    if [ -n "$resolved_ip" ]; then
+      success "ca.${DNS_POSTFIX} resolves to $resolved_ip"
+      dns_ok=true
+      break
+    fi
+    echo "  Waiting for DNS propagation... (attempt $attempt/10)"
+    sleep 2
+  done
+
+  if [ "$dns_ok" != "true" ]; then
+    warn "DNS resolution failed for ca.${DNS_POSTFIX}"
+    warn "Falling back to IP-based ACME directory (may fail cert verification)"
+    ACME_DIR="https://${CA_IP}/acme/acme/directory"
+  fi
 
   doing "Registering ACME account 'default' against Step CA directory"
   ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" "
@@ -2950,6 +3114,7 @@ function updateTerraformFromClusterInfo() {
   local DNS_POSTFIX_VAL=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
   local BRIDGE_VAL=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
   local STORAGE_VAL=$(jq -r '.storage.selected // "local-lvm"' "$CLUSTER_INFO_FILE")
+  local STORAGE_TYPE_VAL=$(jq -r '.storage.type // "lvm"' "$CLUSTER_INFO_FILE")
 
   # Copy from example if doesn't exist
   if [ ! -f "$TFVARS_FILE" ]; then
@@ -2979,14 +3144,22 @@ function updateTerraformFromClusterInfo() {
   sed_inplace "s|^network_interface_bridge = .*|network_interface_bridge = \"$BRIDGE_VAL\"|" "$TFVARS_FILE"
   info "  network_interface_bridge = \"$BRIDGE_VAL\""
 
-  # Update lxc_storage
+  # Update lxc_storage - LXC containers require local block storage (not NFS)
+  # NFS and other file-level storage don't support container directories
+  local LXC_STORAGE_VAL="local-lvm"
+  if [ "$STORAGE_TYPE_VAL" = "nfs" ] || [ "$STORAGE_TYPE_VAL" = "cifs" ]; then
+    info "  Note: Using local-lvm for LXC (NFS/CIFS don't support containers)"
+  else
+    # For non-NFS shared storage (ceph, iscsi, lvm-thin), use the selected storage
+    LXC_STORAGE_VAL="$STORAGE_VAL"
+  fi
   if grep -q "^lxc_storage" "$TFVARS_FILE"; then
-    sed_inplace "s|^lxc_storage = .*|lxc_storage = \"$STORAGE_VAL\"|" "$TFVARS_FILE"
+    sed_inplace "s|^lxc_storage = .*|lxc_storage = \"$LXC_STORAGE_VAL\"|" "$TFVARS_FILE"
   else
     echo "" >> "$TFVARS_FILE"
-    echo "lxc_storage = \"$STORAGE_VAL\"" >> "$TFVARS_FILE"
+    echo "lxc_storage = \"$LXC_STORAGE_VAL\"" >> "$TFVARS_FILE"
   fi
-  info "  lxc_storage = \"$STORAGE_VAL\""
+  info "  lxc_storage = \"$LXC_STORAGE_VAL\""
 
   # Update vm_storage (for VM disks - should match template storage)
   if grep -q "^vm_storage" "$TFVARS_FILE"; then
@@ -3131,6 +3304,8 @@ function runEverything() {
 
   # Setup Nomad cluster
   setupNomadCluster
+
+  displayDeploymentSummary
 }
 
 function runEverythingButSSH() {
@@ -3186,6 +3361,8 @@ function runEverythingButSSH() {
 
   # Setup Nomad cluster
   setupNomadCluster
+
+  displayDeploymentSummary
 }
 
 function manualRollback() {
@@ -3383,6 +3560,8 @@ EOF
 
   setupNomadCluster
 
+  displayDeploymentSummary
+
   success "Nomad cluster deployment complete!"
 }
 
@@ -3469,22 +3648,7 @@ EOF
   # Update DNS records with actual IPs
   updateDNSRecords
 
-  # Get Kasm IP
-  KASM_IP=$(jq -r '.external[] | select(.hostname == "kasm01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-
-  cat <<EOF
-
-#############################################################################
-Kasm Deployment Complete!
-
-Kasm Workspaces has been deployed. Access the admin console at:
-  https://kasm.${DNS_POSTFIX}/
-
-Or directly at: https://${KASM_IP}/
-
-Default admin credentials are set via kasm_admin_password in terraform.tfvars.
-#############################################################################
-EOF
+  displayDeploymentSummary
 
   success "Kasm deployment complete!"
 }
