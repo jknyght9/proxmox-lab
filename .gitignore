@@ -5,6 +5,7 @@
 cluster-info.json
 crypto
 hosts.json
+logs/
 proxmox-lab-root-ca.crt
 terraform/lxc-step-ca/step-ca/
 terraform/vm-kasm/rendered/

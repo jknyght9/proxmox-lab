@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+function updateDNSRecords() {
+  # Load configuration from cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    PROXMOX_HOST=$(jq -r '.nodes[0].ip // ""' "$CLUSTER_INFO_FILE")
+
+    # Load cluster nodes if not already loaded
+    if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
+      loadClusterInfo
+    fi
+  fi
+
+  if [ -z "${DNS_POSTFIX}" ]; then
+    read -rp "$(question "Enter your DNS suffix: ")" DNS_POSTFIX
+  fi
+
+  if [ -z "${PROXMOX_HOST}" ]; then
+    read -rp "$(question "Enter Proxmox host IP: ")" PROXMOX_HOST
+  fi
+
+  # Try to generate/update hosts.json from Terraform
+  if [ ! -s hosts.json ]; then
+    generateHostsJson || true
+  fi
+
+  doing "Reading Proxmox node info from cluster-info.json..."
+  local NODE_RECORDS_JSON="[]"
+  local NODE_RECORDS_ALIAS_JSON="[]"
+
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    # Generate Proxmox node records from cluster-info.json
+    NODE_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '[.nodes[] | "\(.ip) \(.name) \(.name).\($suffix)"]' "$CLUSTER_INFO_FILE")"
+    # Create proxmox alias pointing to ALL nodes for round-robin DNS
+    NODE_RECORDS_ALIAS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '[.nodes[] | "\(.ip) proxmox proxmox.\($suffix)"]' "$CLUSTER_INFO_FILE")"
+
+    echo "  Proxmox nodes:"
+    jq -r '.nodes[] | "    - \(.name).\($suffix) -> \(.ip)"' --arg suffix "$DNS_POSTFIX" "$CLUSTER_INFO_FILE"
+    echo "  Round-robin alias:"
+    jq -r '.nodes[] | "    - proxmox.\($suffix) -> \(.ip)"' --arg suffix "$DNS_POSTFIX" "$CLUSTER_INFO_FILE"
+  else
+    warn "cluster-info.json not found, skipping Proxmox node records"
+  fi
+
+  doing "Generating service DNS records from hosts.json..."
+  local EXT_RECORDS_JSON="[]"
+  local DNS_IP=""
+
+  if [ -s hosts.json ]; then
+    EXT_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
+      '(.external // []) | map("\((.ip | split("/")[0])) \(.hostname) \(.hostname)." + $suffix)' hosts.json)"
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json | cut -d'/' -f1)
+
+    echo "  Services:"
+    jq -r --arg suffix "$DNS_POSTFIX" \
+      '(.external // [])[] | "    - \(.hostname).\($suffix) -> \(.ip | split("/")[0])"' hosts.json
+  else
+    warn "hosts.json not found - only Proxmox node records will be added"
+    warn "Run Terraform apply first, or create hosts.json manually"
+  fi
+
+  if [ -z "$DNS_IP" ]; then
+    read -rp "$(question "Enter primary DNS server IP (dns-01): ")" DNS_IP
+  fi
+
+  # Add "dns" alias pointing to dns-01
+  local DNS_ALIAS_JSON
+  DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
+
+  local ALL_DNS_RECORDS_JSON
+  ALL_DNS_RECORDS_JSON="$(jq -c -n \
+    --argjson a "$NODE_RECORDS_JSON" \
+    --argjson b "$EXT_RECORDS_JSON" \
+    --argjson c "$NODE_RECORDS_ALIAS_JSON" \
+    --argjson d "$DNS_ALIAS_JSON" \
+    '$a + $b + $c + $d | unique')"
+
+  local RECORD_COUNT
+  RECORD_COUNT=$(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON")
+
+  echo
+  info "Summary: $RECORD_COUNT A-records to add"
+
+  doing "Updating Pi-hole @ $DNS_IP..."
+  sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' && pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'" \
+    && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
+
+  # Trigger Nebula-Sync to propagate changes
+  doing "Triggering Nebula-Sync to propagate to replicas..."
+  if sshRun "$REMOTE_USER" "$DNS_IP" "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
+    success "Sync triggered"
+  else
+    warn "Nebula-Sync sync failed or not configured - records may need manual sync"
+  fi
+
+  read -rp "$(question "Update Proxmox nodes to use this DNS server? [Y/n]: ")" UPDATE_PROXMOX
+  UPDATE_PROXMOX=${UPDATE_PROXMOX:-Y}
+
+  if [[ "$UPDATE_PROXMOX" =~ ^[Yy]$ ]]; then
+    doing "Updating Proxmox nodes' DNS settings..."
+    for i in "${!CLUSTER_NODES[@]}"; do
+      local node="${CLUSTER_NODES[$i]}"
+      local ip="${CLUSTER_NODE_IPS[$i]}"
+      sshRun "$REMOTE_USER" "$ip" "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+      echo "  - $node: DNS set to $DNS_IP"
+    done
+    success "Proxmox DNS settings updated"
+  fi
+}
