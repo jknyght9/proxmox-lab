@@ -212,8 +212,9 @@ function ensureCriticalServices() {
     return 1
   fi
 
-  # Verify CA is actually responding (check step-ca health endpoint)
-  if ! curl -s --connect-timeout 5 -k "https://$CA_IP:9443/health" >/dev/null 2>&1; then
+  # Verify CA is actually responding (check step-ca health endpoint or roots.pem)
+  if ! curl -s --connect-timeout 5 -k "https://$CA_IP/health" >/dev/null 2>&1 && \
+     ! curl -s --connect-timeout 5 -k "https://$CA_IP/roots.pem" >/dev/null 2>&1; then
     error "CA server at $CA_IP is not responding."
     error "Ensure step-ca is running. Deploy critical services first (option 4)."
     return 1

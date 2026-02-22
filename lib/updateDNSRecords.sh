@@ -70,13 +70,35 @@ function updateDNSRecords() {
   local DNS_ALIAS_JSON
   DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
 
+  # Add Nomad service DNS records (services fronted by Traefik)
+  # All services pinned to nomad01, so DNS points there
+  local NOMAD_IP=""
+  local NOMAD_SERVICES_JSON="[]"
+  if [ -s hosts.json ]; then
+    # Always use nomad01 since all services are constrained there
+    NOMAD_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ]; then
+      # Add common Nomad service names
+      NOMAD_SERVICES_JSON="$(jq -c -n --arg ip "$NOMAD_IP" --arg suffix "$DNS_POSTFIX" '[
+        "\($ip) vault vault.\($suffix)",
+        "\($ip) auth auth.\($suffix)",
+        "\($ip) traefik traefik.\($suffix)"
+      ]')"
+      echo "  Nomad services (via Traefik @ $NOMAD_IP):"
+      echo "    - vault.$DNS_POSTFIX -> $NOMAD_IP"
+      echo "    - auth.$DNS_POSTFIX -> $NOMAD_IP"
+      echo "    - traefik.$DNS_POSTFIX -> $NOMAD_IP"
+    fi
+  fi
+
   local ALL_DNS_RECORDS_JSON
   ALL_DNS_RECORDS_JSON="$(jq -c -n \
     --argjson a "$NODE_RECORDS_JSON" \
     --argjson b "$EXT_RECORDS_JSON" \
     --argjson c "$NODE_RECORDS_ALIAS_JSON" \
     --argjson d "$DNS_ALIAS_JSON" \
-    '$a + $b + $c + $d | unique')"
+    --argjson e "$NOMAD_SERVICES_JSON" \
+    '$a + $b + $c + $d + $e | unique')"
 
   local RECORD_COUNT
   RECORD_COUNT=$(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON")

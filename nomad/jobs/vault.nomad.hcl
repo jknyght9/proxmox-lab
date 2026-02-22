@@ -5,42 +5,43 @@ job "vault" {
   group "vault" {
     count = 1
 
+    # Pin to same node as Traefik for consistency
+    constraint {
+      attribute = "${attr.unique.hostname}"
+      value     = "nomad01"
+    }
+
     network {
       mode = "host"
       port "api"     { static = 8200 }
       port "cluster" { static = 8201 }
     }
 
-    volume "vault-data" {
-      type   = "host"
-      source = "gluster-data"
-    }
-
     task "vault" {
       driver = "docker"
 
-      volume_mount {
-        volume      = "vault-data"
-        destination = "/vault"
+      env {
+        SKIP_CHOWN = "true"
+        VAULT_ADDR = "http://127.0.0.1:8200"
       }
 
       config {
         image        = "hashicorp/vault:1.15"
         network_mode = "host"
-        cap_add      = ["IPC_LOCK"]
-        args         = ["server", "-config=/vault/config/vault.hcl"]
+        privileged   = true
+        args         = ["server", "-config=/local/vault.hcl"]
         volumes = [
-          "local/vault.hcl:/vault/config/vault.hcl:ro",
+          "/srv/gluster/nomad-data/vault:/data/vault",
         ]
       }
 
       template {
         data = <<EOH
 ui = true
-disable_mlock = false
+disable_mlock = true
 
 storage "file" {
-  path = "/vault/file"
+  path = "/data/vault"
 }
 
 listener "tcp" {
@@ -66,7 +67,11 @@ EOH
 
         tags = [
           "traefik.enable=true",
-          "traefik.http.routers.vault.rule=Host(`vault.${DNS_POSTFIX}`)",
+          # HTTP router for ACME challenges and short name
+          "traefik.http.routers.vault-http.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`)",
+          "traefik.http.routers.vault-http.entrypoints=web",
+          # HTTPS router with TLS - accepts both FQDN and short name
+          "traefik.http.routers.vault.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`)",
           "traefik.http.routers.vault.entrypoints=websecure",
           "traefik.http.routers.vault.tls=true",
           "traefik.http.routers.vault.tls.certresolver=step-ca",

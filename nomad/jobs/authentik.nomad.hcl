@@ -1,9 +1,25 @@
+variable "postgres_password" {
+  description = "PostgreSQL password for Authentik database"
+  type        = string
+}
+
+variable "secret_key" {
+  description = "Authentik secret key for encryption"
+  type        = string
+}
+
 job "authentik" {
   datacenters = ["dc1"]
   type        = "service"
 
   group "authentik" {
     count = 1
+
+    # Pin to same node as Traefik for consistency
+    constraint {
+      attribute = "${attr.unique.hostname}"
+      value     = "nomad01"
+    }
 
     network {
       mode = "host"
@@ -13,19 +29,11 @@ job "authentik" {
       port "redis"    { static = 6379 }
     }
 
-    volume "authentik-data" {
-      type   = "host"
-      source = "gluster-data"
-    }
-
     # PostgreSQL - Database for Authentik
     task "postgres" {
       driver = "docker"
 
-      volume_mount {
-        volume      = "authentik-data"
-        destination = "/data"
-      }
+      user = "root"
 
       config {
         image        = "postgres:16-alpine"
@@ -39,7 +47,8 @@ job "authentik" {
         data = <<EOH
 POSTGRES_USER=authentik
 POSTGRES_DB=authentik
-POSTGRES_PASSWORD={{ file "/srv/gluster/nomad-data/authentik/.postgres_password" }}
+POSTGRES_PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
+PGDATA=/var/lib/postgresql/data
 EOH
         destination = "secrets/postgres.env"
         env         = true
@@ -60,20 +69,16 @@ EOH
     task "redis" {
       driver = "docker"
 
-      volume_mount {
-        volume      = "authentik-data"
-        destination = "/data"
-      }
-
       config {
         image        = "redis:7-alpine"
         network_mode = "host"
         args = [
           "--save", "60", "1",
           "--loglevel", "warning",
+          "--dir", "/data/redis",
         ]
         volumes = [
-          "/srv/gluster/nomad-data/authentik/redis:/data",
+          "/srv/gluster/nomad-data/authentik/redis:/data/redis",
         ]
       }
 
@@ -92,11 +97,6 @@ EOH
     task "server" {
       driver = "docker"
 
-      volume_mount {
-        volume      = "authentik-data"
-        destination = "/data"
-      }
-
       config {
         image        = "ghcr.io/goauthentik/server:2024.10"
         network_mode = "host"
@@ -109,12 +109,12 @@ EOH
 
       template {
         data = <<EOH
-AUTHENTIK_SECRET_KEY={{ file "/srv/gluster/nomad-data/authentik/.secret_key" }}
+AUTHENTIK_SECRET_KEY={{ env "NOMAD_VAR_secret_key" }}
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_POSTGRESQL__PASSWORD={{ file "/srv/gluster/nomad-data/authentik/.postgres_password" }}
+AUTHENTIK_POSTGRESQL__PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
 AUTHENTIK_REDIS__HOST=127.0.0.1
 AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
@@ -137,7 +137,11 @@ EOH
 
         tags = [
           "traefik.enable=true",
-          "traefik.http.routers.authentik.rule=Host(`auth.${DNS_POSTFIX}`)",
+          # HTTP router for ACME challenges and short name
+          "traefik.http.routers.authentik-http.rule=Host(`auth.${DNS_POSTFIX}`) || Host(`auth`)",
+          "traefik.http.routers.authentik-http.entrypoints=web",
+          # HTTPS router with TLS - accepts both FQDN and short name
+          "traefik.http.routers.authentik.rule=Host(`auth.${DNS_POSTFIX}`) || Host(`auth`)",
           "traefik.http.routers.authentik.entrypoints=websecure",
           "traefik.http.routers.authentik.tls=true",
           "traefik.http.routers.authentik.tls.certresolver=step-ca",
@@ -158,11 +162,6 @@ EOH
     task "worker" {
       driver = "docker"
 
-      volume_mount {
-        volume      = "authentik-data"
-        destination = "/data"
-      }
-
       config {
         image        = "ghcr.io/goauthentik/server:2024.10"
         network_mode = "host"
@@ -175,12 +174,12 @@ EOH
 
       template {
         data = <<EOH
-AUTHENTIK_SECRET_KEY={{ file "/srv/gluster/nomad-data/authentik/.secret_key" }}
+AUTHENTIK_SECRET_KEY={{ env "NOMAD_VAR_secret_key" }}
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_POSTGRESQL__PASSWORD={{ file "/srv/gluster/nomad-data/authentik/.postgres_password" }}
+AUTHENTIK_POSTGRESQL__PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
 AUTHENTIK_REDIS__HOST=127.0.0.1
 AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false

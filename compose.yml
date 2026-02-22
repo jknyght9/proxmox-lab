@@ -13,6 +13,16 @@ services:
     ports:
       - 8000:8000
     command: "serve -a 0.0.0.0:8000"
+  nomad:
+    image: hashicorp/nomad:1.9
+    container_name: nomad
+    working_dir: /nomad
+    volumes:
+      - ./nomad:/nomad
+    environment:
+      NOMAD_ADDR: "http://10.1.50.114:4646" # Update to your nomad01 IP
+    entrypoint: ["nomad"]
+    network_mode: host
   packer:
     build: ./packer
     #image: hashicorp/packer:latest
@@ -51,4 +61,3 @@ services:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
     network_mode: host
-

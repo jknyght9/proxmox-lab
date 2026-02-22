@@ -198,17 +198,45 @@ function createLabSDN() {
   if $SUBNET_EXISTS; then
     echo "    - subnet exists"
   else
-    cat > /etc/pve/sdn/subnets.cfg << EOF
+    # Use pvesh API to create subnet properly (ensures proper rule generation)
+    pvesh create /cluster/sdn/vnets/${SDN_VNET_NAME}/subnets \
+      -subnet "$SDN_SUBNET" \
+      -gateway "$SDN_GATEWAY" \
+      -snat 1 \
+      -type subnet 2>/dev/null || {
+      # Fallback to direct file write if API fails (older Proxmox versions)
+      echo "    - API create failed, using config file"
+      cat >> /etc/pve/sdn/subnets.cfg << EOF
 subnet: $SDN_ZONE_NAME-$SDN_GATEWAY-$SDN_SUBNET_CIDR
         vnet $SDN_VNET_NAME
         dnszoneprefix $SDN_SUBNET_PREFIX
         gateway $SDN_GATEWAY
         snat 1
 EOF
+    }
     echo "    - created"
   fi
 
+  # Enable IP forwarding (required for SNAT)
+  echo "[+] Enabling IP forwarding for SNAT..."
+  sysctl -w net.ipv4.ip_forward=1
+  if ! grep -q "^net.ipv4.ip_forward=1" /etc/sysctl.conf 2>/dev/null; then
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+  fi
+
+  # Apply SDN configuration (generates firewall/routing rules)
+  echo "[+] Applying SDN configuration..."
   pvesh set /cluster/sdn
+
+  # Verify SNAT rules were created
+  echo "[+] Verifying NAT rules..."
+  if iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "MASQUERADE\|SNAT"; then
+    echo "    - NAT rules active"
+  else
+    echo "    - WARNING: No NAT rules found, manually adding masquerade..."
+    iptables -t nat -A POSTROUTING -s ${SDN_SUBNET} ! -d ${SDN_SUBNET} -j MASQUERADE
+  fi
+
   echo -e "[+] SDN creation done\n"
 }
 

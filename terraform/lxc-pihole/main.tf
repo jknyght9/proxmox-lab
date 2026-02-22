@@ -168,6 +168,9 @@ resource "null_resource" "nebula_sync_setup" {
 
       echo "[+] Installing Nebula-Sync on primary node (${local.primary_node.hostname})..."
 
+      # Install curl if not available
+      apt-get update -qq && apt-get install -y -qq curl
+
       # Download Nebula-Sync binary
       cd /tmp && \
       curl -sSL -o nebula-sync.tar.gz \
@@ -435,6 +438,9 @@ export PATH="/usr/local/bin:\$PATH"
 echo "nameserver 1.1.1.1" > /etc/resolv.conf
 
 echo "[+] Installing Nebula-Sync on primary node..."
+
+# Install curl if not available
+apt-get update -qq && apt-get install -y -qq curl
 
 # Download and extract Nebula-Sync binary
 cd /tmp

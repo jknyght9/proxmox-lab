@@ -56,7 +56,7 @@ EOF
   if ! sshScript "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     AUTHENTIK_DIR="/srv/gluster/nomad-data/authentik"
 
-    # Create required directories
+    # Create required directories (maps to /data/authentik/* in containers)
     sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,redis,media,templates,certs}
 
     # Generate PostgreSQL password if not exists
@@ -73,18 +73,49 @@ EOF
       echo "Generated new Authentik secret key"
     fi
 
-    # Set ownership for volumes
-    sudo chown -R 1000:1000 "$AUTHENTIK_DIR"
+    # Set ownership - postgres runs as root in our config, redis as redis (999)
+    sudo chown -R root:root "$AUTHENTIK_DIR/postgres"
+    sudo chown -R 999:999 "$AUTHENTIK_DIR/redis"
+    sudo chown -R 1000:1000 "$AUTHENTIK_DIR/media" "$AUTHENTIK_DIR/templates" "$AUTHENTIK_DIR/certs"
 REMOTE_SCRIPT
   then
     error "Failed to prepare Authentik storage"
     return 1
   fi
 
-  # Deploy Authentik using the generic Nomad job deployer
-  if ! deployNomadJob "authentik" "nomad/jobs/authentik.nomad.hcl" "$AUTHENTIK_DIR"; then
+  # Read secrets from remote node
+  doing "Reading secrets for Nomad deployment..."
+  local POSTGRES_PASSWORD SECRET_KEY
+  POSTGRES_PASSWORD=$(sshRun "$VM_USER" "$NOMAD_IP" "sudo cat /srv/gluster/nomad-data/authentik/.postgres_password")
+  SECRET_KEY=$(sshRun "$VM_USER" "$NOMAD_IP" "sudo cat /srv/gluster/nomad-data/authentik/.secret_key")
+
+  if [ -z "$POSTGRES_PASSWORD" ] || [ -z "$SECRET_KEY" ]; then
+    error "Failed to read Authentik secrets"
     return 1
   fi
+
+  # Deploy Authentik with variables
+  doing "Deploying Authentik to Nomad cluster..."
+
+  # Render template with environment variables
+  export DNS_POSTFIX
+  envsubst '${DNS_POSTFIX}' < "nomad/jobs/authentik.nomad.hcl" > "/tmp/authentik-rendered.nomad.hcl"
+
+  # Copy to Nomad node
+  scpTo "/tmp/authentik-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.nomad.hcl"
+
+  # Run the job with variables
+  if ! sshRun "$VM_USER" "$NOMAD_IP" "nomad job run -var='postgres_password=$POSTGRES_PASSWORD' -var='secret_key=$SECRET_KEY' /tmp/authentik.nomad.hcl"; then
+    error "Failed to deploy authentik"
+    return 1
+  fi
+
+  # Wait for deployment and show status
+  doing "Waiting for authentik deployment..."
+  sleep 5
+  sshRun "$VM_USER" "$NOMAD_IP" "nomad job status authentik | head -25"
+
+  success "authentik deployed successfully!"
 
   # Update DNS records for authentik
   updateDNSRecords

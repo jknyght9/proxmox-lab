@@ -42,11 +42,23 @@ EOF
   if ! sshScript "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     VAULT_DIR="/srv/gluster/nomad-data/vault"
 
-    # Create required directories
-    sudo mkdir -p "$VAULT_DIR"/{file,config}
-    sudo chmod 700 "$VAULT_DIR"
+    # Clean up any stale data from previous deployments
+    if [ -d "$VAULT_DIR" ]; then
+      echo "Cleaning up previous Vault data..."
+      sudo rm -rf "$VAULT_DIR"
+    fi
 
-    echo "Vault storage directories created"
+    # Create storage directory with permissive permissions
+    sudo mkdir -p "$VAULT_DIR"
+    sudo chmod 777 "$VAULT_DIR"
+
+    # Verify directory is writable
+    if sudo touch "$VAULT_DIR/.write_test" && sudo rm "$VAULT_DIR/.write_test"; then
+      echo "Vault storage directory prepared and writable"
+    else
+      echo "ERROR: Vault storage directory is not writable"
+      exit 1
+    fi
 REMOTE_SCRIPT
   then
     error "Failed to prepare Vault storage"
@@ -58,15 +70,44 @@ REMOTE_SCRIPT
     return 1
   fi
 
-  # Wait for Vault to start
-  doing "Waiting for Vault to start..."
-  sleep 10
+  # Wait for Vault to start and find which node it's running on
+  # Use uninitcode=200&sealedcode=200 to accept uninitialized/sealed Vault as "running"
+  doing "Waiting for Vault to start (checking all Nomad nodes)..."
+
+  local VAULT_IP=""
+  local VAULT_READY=false
+  local ALL_NOMAD_IPS
+  ALL_NOMAD_IPS=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json | cut -d'/' -f1)
+
+  for attempt in {1..30}; do
+    for ip in $ALL_NOMAD_IPS; do
+      # Accept any response (even 501) as long as Vault is responding
+      if curl -s --connect-timeout 2 --max-time 3 "http://$ip:8200/v1/sys/health?uninitcode=200&sealedcode=200" >/dev/null 2>&1; then
+        VAULT_IP="$ip"
+        VAULT_READY=true
+        break 2
+      fi
+    done
+    sleep 2
+  done
+
+  if [ -z "$VAULT_IP" ]; then
+    VAULT_IP="$NOMAD_IP"  # Fallback for error messages
+  fi
+
+  info "Vault running on: $VAULT_IP"
+
+  if [ "$VAULT_READY" = "false" ]; then
+    error "Vault did not become responsive within 60 seconds"
+    info "Check Nomad logs: nomad alloc logs -job vault"
+    return 1
+  fi
 
   # Check Vault status and initialize if needed
   doing "Checking Vault initialization status..."
 
   local VAULT_STATUS
-  VAULT_STATUS=$(curl -s "http://$NOMAD_IP:8200/v1/sys/health" 2>/dev/null || echo '{"initialized": false}')
+  VAULT_STATUS=$(curl -sf --connect-timeout 5 --max-time 10 "http://$VAULT_IP:8200/v1/sys/health" 2>/dev/null || echo '{"initialized": false}')
 
   local IS_INITIALIZED
   IS_INITIALIZED=$(echo "$VAULT_STATUS" | jq -r '.initialized // false')
@@ -75,9 +116,9 @@ REMOTE_SCRIPT
     doing "Initializing Vault (1 key share for home lab simplicity)..."
 
     local INIT_RESPONSE
-    INIT_RESPONSE=$(curl -s -X PUT "http://$NOMAD_IP:8200/v1/sys/init" \
+    INIT_RESPONSE=$(curl -sf --connect-timeout 5 --max-time 30 -X PUT "http://$VAULT_IP:8200/v1/sys/init" \
       -H "Content-Type: application/json" \
-      -d '{"secret_shares": 1, "secret_threshold": 1}')
+      -d '{"secret_shares": 1, "secret_threshold": 1}' 2>&1)
 
     local UNSEAL_KEY ROOT_TOKEN
     UNSEAL_KEY=$(echo "$INIT_RESPONSE" | jq -r '.keys[0]')
@@ -89,15 +130,34 @@ REMOTE_SCRIPT
       return 1
     fi
 
-    # Store unseal key and root token on GlusterFS
-    doing "Storing Vault credentials on GlusterFS..."
-    sshRun "$VM_USER" "$NOMAD_IP" "echo '$UNSEAL_KEY' | sudo tee $VAULT_DIR/.unseal_key > /dev/null; echo '$ROOT_TOKEN' | sudo tee $VAULT_DIR/.root_token > /dev/null; sudo chmod 600 $VAULT_DIR/.unseal_key; sudo chmod 600 $VAULT_DIR/.root_token"
-
     success "Vault initialized successfully"
+
+    # Display credentials - user must save these securely
+    echo
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                        VAULT CREDENTIALS - SAVE THESE NOW                    ║"
+    echo "║                                                                              ║"
+    echo "║  These credentials will NOT be displayed again and are NOT stored on disk.   ║"
+    echo "║  Store them in a password manager or other secure location.                  ║"
+    echo "╠══════════════════════════════════════════════════════════════════════════════╣"
+    echo "║                                                                              ║"
+    printf "║  %-74s  ║\n" "UNSEAL KEY:"
+    printf "║  %-74s  ║\n" "$UNSEAL_KEY"
+    echo "║                                                                              ║"
+    printf "║  %-74s  ║\n" "ROOT TOKEN:"
+    printf "║  %-74s  ║\n" "$ROOT_TOKEN"
+    echo "║                                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    echo
+    read -rp "$(question "Have you saved these credentials securely? [y/N]: ")" SAVED_CREDS
+    if [[ ! "$SAVED_CREDS" =~ ^[Yy]$ ]]; then
+      warn "Please save the credentials above before continuing!"
+      read -rp "$(question "Press Enter when ready...")"
+    fi
 
     # Unseal Vault
     doing "Unsealing Vault..."
-    curl -s -X PUT "http://$NOMAD_IP:8200/v1/sys/unseal" \
+    curl -sf --connect-timeout 5 --max-time 10 -X PUT "http://$VAULT_IP:8200/v1/sys/unseal" \
       -H "Content-Type: application/json" \
       -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
 
@@ -106,10 +166,10 @@ REMOTE_SCRIPT
     # Enable KV secrets engine
     doing "Enabling KV v2 secrets engine..."
     sleep 2
-    curl -s -X POST "http://$NOMAD_IP:8200/v1/sys/mounts/secret" \
+    curl -sf --connect-timeout 5 --max-time 10 -X POST "http://$VAULT_IP:8200/v1/sys/mounts/secret" \
       -H "X-Vault-Token: $ROOT_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"type": "kv", "options": {"version": "2"}}' > /dev/null
+      -d '{"type": "kv", "options": {"version": "2"}}' > /dev/null 2>&1 || true
 
     success "KV v2 secrets engine enabled at secret/"
 
@@ -119,20 +179,26 @@ REMOTE_SCRIPT
     IS_SEALED=$(echo "$VAULT_STATUS" | jq -r '.sealed // true')
 
     if [ "$IS_SEALED" = "true" ]; then
-      doing "Vault is sealed. Attempting auto-unseal..."
-
-      # Try to read unseal key from GlusterFS
-      local UNSEAL_KEY
-      UNSEAL_KEY=$(sshRun "$VM_USER" "$NOMAD_IP" "sudo cat $VAULT_DIR/.unseal_key 2>/dev/null" || echo "")
+      warn "Vault is sealed and requires unsealing."
+      echo
+      read -rsp "$(question "Enter your Vault unseal key: ")" UNSEAL_KEY
+      echo
 
       if [ -n "$UNSEAL_KEY" ]; then
-        curl -s -X PUT "http://$NOMAD_IP:8200/v1/sys/unseal" \
+        local UNSEAL_RESPONSE
+        UNSEAL_RESPONSE=$(curl -sf --connect-timeout 5 --max-time 10 -X PUT "http://$VAULT_IP:8200/v1/sys/unseal" \
           -H "Content-Type: application/json" \
-          -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
-        success "Vault unsealed using stored key"
+          -d "{\"key\": \"$UNSEAL_KEY\"}" 2>&1)
+
+        if echo "$UNSEAL_RESPONSE" | jq -e '.sealed == false' >/dev/null 2>&1; then
+          success "Vault unsealed successfully"
+        else
+          error "Failed to unseal Vault. Check your unseal key."
+          return 1
+        fi
       else
-        warn "Could not find unseal key at /srv/gluster/nomad-data/vault/.unseal_key"
-        warn "You will need to unseal Vault manually"
+        error "No unseal key provided"
+        return 1
       fi
     else
       success "Vault is already initialized and unsealed"
@@ -146,12 +212,11 @@ REMOTE_SCRIPT
 
   echo
   info "Vault is running at: https://vault.${DNS_POSTFIX}/ (via Traefik)"
-  info "Or directly at: http://${NOMAD_IP}:8200/"
-  info "Root token stored at: /srv/gluster/nomad-data/vault/.root_token"
-  info "Unseal key stored at: /srv/gluster/nomad-data/vault/.unseal_key"
+  info "Or directly at: http://${VAULT_IP}:8200/"
   echo
-  warn "SECURITY NOTE: For production, use proper auto-unseal (AWS KMS, etc.)"
-  warn "and store root token securely. This setup is for home lab use."
+  warn "IMPORTANT: Vault credentials are NOT stored on disk."
+  warn "If Vault restarts, you will need to unseal it with your saved unseal key."
+  warn "If you lose your credentials, you will need to redeploy Vault from scratch."
 
   success "Vault deployment complete!"
 }
