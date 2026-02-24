@@ -1,13 +1,3 @@
-variable "postgres_password" {
-  description = "PostgreSQL password for Authentik database"
-  type        = string
-}
-
-variable "secret_key" {
-  description = "Authentik secret key for encryption"
-  type        = string
-}
-
 job "authentik" {
   datacenters = ["dc1"]
   type        = "service"
@@ -19,6 +9,12 @@ job "authentik" {
     constraint {
       attribute = "${attr.unique.hostname}"
       value     = "nomad01"
+    }
+
+    # Vault integration - fetch secrets at runtime using Workload Identity
+    vault {
+      role        = "authentik"
+      change_mode = "restart"
     }
 
     network {
@@ -47,7 +43,9 @@ job "authentik" {
         data = <<EOH
 POSTGRES_USER=authentik
 POSTGRES_DB=authentik
-POSTGRES_PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
+{{ with secret "secret/data/authentik" }}
+POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
+{{ end }}
 PGDATA=/var/lib/postgresql/data
 EOH
         destination = "secrets/postgres.env"
@@ -98,7 +96,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2024.10"
+        image        = "ghcr.io/goauthentik/server:2025.12"
         network_mode = "host"
         args         = ["server"]
         volumes = [
@@ -109,12 +107,14 @@ EOH
 
       template {
         data = <<EOH
-AUTHENTIK_SECRET_KEY={{ env "NOMAD_VAR_secret_key" }}
+{{ with secret "secret/data/authentik" }}
+AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
+AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
+{{ end }}
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_POSTGRESQL__PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
 AUTHENTIK_REDIS__HOST=127.0.0.1
 AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
@@ -163,7 +163,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2024.10"
+        image        = "ghcr.io/goauthentik/server:2025.12"
         network_mode = "host"
         args         = ["worker"]
         volumes = [
@@ -174,12 +174,14 @@ EOH
 
       template {
         data = <<EOH
-AUTHENTIK_SECRET_KEY={{ env "NOMAD_VAR_secret_key" }}
+{{ with secret "secret/data/authentik" }}
+AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
+AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
+{{ end }}
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_POSTGRESQL__PASSWORD={{ env "NOMAD_VAR_postgres_password" }}
 AUTHENTIK_REDIS__HOST=127.0.0.1
 AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false

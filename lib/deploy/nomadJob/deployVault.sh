@@ -8,14 +8,15 @@
 #   - Traefik deployed (recommended for ingress)
 #   - GlusterFS mounted at NOMAD_DATA_DIR
 #
-# Globals read: DNS_POSTFIX, KEY_PATH, VM_USER, VAULT_DIR
+# Globals read: DNS_POSTFIX, KEY_PATH, VM_USER, VAULT_DIR, VAULT_CREDENTIALS_FILE, SCRIPT_DIR
 # Arguments: None
 # Returns: 0 on success, 1 on failure
 #
 # Side effects:
 #   - Creates Vault storage directories on GlusterFS
 #   - Initializes Vault if not already initialized
-#   - Stores unseal key and root token at VAULT_DIR/.unseal_key and .root_token
+#   - Creates Vault policies and Nomad token role
+#   - Saves credentials to VAULT_CREDENTIALS_FILE (crypto/vault-credentials.json)
 function deployVaultOnly() {
   cat <<EOF
 
@@ -132,29 +133,6 @@ REMOTE_SCRIPT
 
     success "Vault initialized successfully"
 
-    # Display credentials - user must save these securely
-    echo
-    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
-    echo "║                        VAULT CREDENTIALS - SAVE THESE NOW                    ║"
-    echo "║                                                                              ║"
-    echo "║  These credentials will NOT be displayed again and are NOT stored on disk.   ║"
-    echo "║  Store them in a password manager or other secure location.                  ║"
-    echo "╠══════════════════════════════════════════════════════════════════════════════╣"
-    echo "║                                                                              ║"
-    printf "║  %-74s  ║\n" "UNSEAL KEY:"
-    printf "║  %-74s  ║\n" "$UNSEAL_KEY"
-    echo "║                                                                              ║"
-    printf "║  %-74s  ║\n" "ROOT TOKEN:"
-    printf "║  %-74s  ║\n" "$ROOT_TOKEN"
-    echo "║                                                                              ║"
-    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
-    echo
-    read -rp "$(question "Have you saved these credentials securely? [y/N]: ")" SAVED_CREDS
-    if [[ ! "$SAVED_CREDS" =~ ^[Yy]$ ]]; then
-      warn "Please save the credentials above before continuing!"
-      read -rp "$(question "Press Enter when ready...")"
-    fi
-
     # Unseal Vault
     doing "Unsealing Vault..."
     curl -sf --connect-timeout 5 --max-time 10 -X PUT "http://$VAULT_IP:8200/v1/sys/unseal" \
@@ -172,6 +150,16 @@ REMOTE_SCRIPT
       -d '{"type": "kv", "options": {"version": "2"}}' > /dev/null 2>&1 || true
 
     success "KV v2 secrets engine enabled at secret/"
+
+    # Configure Vault policies, token role, and save credentials
+    if ! configureVaultForNomad "$VAULT_IP" "$ROOT_TOKEN" "$UNSEAL_KEY"; then
+      warn "Failed to configure Vault for Nomad - you can retry with menu option 11"
+    else
+      # Configure Nomad servers to use Vault
+      if ! configureNomadVaultIntegration; then
+        warn "Failed to configure Nomad-Vault integration - you can retry with menu option 11"
+      fi
+    fi
 
   else
     # Vault already initialized, check if sealed
@@ -213,10 +201,9 @@ REMOTE_SCRIPT
   echo
   info "Vault is running at: https://vault.${DNS_POSTFIX}/ (via Traefik)"
   info "Or directly at: http://${VAULT_IP}:8200/"
+  info "Credentials: $VAULT_CREDENTIALS_FILE"
   echo
-  warn "IMPORTANT: Vault credentials are NOT stored on disk."
-  warn "If Vault restarts, you will need to unseal it with your saved unseal key."
-  warn "If you lose your credentials, you will need to redeploy Vault from scratch."
+  warn "If Vault restarts, run 'Unseal Vault' (option 10) to unseal it."
 
   success "Vault deployment complete!"
 }
@@ -232,4 +219,65 @@ function isVaultDeployed() {
   status=$(sshRun "$VM_USER" "$nomad_ip" "nomad job status vault 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
+}
+
+# configureVaultForNomad - Set up Vault policies, WIF, and save credentials
+#
+# Arguments:
+#   $1 - Vault IP address
+#   $2 - Root token
+#   $3 - Unseal key
+# Returns: 0 on success, 1 on failure
+function configureVaultForNomad() {
+  local VAULT_IP="$1"
+  local ROOT_TOKEN="$2"
+  local UNSEAL_KEY="$3"
+  local VAULT_ADDR="http://${VAULT_IP}:8200"
+
+  doing "Configuring Vault for Nomad integration..."
+
+  # Upload and apply authentik policy
+  doing "Creating authentik policy..."
+  local AUTHENTIK_POLICY
+  AUTHENTIK_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/authentik.hcl")
+
+  if ! curl -sf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/authentik" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"policy\": $(echo "$AUTHENTIK_POLICY" | jq -Rs .)}" > /dev/null; then
+    error "Failed to create authentik policy"
+    return 1
+  fi
+  success "Created authentik policy"
+
+  # Save credentials to file (needed for unsealing and admin access)
+  doing "Saving credentials to $VAULT_CREDENTIALS_FILE..."
+
+  # Ensure crypto directory exists
+  mkdir -p "$(dirname "$VAULT_CREDENTIALS_FILE")"
+
+  local TIMESTAMP
+  TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  cat > "$VAULT_CREDENTIALS_FILE" <<EOF
+{
+  "unseal_key": "$UNSEAL_KEY",
+  "root_token": "$ROOT_TOKEN",
+  "vault_address": "$VAULT_ADDR",
+  "initialized_at": "$TIMESTAMP"
+}
+EOF
+
+  # Set restrictive permissions
+  chmod 600 "$VAULT_CREDENTIALS_FILE"
+
+  success "Credentials saved to $VAULT_CREDENTIALS_FILE"
+
+  # Configure Vault for Workload Identity Federation
+  if ! configureVaultWIF; then
+    error "Failed to configure Vault WIF"
+    return 1
+  fi
+
+  return 0
 }

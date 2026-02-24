@@ -32,3 +32,6 @@ VMID_KASM=930
 VMID_DOCKER_TEMPLATE=9001
 VMID_NOMAD_TEMPLATE=9002
 VMID_BASE_TEMPLATE=9999
+
+# Vault credentials file (gitignored - contains sensitive data)
+VAULT_CREDENTIALS_FILE="$SCRIPT_DIR/crypto/vault-credentials.json"

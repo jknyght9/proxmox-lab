@@ -18,6 +18,9 @@ source "$SCRIPT_DIR/lib/deploy/rollbackManual.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployAuthentik.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployTraefik.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployVault.sh"
+source "$SCRIPT_DIR/lib/deploy/nomadJob/unsealVault.sh"
+source "$SCRIPT_DIR/lib/deploy/configureVaultWIF.sh"
+source "$SCRIPT_DIR/lib/deploy/configureNomadVaultIntegration.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployKasm.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployNomad.sh"
 source "$SCRIPT_DIR/lib/proxmox/clusterHelpers.sh"
@@ -195,14 +198,16 @@ function showMenu() {
   echo "  5) Deploy Nomad only"
   echo "  6) Deploy Kasm only"
   echo "  7) Deploy Traefik load balancer (on Nomad)"
-  echo "  8) Deploy Authentik SSO (on Nomad)"
-  echo "  9) Deploy Vault secrets manager (on Nomad)"
-  echo " 10) Build DNS records"
-  echo " 11) Regenerate CA"
-  echo " 12) Update Proxmox root certificates"
-  echo " 13) Rollback service deployment (Terraform)"
-  echo " 14) Purge service deployment (Emergency)"
-  echo " 15) Purge entire deployment"
+  echo "  8) Deploy Vault secrets manager (on Nomad)"
+  echo "  9) Deploy Authentik SSO (on Nomad)"
+  echo " 10) Unseal Vault"
+  echo " 11) Configure Nomad-Vault integration"
+  echo " 12) Build DNS records"
+  echo " 13) Regenerate CA"
+  echo " 14) Update Proxmox root certificates"
+  echo " 15) Rollback service deployment (Terraform)"
+  echo " 16) Purge service deployment (Emergency)"
+  echo " 17) Purge entire deployment"
   echo "  0) Exit"
   echo
 }
@@ -211,7 +216,7 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-15]: ")" choice
+  read -rp "$(question "Select an option [0-17]: ")" choice
 
   case $choice in
     1) runEverything;;
@@ -221,14 +226,16 @@ while true; do
     5) deployNomadOnly;;
     6) deployKasmOnly;;
     7) deployTraefikOnly;;
-    8) deployAuthentikOnly;;
-    9) deployVaultOnly;;
-    10) updateDNSRecords;;
-    11) regenerateCA;;
-    12) updateRootCertificates;;
-    13) rollbackManual;;
-    14) purgeClusterResources;;
-    15) purgeDeployment;;
+    8) deployVaultOnly;;
+    9) deployAuthentikOnly;;
+    10) unsealVault;;
+    11) configureNomadVaultIntegration;;
+    12) updateDNSRecords;;
+    13) regenerateCA;;
+    14) updateRootCertificates;;
+    15) rollbackManual;;
+    16) purgeClusterResources;;
+    17) purgeDeployment;;
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
   esac
