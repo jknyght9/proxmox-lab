@@ -200,14 +200,12 @@ function showMenu() {
   echo "  7) Deploy Traefik load balancer (on Nomad)"
   echo "  8) Deploy Vault secrets manager (on Nomad)"
   echo "  9) Deploy Authentik SSO (on Nomad)"
-  echo " 10) Unseal Vault"
-  echo " 11) Configure Nomad-Vault integration"
-  echo " 12) Build DNS records"
-  echo " 13) Regenerate CA"
-  echo " 14) Update Proxmox root certificates"
-  echo " 15) Rollback service deployment (Terraform)"
-  echo " 16) Purge service deployment (Emergency)"
-  echo " 17) Purge entire deployment"
+  echo " 10) Build DNS records"
+  echo " 11) Regenerate CA"
+  echo " 12) Update Proxmox root certificates"
+  echo " 13) Rollback service deployment (Terraform)"
+  echo " 14) Purge service deployment (Emergency)"
+  echo " 15) Purge entire deployment"
   echo "  0) Exit"
   echo
 }
@@ -216,7 +214,7 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-17]: ")" choice
+  read -rp "$(question "Select an option [0-15]: ")" choice
 
   case $choice in
     1) runEverything;;
@@ -228,14 +226,12 @@ while true; do
     7) deployTraefikOnly;;
     8) deployVaultOnly;;
     9) deployAuthentikOnly;;
-    10) unsealVault;;
-    11) configureNomadVaultIntegration;;
-    12) updateDNSRecords;;
-    13) regenerateCA;;
-    14) updateRootCertificates;;
-    15) rollbackManual;;
-    16) purgeClusterResources;;
-    17) purgeDeployment;;
+    10) updateDNSRecords;;
+    11) regenerateCA;;
+    12) updateRootCertificates;;
+    13) rollbackManual;;
+    14) purgeClusterResources;;
+    15) purgeDeployment;;
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
   esac
