@@ -15,31 +15,38 @@ graph TD
 
     subgraph phase2["Phase 2: Network & Templates"]
         SDN[labnet SDN]
-        TPL[VM/LXC Templates]
+        TPL[Packer Templates]
     end
 
     subgraph phase3["Phase 3: Core Services"]
-        PIHOLE_EXT[pihole-external]
+        DNS[DNS Cluster]
         STEPCA[step-ca]
     end
 
     subgraph phase4["Phase 4: Infrastructure"]
-        PIHOLE_INT[pihole-internal]
-        DOCKER[Docker Swarm]
+        NOMAD[Nomad Cluster]
         KASM[Kasm Workspaces]
+    end
+
+    subgraph phase5["Phase 5: Nomad Jobs"]
+        TRAEFIK[Traefik]
+        VAULT[Vault]
+        AUTHENTIK[Authentik]
     end
 
     SSH --> PVE
     PVE --> SDN
     PVE --> TPL
-    SDN --> PIHOLE_INT
-    TPL --> PIHOLE_EXT
+    TPL --> DNS
     TPL --> STEPCA
-    PIHOLE_EXT --> STEPCA
-    TPL --> DOCKER
+    DNS --> STEPCA
+    TPL --> NOMAD
     TPL --> KASM
-    STEPCA --> DOCKER
+    STEPCA --> NOMAD
     STEPCA --> KASM
+    NOMAD --> TRAEFIK
+    TRAEFIK --> VAULT
+    VAULT --> AUTHENTIK
 ```
 
 ### Dependency Explanation
@@ -49,12 +56,14 @@ graph TD
 | 1 | SSH Keys | - | Required for all remote operations |
 | 1 | Proxmox Config | SSH Keys | Needs SSH access to configure |
 | 2 | SDN (labnet) | Proxmox Config | SDN is a Proxmox feature |
-| 2 | Templates | Proxmox Config | Need storage and network |
-| 3 | pihole-external | Templates | Cloned from LXC template |
-| 3 | step-ca | pihole-external | Needs DNS resolution |
-| 4 | pihole-internal | SDN | Runs on labnet |
-| 4 | Docker Swarm | step-ca | Needs TLS certificates |
-| 4 | Kasm | step-ca | Needs TLS certificates |
+| 2 | Packer Templates | Proxmox Config | Need storage and network |
+| 3 | DNS Cluster | Packer Templates | Deploy from templates |
+| 3 | step-ca | DNS Cluster | Needs DNS resolution |
+| 4 | Nomad Cluster | step-ca, Templates | Needs TLS certificates |
+| 4 | Kasm | step-ca, Templates | Needs TLS certificates |
+| 5 | Traefik | Nomad Cluster | Runs as Nomad job |
+| 5 | Vault | Traefik | Needs ingress routing |
+| 5 | Authentik | Vault | Fetches secrets from Vault |
 
 ## Service Communication Matrix
 
@@ -62,14 +71,18 @@ graph TD
 
 | Service | Talks To | Protocol | Purpose |
 |---------|----------|----------|---------|
-| **All Services** | pihole-external | DNS (53) | Name resolution |
-| **Docker VMs** | step-ca | HTTPS (443) | Certificate requests |
+| **All Services** | DNS Cluster | DNS (53) | Name resolution |
+| **Nomad VMs** | step-ca | HTTPS (443) | Certificate requests |
 | **Kasm** | step-ca | HTTPS (443) | Certificate requests |
-| **Docker nodes** | Docker nodes | TCP 2377, 7946 | Swarm management |
+| **Nomad nodes** | Nomad nodes | TCP 4646-4648 | Cluster management |
+| **Nomad nodes** | Nomad nodes | GlusterFS | Replicated storage |
+| **Traefik** | Nomad API | HTTP (4646) | Service discovery |
+| **Traefik** | step-ca | HTTPS (443) | ACME challenges |
+| **Authentik** | Vault | HTTP (8200) | Fetch secrets via WIF |
 | **Proxmox** | step-ca | HTTPS (443) | Web UI certificate |
-| **pihole-internal** | pihole-external | DNS (53) | Forwarded queries |
-| **Clients** | Kasm | HTTPS (443) | Web access |
-| **Clients** | pihole-external | HTTP (80) | Admin interface |
+| **labnet-dns** | dns-01 | DNS (53) | Forwarded queries |
+| **Clients** | Traefik | HTTPS (443) | Service access |
+| **Clients** | DNS Cluster | HTTP (80) | Admin interface |
 
 ### Communication Flow Diagram
 
@@ -107,49 +120,49 @@ graph LR
     PROXMOX --> STEPCA
 ```
 
-## Docker Swarm Topology
+## Nomad Cluster Topology
 
-### Manager Node Relationships
+### Server Node Relationships
 
-All three Docker nodes are configured as Swarm managers for high availability:
+All three Nomad nodes are configured as both servers and clients for high availability:
 
 ```mermaid
 graph TB
-    subgraph swarm["Docker Swarm Cluster"]
-        D1[docker01<br/>Manager - Leader]
-        D2[docker02<br/>Manager - Reachable]
-        D3[docker03<br/>Manager - Reachable]
+    subgraph nomad["Nomad Cluster (dc1)"]
+        N1[nomad01<br/>Server+Client - Leader]
+        N2[nomad02<br/>Server+Client - Follower]
+        N3[nomad03<br/>Server+Client - Follower]
 
-        D1 <-->|Raft Consensus| D2
-        D2 <-->|Raft Consensus| D3
-        D3 <-->|Raft Consensus| D1
+        N1 <-->|Raft Consensus| N2
+        N2 <-->|Raft Consensus| N3
+        N3 <-->|Raft Consensus| N1
     end
 
     subgraph storage["Shared Storage"]
-        GFS[GlusterFS Volume<br/>/gluster/volume1]
+        GFS[GlusterFS Volume<br/>/srv/gluster/nomad-data]
     end
 
-    D1 --> GFS
-    D2 --> GFS
-    D3 --> GFS
+    N1 --> GFS
+    N2 --> GFS
+    N3 --> GFS
 ```
 
-### Swarm Port Usage
+### Nomad Port Usage
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 2377 | TCP | Cluster management |
-| 7946 | TCP/UDP | Node discovery and gossip |
-| 4789 | UDP | Overlay network (VXLAN) |
+| 4646 | TCP | HTTP API and UI |
+| 4647 | TCP | RPC (server-to-server) |
+| 4648 | TCP/UDP | Serf gossip |
 
 ### GlusterFS Replication
 
 ```mermaid
 graph LR
     subgraph gluster["GlusterFS Replicated Volume"]
-        B1[Brick 1<br/>docker01:/gluster/volume1]
-        B2[Brick 2<br/>docker02:/gluster/volume1]
-        B3[Brick 3<br/>docker03:/gluster/volume1]
+        B1[Brick 1<br/>nomad01:/srv/gluster/nomad-data]
+        B2[Brick 2<br/>nomad02:/srv/gluster/nomad-data]
+        B3[Brick 3<br/>nomad03:/srv/gluster/nomad-data]
 
         B1 <-->|Sync| B2
         B2 <-->|Sync| B3
@@ -157,37 +170,79 @@ graph LR
     end
 ```
 
-Data written to any node is replicated to all three nodes.
+Data written to any node is replicated to all three nodes. Nomad jobs store persistent data here.
 
-## Pihole DNS Relationships
+## Pi-hole DNS Relationships
 
-### External Pihole (pihole-external)
+### Main DNS Cluster (dns-01, dns-02, dns-03)
 
 ```mermaid
 graph TD
-    subgraph pihole_ext["pihole-external Stack"]
-        PH[Pihole<br/>Port 53]
+    subgraph dns_cluster["Main DNS Cluster"]
+        DNS01[dns-01<br/>Primary + Gravity Sync]
+        DNS02[dns-02<br/>Secondary]
+        DNS03[dns-03<br/>Tertiary]
+    end
+
+    subgraph stack["DNS Resolution Stack"]
+        PH[Pi-hole v6<br/>Port 53]
         UB[Unbound<br/>Port 5335]
-        DC[dnscrypt-proxy<br/>Port 5053]
     end
 
-    CLIENT[Client Query] --> PH
+    CLIENT[Client Query] --> DNS01
+    CLIENT --> DNS02
+    CLIENT --> DNS03
+    DNS01 -->|Gravity Sync| DNS02
+    DNS01 -->|Gravity Sync| DNS03
     PH -->|Recursive| UB
-    UB -->|Encrypted| DC
-    DC -->|DoH| INTERNET((Internet))
+    UB -->|DNS-over-TLS| INTERNET((Internet))
 ```
 
-### Internal Pihole (pihole-internal)
+### Labnet DNS (labnet-dns-01, labnet-dns-02)
 
 ```mermaid
 graph TD
-    subgraph pihole_int["pihole-internal"]
-        PH_INT[Pihole<br/>DNS + DHCP]
+    subgraph labnet_dns["Labnet DNS"]
+        LDNS01[labnet-dns-01<br/>SDN Primary]
+        LDNS02[labnet-dns-02<br/>SDN Secondary]
     end
 
-    LAB_VM[Lab VM] --> PH_INT
-    PH_INT -->|Forward| PIHOLE_EXT[pihole-external]
+    LAB_VM[SDN VM] --> LDNS01
+    LAB_VM --> LDNS02
+    LDNS01 -->|Forward| DNS01[dns-01]
+    LDNS02 -->|Forward| DNS01
 ```
+
+## Vault Workload Identity Federation (WIF)
+
+Nomad jobs authenticate to Vault using JWT-based Workload Identity instead of long-lived tokens:
+
+```mermaid
+sequenceDiagram
+    participant Job as Nomad Job
+    participant Nomad as Nomad Server
+    participant Vault as Vault API
+    participant JWKS as Nomad JWKS
+
+    Job->>Nomad: Request workload identity
+    Nomad->>Nomad: Sign JWT with job metadata
+    Nomad-->>Job: Return signed JWT
+    Job->>Vault: Authenticate with JWT
+    Vault->>JWKS: Fetch public keys
+    JWKS-->>Vault: Return JWKS
+    Vault->>Vault: Verify JWT signature
+    Vault->>Vault: Check role bindings
+    Vault-->>Job: Return Vault token
+    Job->>Vault: Fetch secrets
+    Vault-->>Job: Return secrets
+```
+
+Key points:
+
+- No secrets stored on Nomad nodes
+- JWT contains job metadata (job ID, task, namespace)
+- Vault validates JWT against Nomad's JWKS endpoint
+- Each job maps to a Vault role with specific policies
 
 ## Certificate Request Flow
 
@@ -196,49 +251,69 @@ When a service needs a TLS certificate:
 ```mermaid
 sequenceDiagram
     participant Service
-    participant ACME as acme.sh
-    participant DNS as pihole-external
+    participant Traefik
+    participant DNS as dns-01
     participant CA as step-ca
 
-    Service->>ACME: Request certificate
-    ACME->>DNS: Resolve ca.mylab.lan
-    DNS-->>ACME: Return step-ca IP
-    ACME->>CA: ACME challenge (HTTPS)
-    CA->>CA: Verify domain ownership
-    CA-->>ACME: Issue certificate
-    ACME->>Service: Install cert + key
+    Service->>Traefik: Register with Nomad tags
+    Traefik->>Traefik: Detect new service
+    Traefik->>DNS: Resolve service FQDN
+    DNS-->>Traefik: Return IP address
+    Traefik->>CA: ACME HTTP challenge
+    CA->>Traefik: Verify challenge
+    CA-->>Traefik: Issue certificate
+    Traefik->>Service: Route traffic with TLS
 ```
 
 ## Failure Scenarios
 
-### Single Docker Node Failure
+### Single Nomad Node Failure
 
 ```mermaid
 graph TB
     subgraph healthy["Healthy State"]
-        H1[docker01 ✓]
-        H2[docker02 ✓]
-        H3[docker03 ✓]
+        H1[nomad01 ✓]
+        H2[nomad02 ✓]
+        H3[nomad03 ✓]
     end
 
     subgraph failure["Node Failure"]
-        F1[docker01 ✓]
-        F2[docker02 ✗]
-        F3[docker03 ✓]
+        F1[nomad01 ✗]
+        F2[nomad02 ✓]
+        F3[nomad03 ✓]
     end
 
-    healthy -->|docker02 fails| failure
+    healthy -->|nomad01 fails| failure
 
-    style F2 fill:#f66
+    style F1 fill:#f66
 ```
 
-**Impact:** Swarm continues operating. Services on failed node are rescheduled.
+**Impact:**
+- If nomad01 fails: Traefik, Vault, and Authentik become unavailable (pinned to nomad01)
+- Cluster remains operational with 2 servers (quorum maintained)
+- GlusterFS continues with 2 replicas
 
-### Pihole-External Failure
+**Mitigation:**
+- Redeploy jobs without node constraint, or
+- Restore nomad01 from backup
 
-**Impact:** All DNS resolution fails for external network.
+### DNS Cluster Failure
 
-**Mitigation:** Configure a backup DNS in your router.
+**Impact:** DNS resolution fails if all DNS nodes are down.
+
+**Mitigation:**
+- Multiple DNS nodes provide redundancy
+- Configure secondary DNS in router settings
+
+### Vault Sealed/Failure
+
+**Impact:**
+- Authentik cannot fetch secrets (fails to start)
+- New certificates can still be issued via Traefik
+
+**Mitigation:**
+- Unseal Vault using stored unseal key
+- See [Vault Operations](../operations/vault-operations.md)
 
 ### Step-CA Failure
 
@@ -251,11 +326,15 @@ graph TB
 | Service | Health Check | Expected Response |
 |---------|--------------|-------------------|
 | step-ca | `https://ca.mylab.lan/health` | `{"status":"ok"}` |
-| pihole | `http://pihole-ip/admin/api.php` | JSON response |
-| Docker | `docker node ls` | Node list |
+| Pi-hole | `http://dns-ip/admin/api.php` | JSON response |
+| Nomad | `nomad server members` | Server list |
+| Vault | `curl http://nomad01:8200/v1/sys/health` | JSON with `initialized: true` |
+| Traefik | `http://nomad01:8081/api/http/routers` | JSON router list |
+| Authentik | `http://nomad01:9000/-/health/live/` | HTTP 200 |
 
 ## Next Steps
 
 - [:octicons-arrow-right-24: Certificate Chain](certificate-chain.md) - TLS certificate hierarchy
-- [:octicons-arrow-right-24: Docker Swarm Operations](../operations/docker-swarm-operations.md) - Managing the cluster
+- [:octicons-arrow-right-24: Nomad Operations](../operations/nomad-operations.md) - Managing the cluster
+- [:octicons-arrow-right-24: Vault Operations](../operations/vault-operations.md) - Secrets management
 - [:octicons-arrow-right-24: Troubleshooting](../troubleshooting/common-issues.md) - When things go wrong

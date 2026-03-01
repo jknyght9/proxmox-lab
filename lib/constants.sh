@@ -35,3 +35,9 @@ VMID_BASE_TEMPLATE=9999
 
 # Vault credentials file (gitignored - contains sensitive data)
 VAULT_CREDENTIALS_FILE="$SCRIPT_DIR/crypto/vault-credentials.json"
+
+# Samba AD Domain Controller configuration
+# AD_REALM and AD_DOMAIN are derived dynamically from DNS_POSTFIX in deploySambaAD.sh
+# Example: DNS_POSTFIX="mylab.lan" -> AD_REALM="AD.MYLAB.LAN", AD_DOMAIN="AD"
+SAMBA_DC01_DIR="$NOMAD_DATA_DIR/samba-dc01"
+SAMBA_DC02_DIR="$NOMAD_DATA_DIR/samba-dc02"

@@ -73,10 +73,12 @@ function updateDNSRecords() {
   # Add Nomad service DNS records (services fronted by Traefik)
   # All services pinned to nomad01, so DNS points there
   local NOMAD_IP=""
+  local NOMAD02_IP=""
   local NOMAD_SERVICES_JSON="[]"
   if [ -s hosts.json ]; then
     # Always use nomad01 since all services are constrained there
     NOMAD_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    NOMAD02_IP=$(jq -r '.external[] | select(.hostname == "nomad02") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
     if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ]; then
       # Add common Nomad service names
       NOMAD_SERVICES_JSON="$(jq -c -n --arg ip "$NOMAD_IP" --arg suffix "$DNS_POSTFIX" '[
@@ -91,6 +93,29 @@ function updateDNSRecords() {
     fi
   fi
 
+  # Add Samba AD DNS records if AD is configured
+  local AD_RECORDS_JSON="[]"
+  local AD_REALM_FROM_CONFIG=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    AD_REALM_FROM_CONFIG=$(jq -r '.ad_config.realm // ""' "$CLUSTER_INFO_FILE")
+  fi
+  if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ] && [ -n "$AD_REALM_FROM_CONFIG" ] && [ "$AD_REALM_FROM_CONFIG" != "null" ]; then
+    local AD_REALM_LOWER
+    AD_REALM_LOWER=$(echo "$AD_REALM_FROM_CONFIG" | tr '[:upper:]' '[:lower:]')
+    AD_RECORDS_JSON="$(jq -c -n --arg ip "$NOMAD_IP" --arg realm "$AD_REALM_LOWER" '[
+      "\($ip) samba-dc01 samba-dc01.\($realm)"
+    ]')"
+    if [ -n "$NOMAD02_IP" ] && [ "$NOMAD02_IP" != "null" ]; then
+      AD_RECORDS_JSON="$(echo "$AD_RECORDS_JSON" | jq -c --arg ip "$NOMAD02_IP" --arg realm "$AD_REALM_LOWER" \
+        '. + ["\($ip) samba-dc02 samba-dc02.\($realm)"]')"
+    fi
+    echo "  Samba AD Domain Controllers:"
+    echo "    - samba-dc01.$AD_REALM_LOWER -> $NOMAD_IP"
+    if [ -n "$NOMAD02_IP" ] && [ "$NOMAD02_IP" != "null" ]; then
+      echo "    - samba-dc02.$AD_REALM_LOWER -> $NOMAD02_IP"
+    fi
+  fi
+
   local ALL_DNS_RECORDS_JSON
   ALL_DNS_RECORDS_JSON="$(jq -c -n \
     --argjson a "$NODE_RECORDS_JSON" \
@@ -98,7 +123,8 @@ function updateDNSRecords() {
     --argjson c "$NODE_RECORDS_ALIAS_JSON" \
     --argjson d "$DNS_ALIAS_JSON" \
     --argjson e "$NOMAD_SERVICES_JSON" \
-    '$a + $b + $c + $d + $e | unique')"
+    --argjson f "$AD_RECORDS_JSON" \
+    '$a + $b + $c + $d + $e + $f | unique')"
 
   local RECORD_COUNT
   RECORD_COUNT=$(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON")

@@ -15,27 +15,39 @@ graph TB
 
         subgraph proxmox["Proxmox VE Host"]
             subgraph lxc_containers["LXC Containers"]
-                PIHOLE_EXT[pihole-external<br/>LXC 900<br/>10.1.50.3]
-                STEPCA[step-ca<br/>LXC 902<br/>10.1.50.4]
-                PIHOLE_INT[pihole-internal<br/>LXC 901<br/>172.16.0.3]
+                DNS01[dns-01<br/>LXC 910<br/>Primary DNS]
+                DNS02[dns-02<br/>LXC 911<br/>Secondary DNS]
+                STEPCA[step-ca<br/>LXC 902<br/>Certificate Authority]
+                LABNET_DNS[labnet-dns-01<br/>LXC 920<br/>SDN DNS]
             end
 
             subgraph virtual_machines["Virtual Machines"]
-                DOCKER1[docker01<br/>VM 905]
-                DOCKER2[docker02<br/>VM 906]
-                DOCKER3[docker03<br/>VM 907]
-                KASM[kasm01<br/>VM 910]
+                NOMAD1[nomad01<br/>VM 905<br/>Nomad Server+Client]
+                NOMAD2[nomad02<br/>VM 906<br/>Nomad Server+Client]
+                NOMAD3[nomad03<br/>VM 907<br/>Nomad Server+Client]
+                KASM[kasm01<br/>VM 930]
+            end
+
+            subgraph nomad_jobs["Nomad Jobs (on nomad01)"]
+                TRAEFIK[Traefik<br/>Reverse Proxy]
+                VAULT[Vault<br/>Secrets Manager]
+                AUTHENTIK[Authentik<br/>SSO/Identity]
             end
         end
     end
 
     WAN --> ROUTER
-    ROUTER --> PIHOLE_EXT
-    PIHOLE_EXT --> STEPCA
-    DOCKER1 <--> DOCKER2
-    DOCKER2 <--> DOCKER3
-    DOCKER3 <--> DOCKER1
-    DOCKER1 & DOCKER2 & DOCKER3 --> STEPCA
+    ROUTER --> DNS01
+    DNS01 --> STEPCA
+    NOMAD1 <-->|Raft Consensus| NOMAD2
+    NOMAD2 <-->|Raft Consensus| NOMAD3
+    NOMAD3 <-->|Raft Consensus| NOMAD1
+    NOMAD1 & NOMAD2 & NOMAD3 -->|GlusterFS| NOMAD1
+    NOMAD1 --> TRAEFIK
+    NOMAD1 --> VAULT
+    NOMAD1 --> AUTHENTIK
+    AUTHENTIK -->|Vault WIF| VAULT
+    TRAEFIK --> STEPCA
     KASM --> STEPCA
 ```
 
@@ -43,13 +55,20 @@ graph TB
 
 | Component | Type | VMID | Network | IP Address | Purpose |
 |-----------|------|------|---------|------------|---------|
-| pihole-external | LXC | 900 | vmbr0 | Configurable | External DNS + ad-blocking |
-| pihole-internal | LXC | 901 | labnet | 172.16.0.3 | Lab DNS + DHCP |
-| step-ca | LXC | 902 | vmbr0 | Configurable | Certificate Authority |
-| docker01 | VM | 905 | vmbr0 | DHCP | Docker Swarm manager |
-| docker02 | VM | 906 | vmbr0 | DHCP | Docker Swarm manager |
-| docker03 | VM | 907 | vmbr0 | DHCP | Docker Swarm manager |
-| kasm01 | VM | 910 | vmbr0 | DHCP | Kasm Workspaces |
+| step-ca | LXC | 902 | vmbr0 | User-defined | Certificate Authority with ACME |
+| nomad01 | VM | 905 | vmbr0 | User-defined | Nomad server+client, GlusterFS |
+| nomad02 | VM | 906 | vmbr0 | User-defined | Nomad server+client, GlusterFS |
+| nomad03 | VM | 907 | vmbr0 | User-defined | Nomad server+client, GlusterFS |
+| dns-01 | LXC | 910 | vmbr0 | User-defined | Pi-hole v6 + Unbound (Primary) |
+| dns-02 | LXC | 911 | vmbr0 | User-defined | Pi-hole v6 + Unbound (Secondary) |
+| dns-03 | LXC | 912 | vmbr0 | User-defined | Pi-hole v6 + Unbound (Tertiary) |
+| labnet-dns-01 | LXC | 920 | labnet | SDN internal | Pi-hole v6 for SDN network |
+| labnet-dns-02 | LXC | 921 | labnet | SDN internal | Pi-hole v6 for SDN network |
+| kasm01 | VM | 930 | vmbr0 | User-defined | Kasm Workspaces |
+| **Nomad Jobs** | | | | | |
+| traefik | Nomad Job | - | nomad01 | nomad01 IP:80/443 | Reverse proxy, load balancer |
+| vault | Nomad Job | - | nomad01 | nomad01 IP:8200 | Secrets manager |
+| authentik | Nomad Job | - | nomad01 | nomad01 IP:9000 | SSO/Identity provider |
 
 ## Technology Stack
 
@@ -86,33 +105,40 @@ graph LR
 | **Proxmox VE** | 8.x+ | Hypervisor platform |
 | **Terraform** | Latest | Infrastructure provisioning |
 | **Packer** | Latest | Golden image creation |
+| **HashiCorp Nomad** | Latest | Container orchestration |
+| **HashiCorp Vault** | 1.15+ | Secrets management |
 | **Docker** | Latest | Container runtime |
+| **GlusterFS** | Latest | Distributed file system |
 
 ### Networking Layer
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | External Bridge | vmbr0 | Physical network connectivity |
-| Lab SDN | Proxmox SDN | Isolated virtual network |
-| DNS (External) | Pihole + Unbound + dnscrypt-proxy | Secure DNS resolution |
-| DNS (Internal) | Pihole | Lab DNS + DHCP |
+| Lab SDN | Proxmox SDN (labnet) | Isolated virtual network |
+| DNS (Main) | Pi-hole v6 + Unbound | Secure DNS with Gravity Sync |
+| DNS (Labnet) | Pi-hole v6 | SDN network DNS |
+| Reverse Proxy | Traefik | Load balancing, TLS termination |
 
 ### Security Layer
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | Certificate Authority | Step-CA | TLS certificate issuance |
-| ACME Client | acme.sh | Automated certificate management |
+| ACME Protocol | Traefik + step-ca | Automated certificate management |
+| Secrets Management | HashiCorp Vault | Centralized secrets storage |
+| Workload Identity | Vault WIF (JWT) | Token-less authentication |
+| SSO/Identity | Authentik | OAuth2/OIDC/SAML provider |
 | Key Management | ed25519 SSH keys | Secure authentication |
 
 ### Application Layer
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Container Orchestration | Docker Swarm | HA container management |
-| Distributed Storage | GlusterFS | Shared storage for containers |
+| Container Orchestration | HashiCorp Nomad | Cluster scheduler and orchestration |
+| Distributed Storage | GlusterFS | Replicated volume for Nomad jobs |
 | Remote Workspaces | Kasm | Browser-based desktops |
-| Container Management | Portainer | Web UI for Docker |
+| Reverse Proxy | Traefik | Service discovery and routing |
 
 ## Resource Allocation
 
@@ -120,26 +146,28 @@ graph LR
 
 | VM | CPU Cores | Memory | Disk |
 |----|-----------|--------|------|
-| docker01 | 4 | 8 GB | 100 GB |
-| docker02 | 4 | 8 GB | 100 GB |
-| docker03 | 4 | 8 GB | 100 GB |
+| nomad01 | 4 | 8 GB | 100 GB |
+| nomad02 | 4 | 8 GB | 100 GB |
+| nomad03 | 4 | 8 GB | 100 GB |
 | kasm01 | 4 | 8 GB | 100 GB |
 
 ### Default LXC Specifications
 
 | Container | CPU Cores | Memory | Disk |
 |-----------|-----------|--------|------|
-| pihole-external | 2 | 1 GB | 4 GB |
-| pihole-internal | 2 | 1 GB | 4 GB |
+| dns-01/02/03 | 2 | 2 GB | 8 GB |
+| labnet-dns-01/02 | 2 | 2 GB | 8 GB |
 | step-ca | 2 | 2 GB | 8 GB |
 
 ### Total Resource Usage
 
 | Resource | Amount |
 |----------|--------|
-| **CPU Cores** | 22 cores |
-| **Memory** | 38 GB |
-| **Disk Space** | 424 GB |
+| **CPU Cores** | 24+ cores (base infra + Nomad jobs) |
+| **Memory** | 44+ GB (base infra + Nomad jobs) |
+| **Disk Space** | 450+ GB |
+
+Note: Nomad jobs (Vault, Authentik, Traefik) run on nomad01 and consume additional resources.
 
 !!! tip "Customization"
     These values can be adjusted in the Terraform module variables.
@@ -172,11 +200,12 @@ VMs are created from golden images (Packer templates) rather than configured in 
 
 ### 4. High Availability
 
-Docker Swarm provides:
+Nomad cluster provides:
 
-- **3 Manager Nodes** - Survives single node failure
+- **3 Server Nodes** - Survives single node failure
 - **Raft Consensus** - Distributed state management
-- **Service Replication** - Containers can run on any node
+- **GlusterFS Replication** - Shared storage across all nodes
+- **Job Scheduling** - Automatic rescheduling on node failure
 
 ## Next Steps
 

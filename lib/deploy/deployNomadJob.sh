@@ -30,6 +30,18 @@ function deployNomadJob() {
     sshRun "$VM_USER" "$NOMAD_IP" "sudo mkdir -p $storage_path" || true
   fi
 
+  # Load DNS_POSTFIX from cluster-info.json if not already set
+  if [ -z "${DNS_POSTFIX:-}" ] || [ "$DNS_POSTFIX" = "null" ]; then
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    fi
+  fi
+
+  if [ -z "${DNS_POSTFIX:-}" ] || [ "$DNS_POSTFIX" = "null" ]; then
+    error "DNS_POSTFIX not configured. Run initial setup first."
+    return 1
+  fi
+
   # Render template with environment variables
   export DNS_POSTFIX
   envsubst '${DNS_POSTFIX}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"

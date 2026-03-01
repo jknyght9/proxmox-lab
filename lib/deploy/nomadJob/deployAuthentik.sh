@@ -154,7 +154,19 @@ REMOTE_SCRIPT
   # Deploy Authentik - render only DNS_POSTFIX (secrets come from Vault)
   doing "Deploying Authentik to Nomad cluster..."
 
-  # Render template with only DNS_POSTFIX (no secrets in file)
+  # Load DNS_POSTFIX from cluster-info.json if not already set
+  if [ -z "${DNS_POSTFIX:-}" ] || [ "$DNS_POSTFIX" = "null" ]; then
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    fi
+  fi
+
+  if [ -z "${DNS_POSTFIX:-}" ] || [ "$DNS_POSTFIX" = "null" ]; then
+    error "DNS_POSTFIX not configured. Run initial setup first."
+    return 1
+  fi
+
+  # Render template with DNS_POSTFIX (no secrets in file)
   export DNS_POSTFIX
   envsubst '${DNS_POSTFIX}' < "nomad/jobs/authentik.nomad.hcl" > "/tmp/authentik-rendered.nomad.hcl"
 

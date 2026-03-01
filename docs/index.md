@@ -50,10 +50,13 @@ This project deploys a complete lab infrastructure on Proxmox VE:
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| **Docker Swarm** | 3 VMs | Container orchestration cluster |
+| **Nomad Cluster** | 3 VMs | HashiCorp Nomad orchestration with GlusterFS |
+| **Vault** | Nomad Job | Secrets management with Workload Identity |
+| **Authentik** | Nomad Job | SSO and identity provider (OAuth2/OIDC/SAML) |
+| **Traefik** | Nomad Job | Reverse proxy and load balancer |
 | **Kasm Workspaces** | 1 VM | Browser-based remote desktops |
-| **Pihole (External)** | LXC | DNS + ad-blocking for your network |
-| **Pihole (Internal)** | LXC | DNS + DHCP for isolated lab network |
+| **Pihole (Main)** | LXC | DNS + ad-blocking for your network |
+| **Pihole (Labnet)** | LXC | DNS for isolated SDN network |
 | **Step-CA** | LXC | Internal Certificate Authority with ACME |
 
 ---
@@ -61,11 +64,15 @@ This project deploys a complete lab infrastructure on Proxmox VE:
 ## Features
 
 - **Proxmox-first** automation using API tokens
-- **Packer** templates for golden VM/LXC images
+- **Packer** templates for golden VM images
 - **Terraform** for declarative infrastructure provisioning
+- **HashiCorp Nomad** for container orchestration (3-node cluster)
+- **HashiCorp Vault** with Workload Identity Federation for secrets
+- **Authentik SSO** for unified authentication across services
+- **Traefik** reverse proxy with automatic TLS via step-ca
 - **Internal CA** with ACME protocol for automated TLS certificates
-- **Secure DNS** with Pihole, Unbound, and dnscrypt-proxy
-- **Docker Swarm** cluster for high-availability container testing
+- **Secure DNS** with Pi-hole v6, Unbound, and Gravity Sync
+- **GlusterFS** replicated storage for high availability
 - **Dual network** architecture (external + isolated lab SDN)
 
 ---
