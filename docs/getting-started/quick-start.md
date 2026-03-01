@@ -24,7 +24,7 @@ Edit `packer/packer.auto.pkrvars.hcl`:
 
 ```hcl
 # Proxmox connection
-proxmox_url          = "https://10.1.50.2:8006/api2/json"
+proxmox_url          = "https://192.168.1.100:8006/api2/json"
 proxmox_node         = "pve"
 proxmox_token_id     = "hashicorp@pam!hashicorp-token"
 proxmox_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -56,26 +56,26 @@ Edit `terraform/terraform.tfvars`:
 
 ```hcl
 # Proxmox API
-proxmox_api_url      = "https://10.1.50.2:8006/api2/json"
+proxmox_api_url      = "https://192.168.1.100:8006/api2/json"
 proxmox_api_token_id = "hashicorp@pam!hashicorp-token"
 proxmox_api_token    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 proxmox_target_node  = "pve"
 
 # Cluster nodes (map of node names to IPs)
 proxmox_node_ips = {
-  "pve" = "10.1.50.2"
+  "pve" = "192.168.1.100"
 }
 
 # Network
 network_interface_bridge = "vmbr0"
-network_gateway_address  = "10.1.50.1"
+network_gateway_address  = "192.168.1.1"
 
 # Pi-hole admin password
 pihole_admin_password = "YourPiholePassword!"
 
 # Step-CA
 step-ca_root_password  = "YourStepCAPassword!"
-step-ca_eth0_ipv4_cidr = "10.1.50.6/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
 
 # DNS domain
 dns_postfix = "mylab.lan"
@@ -98,7 +98,7 @@ Execute the automated setup:
 **Example:**
 
 ```bash
-./setup.sh 10.1.50.2 MyProxmoxRootPassword
+./setup.sh 192.168.1.100 MyProxmoxRootPassword
 ```
 
 Alternatively, run the interactive menu:
@@ -147,11 +147,11 @@ nslookup nomad01.mylab.lan <dns-01-ip>
 
 Expected output:
 ```
-Server:		10.1.50.3
-Address:	10.1.50.3#53
+Server:		192.168.1.10
+Address:	192.168.1.10#53
 
 Name:	nomad01.mylab.lan
-Address: 10.1.50.X
+Address: 192.168.1.x
 ```
 
 ### Access Core Services

@@ -205,7 +205,7 @@ Use this as a reference when filling in your configuration files:
 | `proxmox_api_token_id` | API token ID | `hashicorp@pam!hashicorp-token` |
 | `proxmox_api_token` | API token secret | |
 | `proxmox_target_node` | Target node name | |
-| `proxmox_node_ips` | Map of node names to IPs | `{ "pve" = "10.1.50.2" }` |
+| `proxmox_node_ips` | Map of node names to IPs | `{ "pve" = "192.168.1.100" }` |
 | `network_interface_bridge` | Network bridge | `vmbr0` |
 | `network_gateway_address` | Gateway IP | |
 | `pihole_admin_password` | Pi-hole web admin password | |

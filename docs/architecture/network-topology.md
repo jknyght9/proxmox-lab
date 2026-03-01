@@ -67,8 +67,8 @@ Network settings are captured during `setup.sh` and stored in `cluster-info.json
 | Setting | Example Value | Description |
 |---------|---------------|-------------|
 | Bridge Name | `vmbr0` | Proxmox network bridge |
-| Network Range | `10.1.50.0/24` | Your LAN subnet (user-configured) |
-| Gateway | `10.1.50.1` | Your router IP |
+| Network Range | `192.168.1.0/24` | Your LAN subnet (user-configured) |
+| Gateway | `192.168.1.1` | Your router IP |
 | DNS Postfix | `mylab.lan` | Domain suffix for all hosts |
 
 ### IP Assignments
@@ -279,14 +279,14 @@ All network parameters are captured interactively during `setup.sh` and stored i
 ```json
 {
   "network": {
-    "external_cidr": "10.1.50.0/24",
-    "external_gateway": "10.1.50.1",
+    "external_cidr": "192.168.1.0/24",
+    "external_gateway": "192.168.1.1",
     "labnet_cidr": "172.16.0.0/24",
     "labnet_gateway": "172.16.0.1"
   },
   "dns_postfix": "mylab.lan",
   "proxmox_nodes": {
-    "pve1": "10.1.50.2"
+    "pve1": "192.168.1.100"
   }
 }
 ```

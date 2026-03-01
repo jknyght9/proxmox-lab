@@ -183,7 +183,7 @@ The simplest method is to add it directly on the primary Pi-hole (dns-01):
 ssh root@<dns-01-ip> "pihole-FTL --config dns.hosts"
 
 # Add your record (include ALL existing records plus the new one)
-ssh root@<dns-01-ip> "pihole-FTL --config dns.hosts '[\"10.1.50.114 vault.jdclabs.lan\", \"10.1.50.200 myservice.jdclabs.lan\"]'"
+ssh root@<dns-01-ip> "pihole-FTL --config dns.hosts '[\"192.168.1.50 vault.mylab.lan\", \"192.168.1.60 myservice.mylab.lan\"]'"
 ```
 
 The change will replicate to other Pi-hole instances via nebula-sync within 5 minutes.

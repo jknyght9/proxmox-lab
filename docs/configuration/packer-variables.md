@@ -16,7 +16,7 @@ These variables configure how Packer connects to your Proxmox API to create temp
 
 | Variable | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `proxmox_url` | `string` | Yes | -- | Proxmox API URL (e.g., `https://10.1.50.210:8006/api2/json`) |
+| `proxmox_url` | `string` | Yes | -- | Proxmox API URL (e.g., `https://192.168.1.200:8006/api2/json`) |
 | `proxmox_node` | `string` | Yes | -- | Proxmox node name where templates will be created (e.g., `pve01`) |
 | `proxmox_token_id` | `string` | Yes | -- | API token ID for authentication |
 | `proxmox_token_secret` | `string` | Yes | -- | API token secret value |
@@ -24,7 +24,7 @@ These variables configure how Packer connects to your Proxmox API to create temp
 ### Example
 
 ```hcl
-proxmox_url          = "https://10.1.50.210:8006/api2/json"
+proxmox_url          = "https://192.168.1.200:8006/api2/json"
 proxmox_node         = "pve01"
 proxmox_token_id     = "packer@pam!packer-access-token"
 proxmox_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -121,7 +121,7 @@ A complete `packer.auto.pkrvars.hcl` file:
 
 ```hcl
 # Proxmox connection
-proxmox_url          = "https://10.1.50.210:8006/api2/json"
+proxmox_url          = "https://192.168.1.200:8006/api2/json"
 proxmox_node         = "pve01"
 proxmox_token_id     = "packer@pam!packer-access-token"
 proxmox_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"

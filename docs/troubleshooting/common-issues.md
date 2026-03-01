@@ -160,7 +160,7 @@ ssh user@<nomad01-ip> "docker rm -f <container-id>"
 
 ### FQDN Not Resolving
 
-**Symptom:** A fully qualified domain name (e.g., `vault.jdclabs.lan`) does not resolve, but the service is accessible by IP.
+**Symptom:** A fully qualified domain name (e.g., `vault.mylab.lan`) does not resolve, but the service is accessible by IP.
 
 **Cause:** The DNS record is missing from Pi-hole, or the client is not using Pi-hole as its DNS server.
 
@@ -186,7 +186,7 @@ ssh user@<nomad01-ip> "docker rm -f <container-id>"
 
 ### Short Name Resolves but FQDN Does Not
 
-**Symptom:** `vault` resolves but `vault.jdclabs.lan` does not.
+**Symptom:** `vault` resolves but `vault.mylab.lan` does not.
 
 **Cause:** The search domain is set but the FQDN record is missing, or the record format is incorrect in Pi-hole.
 
@@ -195,7 +195,7 @@ ssh user@<nomad01-ip> "docker rm -f <container-id>"
 1. Check the Pi-hole local DNS entries for both short name and FQDN
 2. Ensure the `dns.hosts` entry uses the full FQDN:
    ```
-   "10.1.50.114 vault.jdclabs.lan"
+   "192.168.1.50 vault.mylab.lan"
    ```
 
 ### Service DNS Missing After Deployment
@@ -278,7 +278,7 @@ ssh user@<nomad01-ip> "docker rm -f <container-id>"
 
 2. Test AD DNS resolution:
    ```bash
-   dig @<dns-ip> _ldap._tcp.ad.jdclabs.lan SRV
+   dig @<dns-ip> _ldap._tcp.ad.mylab.lan SRV
    ```
 
 3. If forwarding is not configured, see [DNS Management - Samba AD DNS Forwarding](../operations/dns-management.md#samba-ad-dns-forwarding).

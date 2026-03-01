@@ -155,7 +155,7 @@ After initialization, credentials are saved to `crypto/vault-credentials.json` (
 {
   "unseal_key": "<base64-encoded-key>",
   "root_token": "hvs.xxxxxxxxxxxxxxxxxxxx",
-  "vault_address": "http://10.1.50.114:8200",
+  "vault_address": "http://192.168.1.50:8200",
   "initialized_at": "2026-02-22T12:00:00Z"
 }
 ```

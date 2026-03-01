@@ -18,10 +18,10 @@ This page provides a consolidated reference for reaching every service deployed 
 | **Kasm Workspaces** | `https://kasm.<domain>` | 443 | HTTPS |
 
 !!! tip "Replace placeholders"
-    - `<proxmox-ip>` -- your Proxmox host IP (e.g., `10.1.50.10`)
-    - `<dns-ip>` -- one of the Pi-hole LXC IPs (e.g., `10.1.50.110`)
-    - `<nomad01-ip>` -- the first Nomad node IP (e.g., `10.1.50.114`)
-    - `<domain>` -- your configured `dns_postfix` (e.g., `jdclabs.lan`)
+    - `<proxmox-ip>` -- your Proxmox host IP (e.g., `192.168.1.100`)
+    - `<dns-ip>` -- one of the Pi-hole LXC IPs (e.g., `192.168.1.10`)
+    - `<nomad01-ip>` -- the first Nomad node IP (e.g., `192.168.1.50`)
+    - `<domain>` -- your configured `dns_postfix` (e.g., `mylab.lan`)
 
 ---
 
@@ -112,7 +112,7 @@ Vault credentials are stored in `crypto/vault-credentials.json` after initial se
 {
   "unseal_key": "<base64-encoded-key>",
   "root_token": "hvs.xxxxxxxxxxxx",
-  "vault_address": "http://10.1.50.114:8200",
+  "vault_address": "http://192.168.1.50:8200",
   "initialized_at": "2026-02-22T12:00:00Z"
 }
 ```

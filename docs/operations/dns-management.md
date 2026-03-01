@@ -53,10 +53,10 @@ Pi-hole v6 stores local DNS records in the `dns.hosts` array within `/etc/pihole
 ```toml
 [dns]
   hosts = [
-    "10.1.50.114 vault.jdclabs.lan",
-    "10.1.50.114 auth.jdclabs.lan",
-    "10.1.50.114 traefik.jdclabs.lan",
-    "10.1.50.110 ca.jdclabs.lan"
+    "192.168.1.50 vault.mylab.lan",
+    "192.168.1.50 auth.mylab.lan",
+    "192.168.1.50 traefik.mylab.lan",
+    "192.168.1.10 ca.mylab.lan"
   ]
 ```
 
@@ -88,7 +88,7 @@ ssh root@<dns-ip>
 pihole-FTL --config dns.hosts
 
 # Add a new record (replaces entire array -- include all existing entries)
-pihole-FTL --config dns.hosts '["10.1.50.114 vault.jdclabs.lan", "10.1.50.114 auth.jdclabs.lan", "10.1.50.200 newservice.jdclabs.lan"]'
+pihole-FTL --config dns.hosts '["192.168.1.50 vault.mylab.lan", "192.168.1.50 auth.mylab.lan", "192.168.1.60 newservice.mylab.lan"]'
 ```
 
 !!! warning "Array replacement"
@@ -103,7 +103,7 @@ To remove a DNS record, rewrite the `dns.hosts` array without the entry you want
 pihole-FTL --config dns.hosts
 
 # Write back the array without the unwanted record
-pihole-FTL --config dns.hosts '["10.1.50.114 vault.jdclabs.lan", "10.1.50.114 auth.jdclabs.lan"]'
+pihole-FTL --config dns.hosts '["192.168.1.50 vault.mylab.lan", "192.168.1.50 auth.mylab.lan"]'
 ```
 
 ---
@@ -144,7 +144,7 @@ When Samba Active Directory is deployed, Pi-hole is configured to forward AD rea
 
 ### How It Works
 
-Pi-hole uses conditional forwarding to route DNS queries for the AD realm (e.g., `ad.jdclabs.lan`) to the Samba DCs:
+Pi-hole uses conditional forwarding to route DNS queries for the AD realm (e.g., `ad.mylab.lan`) to the Samba DCs:
 
 - **DC01** (nomad01): listens on port **5353**
 - **DC02** (nomad02): listens on port **5354**
@@ -152,8 +152,8 @@ Pi-hole uses conditional forwarding to route DNS queries for the AD realm (e.g.,
 The forwarding rules are configured in `/etc/dnsmasq.d/10-ad-forward.conf` on each Pi-hole instance:
 
 ```
-server=/ad.jdclabs.lan/10.1.50.114#5353
-server=/ad.jdclabs.lan/10.1.50.115#5354
+server=/ad.mylab.lan/192.168.1.50#5353
+server=/ad.mylab.lan/192.168.1.51#5354
 ```
 
 ### Verifying AD DNS
@@ -162,10 +162,10 @@ Test that AD DNS resolution works through Pi-hole:
 
 ```bash
 # Query an AD record through Pi-hole
-dig @<dns-ip> _ldap._tcp.ad.jdclabs.lan SRV
+dig @<dns-ip> _ldap._tcp.ad.mylab.lan SRV
 
 # Query a DC directly
-dig @<nomad01-ip> -p 5353 _ldap._tcp.ad.jdclabs.lan SRV
+dig @<nomad01-ip> -p 5353 _ldap._tcp.ad.mylab.lan SRV
 ```
 
 ### Adding AD Forwarding Manually
@@ -174,8 +174,8 @@ If AD DNS forwarding is not configured, you can set it up manually on each Pi-ho
 
 ```bash
 ssh root@<dns-ip> "cat > /etc/dnsmasq.d/10-ad-forward.conf << 'EOF'
-server=/ad.jdclabs.lan/10.1.50.114#5353
-server=/ad.jdclabs.lan/10.1.50.115#5354
+server=/ad.mylab.lan/192.168.1.50#5353
+server=/ad.mylab.lan/192.168.1.51#5354
 EOF
 pihole restartdns"
 ```
@@ -218,10 +218,10 @@ Labnet DNS mirrors the same records as the main DNS cluster but is accessible on
 
 ```bash
 # Using dig
-dig @<dns-ip> vault.jdclabs.lan
+dig @<dns-ip> vault.mylab.lan
 
 # Using nslookup
-nslookup vault.jdclabs.lan <dns-ip>
+nslookup vault.mylab.lan <dns-ip>
 ```
 
 ### Flush Pi-hole Cache

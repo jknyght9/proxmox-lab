@@ -41,7 +41,7 @@ Error: error creating virtual machine: 500 unable to create VM 905 - VM 905 alre
 ### `Error: timeout - lastass_error: dial tcp <ip>:22: connect: connection refused`
 
 ```
-Error: timeout - last error: dial tcp 10.1.50.114:22: connect: connection refused
+Error: timeout - last error: dial tcp 192.168.1.50:22: connect: connection refused
 ```
 
 **Cause:** Terraform timed out waiting for SSH access to a newly created VM. The VM is still booting, cloud-init is running, or SSH is not configured.
@@ -353,7 +353,7 @@ ssh-keygen -R <ip-address>
 ### `Permission denied (publickey)`
 
 ```
-user@10.1.50.114: Permission denied (publickey).
+user@192.168.1.50: Permission denied (publickey).
 ```
 
 **Cause:** The SSH key is not being used or is not authorized on the target host.

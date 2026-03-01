@@ -39,7 +39,7 @@ A logical grouping of Nomad nodes. Proxmox Lab uses a single datacenter called `
 A protocol for encrypting DNS queries using TLS. Unbound on Pi-hole LXCs uses DNS-over-TLS to forward queries to upstream resolvers (Cloudflare, Quad9), preventing eavesdropping on DNS traffic.
 
 ### DNS Postfix
-The domain suffix used throughout the lab (e.g., `jdclabs.lan`). Configured via the `dns_postfix` variable in `terraform.tfvars`. All service hostnames use this as their domain.
+The domain suffix used throughout the lab (e.g., `mylab.lan`). Configured via the `dns_postfix` variable in `terraform.tfvars`. All service hostnames use this as their domain.
 
 ---
 

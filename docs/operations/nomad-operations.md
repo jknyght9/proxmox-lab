@@ -13,7 +13,7 @@ docker compose run --rm nomad <command>
 ```
 
 !!! note "NOMAD_ADDR"
-    The Nomad address is configured in `compose.yml`. If your nomad01 IP differs from the default (`10.1.50.114`), update the `NOMAD_ADDR` environment variable in `compose.yml`.
+    The Nomad address is configured in `compose.yml`. If your nomad01 IP differs from the default (`192.168.1.50`), update the `NOMAD_ADDR` environment variable in `compose.yml`.
 
 ---
 
@@ -188,9 +188,9 @@ Expected output shows 3 members with one marked as `leader`:
 
 ```
 Name           Address       Port  Status  Leader  Raft Version  Build   Datacenter  Region
-nomad01.global 10.1.50.114   4648  alive   true    3             1.x.x   dc1         global
-nomad02.global 10.1.50.115   4648  alive   false   3             1.x.x   dc1         global
-nomad03.global 10.1.50.116   4648  alive   false   3             1.x.x   dc1         global
+nomad01.global 192.168.1.50   4648  alive   true    3             1.x.x   dc1         global
+nomad02.global 192.168.1.51   4648  alive   false   3             1.x.x   dc1         global
+nomad03.global 192.168.1.52   4648  alive   false   3             1.x.x   dc1         global
 ```
 
 ### Node (Client) Status

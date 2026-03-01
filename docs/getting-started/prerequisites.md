@@ -117,7 +117,7 @@ Navigate to **Node > Network** and verify:
 
 ## Network Information
 
-Gather this information before starting:
+Gather this information before starting. You'll need to know your own network subnet — the examples below use `192.168.1.0/24` but **your network will likely be different**. Check your router's admin page to confirm your subnet, gateway, and DHCP range.
 
 ### External Network (Your LAN)
 
@@ -126,19 +126,23 @@ This is the network where your Proxmox server lives:
 | Setting | Example | Your Value |
 |---------|---------|------------|
 | Network Bridge | `vmbr0` | |
-| Gateway IP | `10.1.50.1` | |
+| Network Subnet | `192.168.1.0/24` | |
+| Gateway IP | `192.168.1.1` | |
 | DNS Postfix | `mylab.lan` | |
+
+!!! tip "Find Your Network Details"
+    Most home routers use `192.168.1.0/24` or `192.168.0.0/24`. Check your router's admin page or run `ip route` (Linux/macOS) to find your gateway and subnet.
 
 ### DNS Cluster IPs (Static)
 
-Reserve static IPs outside your router's DHCP range for each DNS node:
+Reserve static IPs **outside your router's DHCP range** for each DNS node. For example, if your DHCP range is `192.168.1.100-200`, choose IPs below 100 or above 200:
 
 | Node | Example IP | Your Value |
 |------|------------|------------|
-| dns-01 (VMID 910) | `10.1.50.3` | |
-| dns-02 (VMID 911) | `10.1.50.4` | |
-| dns-03 (VMID 912) | `10.1.50.5` | |
-| Step-CA (VMID 902) | `10.1.50.6` | |
+| dns-01 (VMID 910) | `192.168.1.10` | |
+| dns-02 (VMID 911) | `192.168.1.11` | |
+| dns-03 (VMID 912) | `192.168.1.12` | |
+| Step-CA (VMID 902) | `192.168.1.13` | |
 
 !!! warning "Static IPs Required"
     DNS and Step-CA nodes must have static IPs outside your router's DHCP range. The number of DNS nodes matches the number of Proxmox cluster nodes (one per node, up to 3).
@@ -174,8 +178,8 @@ graph TD
         WAN[WAN Connection]
     end
 
-    subgraph lan["Your Network (e.g., 10.1.50.0/24)"]
-        ROUTER[Router/Gateway<br/>10.1.50.1]
+    subgraph lan["Your Network (e.g., 192.168.1.0/24)"]
+        ROUTER[Router/Gateway<br/>192.168.1.1]
 
         subgraph proxmox["Proxmox Host"]
             VMBR0["vmbr0 Bridge"]

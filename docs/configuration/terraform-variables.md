@@ -16,7 +16,7 @@ These variables configure how Terraform authenticates with the Proxmox API. Two 
 
 | Variable | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `proxmox_api_url` | `string` | Yes | -- | Proxmox API endpoint URL (e.g., `https://10.1.50.210:8006/api2/json`) |
+| `proxmox_api_url` | `string` | Yes | -- | Proxmox API endpoint URL (e.g., `https://192.168.1.200:8006/api2/json`) |
 | `proxmox_api_token_id` | `string` | Yes | -- | API token ID (e.g., `terraform@pam!terraform-access-token`) |
 | `proxmox_api_token` | `string` | Yes | -- | API token secret value |
 | `proxmox_api_username` | `string` | Yes | -- | Proxmox username for password authentication (e.g., `root@pam`) |
@@ -34,7 +34,7 @@ These variables configure how Terraform authenticates with the Proxmox API. Two 
 
 ```hcl
 # Option 1: API Token authentication (recommended)
-proxmox_api_url      = "https://10.1.50.210:8006/api2/json"
+proxmox_api_url      = "https://192.168.1.200:8006/api2/json"
 proxmox_api_token_id = "terraform@pam!terraform-access-token"
 proxmox_api_token    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
@@ -60,9 +60,9 @@ This variable is **auto-generated** by `setup.sh`.
 
 ```hcl
 proxmox_node_ips = {
-  pve01 = "10.1.50.210"
-  pve02 = "10.1.50.211"
-  pve03 = "10.1.50.212"
+  pve01 = "192.168.1.200"
+  pve02 = "192.168.1.201"
+  pve03 = "192.168.1.202"
 }
 ```
 
@@ -81,7 +81,7 @@ Both are **auto-generated** by `setup.sh`.
 
 ```hcl
 network_interface_bridge = "vmbr0"
-network_gateway_address  = "10.1.50.1"
+network_gateway_address  = "192.168.1.1"
 ```
 
 ---
@@ -133,8 +133,8 @@ Both `dns_main_nodes` and `dns_labnet_nodes` use the same object structure:
 list(object({
   hostname    = string    # Container hostname (e.g., "dns-01")
   target_node = string    # Proxmox node to deploy on (e.g., "pve01")
-  ip          = string    # Static IP with CIDR (e.g., "10.1.50.3/24")
-  gw          = string    # Gateway IP (e.g., "10.1.50.1")
+  ip          = string    # Static IP with CIDR (e.g., "192.168.1.10/24")
+  gw          = string    # Gateway IP (e.g., "192.168.1.1")
 }))
 ```
 
@@ -142,15 +142,15 @@ list(object({
 
 ```hcl
 dns_postfix      = "mylab.lan"
-dns_primary_ipv4 = "10.1.50.3"
+dns_primary_ipv4 = "192.168.1.10"
 
 pihole_admin_password = "secure-admin-password"
 pihole_root_password  = "secure-root-password"
 
 dns_main_nodes = [
-  { hostname = "dns-01", target_node = "pve01", ip = "10.1.50.3/24", gw = "10.1.50.1" },
-  { hostname = "dns-02", target_node = "pve02", ip = "10.1.50.4/24", gw = "10.1.50.1" },
-  { hostname = "dns-03", target_node = "pve03", ip = "10.1.50.5/24", gw = "10.1.50.1" },
+  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.10/24", gw = "192.168.1.1" },
+  { hostname = "dns-02", target_node = "pve02", ip = "192.168.1.11/24", gw = "192.168.1.1" },
+  { hostname = "dns-03", target_node = "pve03", ip = "192.168.1.12/24", gw = "192.168.1.1" },
 ]
 
 dns_labnet_nodes = [
@@ -166,7 +166,7 @@ dns_labnet_nodes = [
 | Variable | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `step-ca_root_password` | `string` | Yes (sensitive) | -- | Root password for the step-ca LXC container |
-| `step-ca_eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation for step-ca (e.g., `10.1.50.10/24`) |
+| `step-ca_eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation for step-ca (e.g., `192.168.1.13/24`) |
 
 Both are **auto-generated** by `setup.sh`.
 
@@ -174,7 +174,7 @@ Both are **auto-generated** by `setup.sh`.
 
 ```hcl
 step-ca_root_password  = "secure-ca-password"
-step-ca_eth0_ipv4_cidr = "10.1.50.10/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
 ```
 
 ---
@@ -214,7 +214,7 @@ A complete `terraform.tfvars` file (copy from `terraform/terraform.tfvars.exampl
 
 ```hcl
 # Authentication
-proxmox_api_url      = "https://10.1.50.210:8006/api2/json"
+proxmox_api_url      = "https://192.168.1.200:8006/api2/json"
 proxmox_api_token_id = "terraform@pam!terraform-access-token"
 proxmox_api_token    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 proxmox_api_username = "root@pam"
@@ -223,26 +223,26 @@ proxmox_target_node  = "pve01"
 
 # Network
 network_interface_bridge = "vmbr0"
-network_gateway_address  = "10.1.50.1"
+network_gateway_address  = "192.168.1.1"
 
 # Storage
 lxc_storage = "local-lvm"
 
 # DNS
 dns_postfix          = "mylab.lan"
-dns_primary_ipv4     = "10.1.50.3"
+dns_primary_ipv4     = "192.168.1.10"
 pihole_admin_password = "secure-admin-password"
 pihole_root_password  = "secure-root-password"
 
 dns_main_nodes = [
-  { hostname = "dns-01", target_node = "pve01", ip = "10.1.50.3/24", gw = "10.1.50.1" },
+  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.10/24", gw = "192.168.1.1" },
 ]
 
 dns_labnet_nodes = []
 
 # Step-CA
 step-ca_root_password  = "secure-ca-password"
-step-ca_eth0_ipv4_cidr = "10.1.50.10/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
 
 # Kasm
 kasm_version        = "1.17.0.7f020d"
@@ -250,7 +250,7 @@ kasm_admin_password = "secure-kasm-password"
 
 # Proxmox Cluster
 proxmox_node_ips = {
-  pve01 = "10.1.50.210"
+  pve01 = "192.168.1.200"
 }
 ```
 
