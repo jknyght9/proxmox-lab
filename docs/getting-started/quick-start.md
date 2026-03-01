@@ -20,10 +20,10 @@ Copy the example configuration and edit it:
 cp packer/packer.auto.pkrvars.hcl.example packer/packer.auto.pkrvars.hcl
 ```
 
-Edit `packer/packer.auto.pkrvars.hcl`:
+Edit `packer/packer.auto.pkrvars.hcl`, replacing `192.168.1.100` with **your Proxmox server's IP address**:
 
 ```hcl
-# Proxmox connection
+# Proxmox connection (replace with YOUR Proxmox IP)
 proxmox_url          = "https://192.168.1.100:8006/api2/json"
 proxmox_node         = "pve"
 proxmox_token_id     = "hashicorp@pam!hashicorp-token"
@@ -41,6 +41,9 @@ dns_postfix = "mylab.lan"
 !!! warning "Security"
     Use strong, unique passwords. These will be the default credentials for your VMs.
 
+!!! tip "Replace Example IPs"
+    Throughout this guide, `192.168.1.100` is used as a placeholder for your Proxmox server's IP address. Replace it with the actual IP of your Proxmox host. Find it by checking your router's admin page or running `hostname -I` on the Proxmox node.
+
 !!! note "API Token"
     The `hashicorp@pam` user and API token are created automatically by `setup.sh` during Proxmox node setup. If you are running Packer manually outside of setup.sh, you will need to create this user and token yourself or use your own credentials.
 
@@ -52,16 +55,16 @@ Copy the example configuration and edit it:
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
 
-Edit `terraform/terraform.tfvars`:
+Edit `terraform/terraform.tfvars`, replacing `192.168.1.100` with **your Proxmox server's IP address**:
 
 ```hcl
-# Proxmox API
+# Proxmox API (replace with YOUR Proxmox IP)
 proxmox_api_url      = "https://192.168.1.100:8006/api2/json"
 proxmox_api_token_id = "hashicorp@pam!hashicorp-token"
 proxmox_api_token    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 proxmox_target_node  = "pve"
 
-# Cluster nodes (map of node names to IPs)
+# Cluster nodes (replace with YOUR Proxmox IP)
 proxmox_node_ips = {
   "pve" = "192.168.1.100"
 }
@@ -75,7 +78,7 @@ pihole_admin_password = "YourPiholePassword!"
 
 # Step-CA
 step-ca_root_password  = "YourStepCAPassword!"
-step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.6/24"
 
 # DNS domain
 dns_postfix = "mylab.lan"
@@ -98,6 +101,7 @@ Execute the automated setup:
 **Example:**
 
 ```bash
+# Replace with YOUR Proxmox IP and root password
 ./setup.sh 192.168.1.100 MyProxmoxRootPassword
 ```
 
@@ -147,8 +151,8 @@ nslookup nomad01.mylab.lan <dns-01-ip>
 
 Expected output:
 ```
-Server:		192.168.1.10
-Address:	192.168.1.10#53
+Server:		192.168.1.3
+Address:	192.168.1.3#53
 
 Name:	nomad01.mylab.lan
 Address: 192.168.1.x

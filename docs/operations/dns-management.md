@@ -56,7 +56,7 @@ Pi-hole v6 stores local DNS records in the `dns.hosts` array within `/etc/pihole
     "192.168.1.50 vault.mylab.lan",
     "192.168.1.50 auth.mylab.lan",
     "192.168.1.50 traefik.mylab.lan",
-    "192.168.1.10 ca.mylab.lan"
+    "192.168.1.3 ca.mylab.lan"
   ]
 ```
 

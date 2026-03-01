@@ -64,8 +64,8 @@ nav:
   - Getting Started:
       - Introduction: getting-started/introduction.md
       - Prerequisites: getting-started/prerequisites.md
-      - Quick Start: getting-started/quick-start.md
       - Pre-Flight Checklist: getting-started/checklist.md
+      - Quick Start: getting-started/quick-start.md
   - Architecture:
       - Overview: architecture/overview.md
       - Network Topology: architecture/network-topology.md

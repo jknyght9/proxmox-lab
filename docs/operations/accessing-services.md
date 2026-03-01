@@ -19,7 +19,7 @@ This page provides a consolidated reference for reaching every service deployed 
 
 !!! tip "Replace placeholders"
     - `<proxmox-ip>` -- your Proxmox host IP (e.g., `192.168.1.100`)
-    - `<dns-ip>` -- one of the Pi-hole LXC IPs (e.g., `192.168.1.10`)
+    - `<dns-ip>` -- one of the Pi-hole LXC IPs (e.g., `192.168.1.3`)
     - `<nomad01-ip>` -- the first Nomad node IP (e.g., `192.168.1.50`)
     - `<domain>` -- your configured `dns_postfix` (e.g., `mylab.lan`)
 

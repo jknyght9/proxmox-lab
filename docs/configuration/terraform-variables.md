@@ -133,7 +133,7 @@ Both `dns_main_nodes` and `dns_labnet_nodes` use the same object structure:
 list(object({
   hostname    = string    # Container hostname (e.g., "dns-01")
   target_node = string    # Proxmox node to deploy on (e.g., "pve01")
-  ip          = string    # Static IP with CIDR (e.g., "192.168.1.10/24")
+  ip          = string    # Static IP with CIDR (e.g., "192.168.1.3/24")
   gw          = string    # Gateway IP (e.g., "192.168.1.1")
 }))
 ```
@@ -142,15 +142,15 @@ list(object({
 
 ```hcl
 dns_postfix      = "mylab.lan"
-dns_primary_ipv4 = "192.168.1.10"
+dns_primary_ipv4 = "192.168.1.3"
 
 pihole_admin_password = "secure-admin-password"
 pihole_root_password  = "secure-root-password"
 
 dns_main_nodes = [
-  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.10/24", gw = "192.168.1.1" },
-  { hostname = "dns-02", target_node = "pve02", ip = "192.168.1.11/24", gw = "192.168.1.1" },
-  { hostname = "dns-03", target_node = "pve03", ip = "192.168.1.12/24", gw = "192.168.1.1" },
+  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.3/24", gw = "192.168.1.1" },
+  { hostname = "dns-02", target_node = "pve02", ip = "192.168.1.4/24", gw = "192.168.1.1" },
+  { hostname = "dns-03", target_node = "pve03", ip = "192.168.1.5/24", gw = "192.168.1.1" },
 ]
 
 dns_labnet_nodes = [
@@ -166,7 +166,7 @@ dns_labnet_nodes = [
 | Variable | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `step-ca_root_password` | `string` | Yes (sensitive) | -- | Root password for the step-ca LXC container |
-| `step-ca_eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation for step-ca (e.g., `192.168.1.13/24`) |
+| `step-ca_eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation for step-ca (e.g., `192.168.1.6/24`) |
 
 Both are **auto-generated** by `setup.sh`.
 
@@ -174,7 +174,7 @@ Both are **auto-generated** by `setup.sh`.
 
 ```hcl
 step-ca_root_password  = "secure-ca-password"
-step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.6/24"
 ```
 
 ---
@@ -230,19 +230,19 @@ lxc_storage = "local-lvm"
 
 # DNS
 dns_postfix          = "mylab.lan"
-dns_primary_ipv4     = "192.168.1.10"
+dns_primary_ipv4     = "192.168.1.3"
 pihole_admin_password = "secure-admin-password"
 pihole_root_password  = "secure-root-password"
 
 dns_main_nodes = [
-  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.10/24", gw = "192.168.1.1" },
+  { hostname = "dns-01", target_node = "pve01", ip = "192.168.1.3/24", gw = "192.168.1.1" },
 ]
 
 dns_labnet_nodes = []
 
 # Step-CA
 step-ca_root_password  = "secure-ca-password"
-step-ca_eth0_ipv4_cidr = "192.168.1.13/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.6/24"
 
 # Kasm
 kasm_version        = "1.17.0.7f020d"

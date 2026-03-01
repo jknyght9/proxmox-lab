@@ -257,7 +257,7 @@ Deploys a single LXC container running step-ca as an internal Certificate Author
 | Variable | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `eth0_vmbr` | `string` | Yes | -- | Network bridge (must match `vmbr[0-9]+` pattern) |
-| `eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation (e.g., `192.168.1.13/24`) |
+| `eth0_ipv4_cidr` | `string` | Yes | -- | Static IP with CIDR notation (e.g., `192.168.1.6/24`) |
 | `eth0_gateway` | `string` | Yes | -- | Gateway IPv4 address |
 | `dns_primary_ipv4` | `string` | Yes | -- | Primary DNS server IP (switched to after install) |
 | `proxmox_target_node` | `string` | Yes | -- | Proxmox node to deploy on |

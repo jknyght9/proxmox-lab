@@ -4,60 +4,67 @@ This page provides a high-level view of the Proxmox Lab infrastructure, built on
 
 ## System Architecture
 
+The infrastructure has two layers: a **platform layer** (VMs and containers managed by Terraform) and a **services layer** (applications scheduled by Nomad).
+
+### Platform Layer
+
 ```mermaid
-graph TB
-    subgraph internet["Internet"]
-        WAN((WAN))
-    end
+graph LR
+    ROUTER[Router / Gateway] --> PROXMOX
 
-    subgraph external["External Network (vmbr0)"]
-        ROUTER[Router/Gateway]
+    subgraph PROXMOX["Proxmox VE"]
+        direction TB
 
-        subgraph proxmox["Proxmox VE Cluster"]
-            subgraph lxc["LXC Containers"]
-                DNS1[dns-01<br/>LXC 910]
-                DNS2[dns-02<br/>LXC 911]
-                DNS3[dns-03<br/>LXC 912]
-                STEPCA[step-ca<br/>LXC 902]
-            end
+        subgraph lxc["LXC Containers"]
+            DNS["DNS Cluster\n(Pi-hole + Unbound)\ndns-01 · dns-02 · dns-03"]
+            CA["Step-CA\nCertificate Authority"]
+        end
 
-            subgraph nomad_cluster["Nomad Cluster (VMs)"]
-                NOMAD1[nomad01<br/>VM 905]
-                NOMAD2[nomad02<br/>VM 906]
-                NOMAD3[nomad03<br/>VM 907]
-                GFS[(GlusterFS<br/>3-replica volume)]
-            end
+        subgraph vms["Virtual Machines"]
+            NOMAD["Nomad Cluster\nnomad01 · nomad02 · nomad03\n+ GlusterFS"]
+            KASM["Kasm Workspaces"]
+        end
 
-            subgraph other_vms["Other VMs"]
-                KASM[kasm01<br/>VM 930]
-            end
+        subgraph labnet["Labnet SDN (optional)"]
+            LABDNS["Labnet DNS\nlabnet-dns-01 · -02"]
         end
     end
 
-    subgraph labnet["Labnet SDN (optional)"]
-        LABDNS1[labnet-dns-01<br/>LXC 920]
-        LABDNS2[labnet-dns-02<br/>LXC 921]
-    end
-
-    WAN --> ROUTER
-    ROUTER --> DNS1
-    DNS1 & DNS2 & DNS3 --> STEPCA
-    NOMAD1 <-->|Raft Consensus| NOMAD2
-    NOMAD2 <-->|Raft Consensus| NOMAD3
-    NOMAD3 <-->|Raft Consensus| NOMAD1
-    NOMAD1 & NOMAD2 & NOMAD3 --> GFS
-    NOMAD1 & NOMAD2 & NOMAD3 --> STEPCA
-    KASM --> STEPCA
-
-    subgraph nomad_services["Services on Nomad (pinned to nomad01)"]
-        TRAEFIK[Traefik<br/>:80/:443/:8081]
-        VAULT[Vault<br/>:8200]
-        AUTHENTIK[Authentik<br/>:9000/:9443]
-        SAMBADC[Samba AD<br/>DC01 on nomad01<br/>DC02 on nomad02]
-    end
-
-    NOMAD1 --> TRAEFIK & VAULT & AUTHENTIK & SAMBADC
+    DNS -->|name resolution| NOMAD
+    DNS -->|name resolution| KASM
+    CA -->|TLS certs| NOMAD
+    CA -->|TLS certs| KASM
 ```
+
+### Services Layer (Nomad)
+
+All services run as Docker containers scheduled by Nomad. Core services are pinned to **nomad01** for consistent DNS and routing.
+
+```mermaid
+graph LR
+    CLIENT[Client] -->|HTTPS :443| TRAEFIK
+
+    subgraph nomad01["nomad01"]
+        TRAEFIK[Traefik\nReverse Proxy]
+        VAULT[Vault\nSecrets]
+        AUTH[Authentik\nSSO / IdP]
+        SAMBA1[Samba DC01\nActive Directory]
+    end
+
+    TRAEFIK --> VAULT
+    TRAEFIK --> AUTH
+
+    VAULT -->|secrets via WIF| AUTH
+    VAULT -->|secrets via WIF| SAMBA1
+
+    SAMBA2[Samba DC02\nnomad02] <-->|replication| SAMBA1
+
+    GFS[(GlusterFS\n3-replica)] --- VAULT
+    GFS --- AUTH
+    GFS --- SAMBA1
+```
+
+For detailed diagrams of individual components, see [Network Topology](network-topology.md) and [Service Relationships](service-relationships.md).
 
 ## Component Summary
 

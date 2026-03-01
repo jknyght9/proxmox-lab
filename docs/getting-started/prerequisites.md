@@ -139,10 +139,10 @@ Reserve static IPs **outside your router's DHCP range** for each DNS node. For e
 
 | Node | Example IP | Your Value |
 |------|------------|------------|
-| dns-01 (VMID 910) | `192.168.1.10` | |
-| dns-02 (VMID 911) | `192.168.1.11` | |
-| dns-03 (VMID 912) | `192.168.1.12` | |
-| Step-CA (VMID 902) | `192.168.1.13` | |
+| dns-01 (VMID 910) | `192.168.1.3` | |
+| dns-02 (VMID 911) | `192.168.1.4` | |
+| dns-03 (VMID 912) | `192.168.1.5` | |
+| Step-CA (VMID 902) | `192.168.1.6` | |
 
 !!! warning "Static IPs Required"
     DNS and Step-CA nodes must have static IPs outside your router's DHCP range. The number of DNS nodes matches the number of Proxmox cluster nodes (one per node, up to 3).

@@ -122,7 +122,7 @@ Format: `["<ip> <hostname> <hostname>.<domain>", ...]`
 Example:
 
 ```json
-["192.168.1.10 dns-01 dns-01.mylab.lan", "192.168.1.11 dns-02 dns-02.mylab.lan"]
+["192.168.1.3 dns-01 dns-01.mylab.lan", "192.168.1.4 dns-02 dns-02.mylab.lan"]
 ```
 
 Additional service DNS records (for Nomad services like Vault, Traefik, Authentik) are added by `setup.sh` option **10** (Build DNS records).
