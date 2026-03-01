@@ -75,15 +75,20 @@ nav:
       - Module Reference: configuration/module-reference.md
       - Cloud-Init Templates: configuration/cloudinit-templates.md
   - Modules:
-      - Docker Swarm: modules/docker-swarm.md
+      - Nomad Cluster: modules/nomad-cluster.md
       - Kasm Workspaces: modules/kasm.md
-      - Pihole DNS: modules/pihole.md
+      - Pi-hole DNS: modules/pihole.md
       - Step-CA: modules/step-ca.md
+  - Services:
+      - Traefik: services/traefik.md
+      - Vault: services/vault.md
+      - Authentik: services/authentik.md
+      - Samba AD: services/samba-ad.md
   - Operations:
       - Accessing Services: operations/accessing-services.md
       - DNS Management: operations/dns-management.md
       - Certificate Operations: operations/certificate-operations.md
-      - Docker Swarm Operations: operations/docker-swarm-operations.md
+      - Nomad Operations: operations/nomad-operations.md
       - Backup & Recovery: operations/backup-recovery.md
   - Troubleshooting:
       - Common Issues: troubleshooting/common-issues.md

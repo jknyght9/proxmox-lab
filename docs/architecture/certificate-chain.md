@@ -1,91 +1,191 @@
 # Certificate Chain
 
-This page explains the TLS certificate hierarchy and how certificates are issued in Proxmox Lab.
+This page explains the TLS certificate hierarchy, how certificates are issued and renewed, and how trust is distributed across the Proxmox Lab infrastructure.
 
-## Certificate Hierarchy
+## PKI Hierarchy
 
-Proxmox Lab uses a two-tier certificate authority:
+Proxmox Lab uses a two-tier certificate authority powered by step-ca:
 
 ```mermaid
 graph TD
-    ROOT[Root CA<br/>proxmox-lab Root CA<br/>10-year validity<br/>Self-signed]
+    ROOT["Root CA<br/>proxmox-lab Root CA<br/>10-year validity<br/>Self-signed"]
 
-    INT[Intermediate CA<br/>proxmox-lab Intermediate CA<br/>5-year validity<br/>Signs service certs]
+    INT["Intermediate CA<br/>proxmox-lab Intermediate CA<br/>5-year validity<br/>Signs all service certificates"]
 
-    subgraph certs["Service Certificates (90-day validity)"]
-        PROXMOX[Proxmox VE<br/>proxmox.mylab.lan]
-        DOCKER1[Docker Node 1<br/>docker01.mylab.lan]
-        DOCKER2[Docker Node 2<br/>docker02.mylab.lan]
-        DOCKER3[Docker Node 3<br/>docker03.mylab.lan]
-        KASM_CERT[Kasm<br/>kasm.mylab.lan]
-        OTHER[Other Services<br/>*.mylab.lan]
+    subgraph acme_clients["ACME-Issued Certificates (90-day validity)"]
+        direction LR
+        NOMAD1["nomad01.<domain>"]
+        NOMAD2["nomad02.<domain>"]
+        NOMAD3["nomad03.<domain>"]
+        KASM_CERT["kasm01.<domain>"]
+        PROXMOX_CERT["proxmox.<domain>"]
+    end
+
+    subgraph traefik_certs["Traefik-Managed Certificates (90-day validity)"]
+        direction LR
+        VAULT_CERT["vault.<domain>"]
+        AUTH_CERT["auth.<domain>"]
+        OTHER_CERT["other services"]
     end
 
     ROOT -->|Signs| INT
-    INT -->|Issues| PROXMOX
-    INT -->|Issues| DOCKER1
-    INT -->|Issues| DOCKER2
-    INT -->|Issues| DOCKER3
-    INT -->|Issues| KASM_CERT
-    INT -->|Issues| OTHER
+    INT -->|"ACME directory<br/>acme.sh on nodes"| acme_clients
+    INT -->|"ACME directory<br/>Traefik certresolver"| traefik_certs
 ```
 
 ## Why Two Tiers?
 
-| Tier | Purpose | Security |
-|------|---------|----------|
-| **Root CA** | Trust anchor | Private key should be kept offline after setup |
-| **Intermediate CA** | Issues certificates | Active, used by Step-CA |
+| Tier | Purpose | Key Location | Validity |
+|------|---------|-------------|----------|
+| **Root CA** | Trust anchor distributed to all clients | step-ca LXC + local backup | 10 years |
+| **Intermediate CA** | Active certificate issuer | step-ca LXC only | 5 years |
 
 !!! info "Security Best Practice"
     If the Intermediate CA is compromised, you can revoke it and create a new one
-    without having to redistribute a new Root CA to all clients.
+    without redistributing a new Root CA to all clients. The Root CA private key
+    ideally should be backed up securely and could be removed from the step-ca
+    LXC after initial setup.
 
-## Certificate Files
+## Certificate Issuance Methods
 
-The setup script generates these files in `terraform/lxc-step-ca/step-ca/`:
+There are two distinct paths for obtaining certificates from step-ca:
+
+### 1. acme.sh on Nomad Nodes (Infrastructure Certificates)
+
+Used for: Nomad node host certificates, Kasm, Proxmox host
+
+```mermaid
+sequenceDiagram
+    participant Node as Nomad Node / VM
+    participant ACME as acme.sh Client
+    participant DNS as Pi-hole DNS
+    participant CA as step-ca
+
+    Note over Node: Cloud-init triggers cert request
+
+    Node->>ACME: Request certificate
+    ACME->>DNS: Resolve ca.<domain>
+    DNS-->>ACME: step-ca IP address
+
+    ACME->>CA: POST /acme/acme/new-order
+    CA-->>ACME: Order + challenges
+
+    ACME->>ACME: Start TLS-ALPN server (:443)
+    ACME->>CA: Ready for validation
+
+    CA->>ACME: TLS-ALPN-01 challenge
+    ACME-->>CA: Challenge response
+
+    CA->>CA: Verify domain ownership
+    CA-->>ACME: Certificate issued
+
+    ACME->>Node: Install cert + key to /etc/ssl/
+```
+
+### 2. Traefik Certresolver (Service Certificates)
+
+Used for: Vault, Authentik, and any other Nomad service behind Traefik
+
+```mermaid
+sequenceDiagram
+    participant Client as Client Browser
+    participant Traefik as Traefik
+    participant CA as step-ca
+    participant Service as Backend Service<br/>(Vault, Authentik)
+
+    Note over Traefik: First request to vault.<domain>
+
+    Traefik->>CA: ACME HTTP-01 challenge<br/>POST /acme/acme/new-order
+    CA-->>Traefik: Challenge token
+
+    Traefik->>Traefik: Serve token at<br/>/.well-known/acme-challenge/
+
+    CA->>Traefik: GET /.well-known/acme-challenge/<token>
+    Traefik-->>CA: Challenge response
+    CA-->>Traefik: Certificate for vault.<domain>
+
+    Traefik->>Traefik: Store cert in acme.json
+
+    Client->>Traefik: HTTPS request to vault.<domain>
+    Traefik->>Service: Proxy to backend
+    Service-->>Traefik: Response
+    Traefik-->>Client: HTTPS response (valid TLS)
+```
+
+### Comparison of Issuance Methods
+
+| Aspect | acme.sh (nodes) | Traefik certresolver (services) |
+|--------|----------------|---------------------------------|
+| **Challenge type** | TLS-ALPN-01 | HTTP-01 |
+| **Triggered by** | Cloud-init / cron | First HTTPS request to service |
+| **Certificate stored at** | `/etc/ssl/certs/` and `/etc/ssl/private/` | `/srv/gluster/nomad-data/traefik/acme.json` |
+| **Renewal** | Cron job (daily check) | Traefik automatic renewal |
+| **Used for** | Host-level TLS (SSH, node APIs) | Service-level TLS (web UIs, APIs) |
+
+## Certificate Files and Storage
+
+### step-ca (LXC 902)
+
+The CA files are generated by `setup.sh` and deployed to the step-ca LXC:
 
 ```
-step-ca/
-├── certs/
-│   ├── root_ca.crt              # Root CA certificate (public)
-│   └── intermediate_ca.crt      # Intermediate CA certificate (public)
-├── config/
-│   └── ca.json                  # Step-CA configuration
-└── secrets/
-    ├── root_ca_key              # Root CA private key
-    ├── intermediate_ca_key      # Intermediate CA private key
-    └── password                 # Key encryption password
+terraform/lxc-step-ca/step-ca/
+  certs/
+    root_ca.crt              # Root CA certificate (public)
+    intermediate_ca.crt      # Intermediate CA certificate (public)
+  config/
+    ca.json                  # step-ca configuration
+  secrets/
+    root_ca_key              # Root CA private key
+    intermediate_ca_key      # Intermediate CA private key
+    password                 # Key encryption password
 ```
 
 !!! danger "Security Warning"
     The `secrets/` directory contains private keys. After deployment:
 
-    1. Back up the secrets securely
-    2. Consider deleting from your workstation
-    3. Never commit to version control
+    1. Back up the secrets securely (e.g., to an encrypted USB drive)
+    2. Consider deleting private keys from your workstation
+    3. Never commit to version control (already in `.gitignore`)
 
-## Step-CA Service
+### Nomad Nodes (acme.sh)
 
-Step-CA runs as a container on the `step-ca` LXC and provides:
+Each Nomad node stores its own certificates:
 
-- **ACME Protocol** - Automated certificate issuance
-- **REST API** - Manual certificate operations
-- **Certificate Database** - Tracks issued certificates
+| Path | Contents |
+|------|----------|
+| `/etc/ssl/certs/<hostname>.crt` | Node certificate (full chain) |
+| `/etc/ssl/private/<hostname>.key` | Node private key |
+| `/root/.acme.sh/<hostname>/` | acme.sh certificate data |
 
-### ACME Endpoint
+### Traefik (ACME storage)
 
-All services request certificates from:
+Traefik stores all service certificates in a single JSON file on GlusterFS:
+
+| Path | Contents |
+|------|----------|
+| `/srv/gluster/nomad-data/traefik/acme.json` | All Traefik-managed certificates |
+| `/srv/gluster/nomad-data/traefik/root_ca.crt` | Root CA (for Traefik to trust step-ca) |
+
+### Root CA on Nomad Nodes
+
+The root CA certificate is distributed to Nomad nodes so that services can trust the internal CA:
+
+| Path | Purpose |
+|------|---------|
+| `/usr/local/share/ca-certificates/root_ca.crt` | System trust store |
+| `/srv/gluster/nomad-data/traefik/root_ca.crt` | Traefik CA trust (mounted into container) |
+
+Traefik uses environment variables to trust the internal CA:
 
 ```
-https://ca.<dns_postfix>/acme/acme/directory
+SSL_CERT_FILE=/data/certs/root_ca.crt
+LEGO_CA_CERTIFICATES=/data/certs/root_ca.crt
 ```
 
-Example: `https://ca.mylab.lan/acme/acme/directory`
+## step-ca Configuration
 
-### Configuration
-
-The CA is configured via `config/ca.json`:
+The ACME endpoint is configured in `config/ca.json`:
 
 ```json
 {
@@ -105,95 +205,35 @@ The CA is configured via `config/ca.json`:
 }
 ```
 
-## Certificate Issuance Flow
+The ACME directory URL used by all clients:
 
-### Automated (ACME)
-
-```mermaid
-sequenceDiagram
-    participant Service
-    participant acme.sh as acme.sh Client
-    participant StepCA as Step-CA
-    participant DNS as pihole-external
-
-    Note over Service: Certificate needed
-
-    Service->>acme.sh: Request certificate
-    acme.sh->>DNS: Resolve ca.mylab.lan
-    DNS-->>acme.sh: 10.1.50.4
-
-    acme.sh->>StepCA: POST /acme/acme/new-order
-    StepCA-->>acme.sh: Order + challenges
-
-    acme.sh->>acme.sh: Start ALPN server (:443)
-    acme.sh->>StepCA: POST ready for validation
-
-    StepCA->>acme.sh: TLS-ALPN-01 challenge
-    acme.sh-->>StepCA: Challenge response
-
-    StepCA->>StepCA: Verify challenge
-    StepCA-->>acme.sh: Certificate issued
-
-    acme.sh->>Service: Install certificate
+```
+https://ca.<dns_postfix>/acme/acme/directory
 ```
 
-### Challenge Types
+## Root CA Distribution
 
-| Challenge | Port | How It Works |
-|-----------|------|--------------|
-| TLS-ALPN-01 | 443 | Client proves control by serving special TLS cert |
-| HTTP-01 | 80 | Client serves token at `/.well-known/acme-challenge/` |
+For browsers and tools to trust certificates issued by the internal CA, the root CA must be installed on client systems and Proxmox nodes.
 
-!!! note "Default Challenge"
-    Proxmox Lab uses TLS-ALPN-01 (`--alpn` flag) by default.
+### Distributing to Proxmox Nodes
 
-## Installing Certificates
+Use `setup.sh` option **12) Update root certificates** to push the root CA to all Proxmox nodes in the cluster. This runs:
 
-### On Services (Automated)
-
-VMs include acme.sh pre-configured. Certificates are:
-
-- **Requested** during cloud-init
-- **Stored** in `/etc/ssl/certs/` and `/etc/ssl/private/`
-- **Renewed** automatically via cron
-
-### acme.sh Commands
-
-```bash
-# Set Step-CA as default
-~/.acme.sh/acme.sh --set-default-ca \
-  --server https://ca.mylab.lan/acme/acme/directory
-
-# Issue certificate
-~/.acme.sh/acme.sh --issue --alpn -d myservice.mylab.lan
-
-# Issue with multiple domains (SANs)
-~/.acme.sh/acme.sh --issue --alpn \
-  -d myservice.mylab.lan \
-  -d alias.mylab.lan
-
-# Install certificate
-~/.acme.sh/acme.sh --install-cert -d myservice.mylab.lan \
-  --key-file /etc/ssl/private/myservice.key \
-  --fullchain-file /etc/ssl/certs/myservice.crt \
-  --reloadcmd "systemctl reload nginx"
-```
-
-## Trusting the Root CA
-
-For browsers and tools to trust certificates, install the Root CA:
+1. Copies `root_ca.crt` to `/usr/local/share/ca-certificates/` on each Proxmox node
+2. Runs `update-ca-certificates` to add it to the system trust store
+3. Proxmox web UI and API then trust the internal CA
 
 ### Download Root CA
 
 ```bash
-# From Step-CA
+# From step-ca (over the network)
 curl -k -o proxmox-lab-ca.crt https://ca.mylab.lan/roots.pem
 
-# Or from local files
+# From local project files
 cp terraform/lxc-step-ca/step-ca/certs/root_ca.crt proxmox-lab-ca.crt
 ```
 
-### Install on Systems
+### Install on Client Systems
 
 === "macOS"
 
@@ -245,9 +285,9 @@ cp terraform/lxc-step-ca/step-ca/certs/root_ca.crt proxmox-lab-ca.crt
 
 ## Certificate Renewal
 
-### Automatic Renewal
+### acme.sh Automatic Renewal
 
-acme.sh installs a cron job:
+acme.sh installs a daily cron job on each node:
 
 ```bash
 # View cron entry
@@ -259,65 +299,140 @@ Typical output:
 0 0 * * * "/root/.acme.sh/acme.sh" --cron --home "/root/.acme.sh" > /dev/null
 ```
 
+Certificates are renewed automatically when they are within 30 days of expiration (default for 90-day certificates).
+
+### Traefik Automatic Renewal
+
+Traefik handles renewal automatically for all service certificates stored in `acme.json`. No manual intervention is required. Traefik checks certificate expiration periodically and renews before expiry.
+
 ### Manual Renewal
 
 ```bash
-# Renew all certificates
+# Renew all certificates on a node
 ~/.acme.sh/acme.sh --cron
 
-# Force renewal of specific cert
-~/.acme.sh/acme.sh --renew -d myservice.mylab.lan --force
+# Force renewal of a specific certificate
+~/.acme.sh/acme.sh --renew -d nomad01.mylab.lan --force
 ```
 
-### Renewal Hooks
+### CA Certificate Regeneration
 
-Configure commands to run after renewal:
+If the CA certificates need to be regenerated (e.g., compromise or expiration), use `setup.sh` option **11) Regenerate CA**. This will:
 
-```bash
-~/.acme.sh/acme.sh --install-cert -d myservice.mylab.lan \
-  --key-file /etc/ssl/private/myservice.key \
-  --fullchain-file /etc/ssl/certs/myservice.crt \
-  --reloadcmd "systemctl reload nginx"
+1. Generate new root and intermediate CA certificates
+2. Redeploy to the step-ca LXC
+3. All existing service certificates will need to be re-issued
+4. The new root CA must be redistributed to all clients
+
+After regenerating, run option **12) Update root certificates** to push to Proxmox nodes.
+
+## End-to-End Certificate Flow
+
+This diagram shows the complete certificate lifecycle from CA creation to client trust:
+
+```mermaid
+graph TD
+    subgraph setup["setup.sh (Initial Deployment)"]
+        GEN[Generate Root + Intermediate CA]
+        DEPLOY_CA[Deploy to step-ca LXC]
+        PUSH_ROOT[Push Root CA to Proxmox nodes]
+    end
+
+    subgraph runtime["Runtime (Automatic)"]
+        subgraph node_certs["Node Certificates"]
+            CLOUDINIT[Cloud-init triggers acme.sh]
+            ACME_REQ[acme.sh requests cert from step-ca]
+            INSTALL[Install to /etc/ssl/]
+            CRON[Daily cron checks renewal]
+        end
+
+        subgraph service_certs["Service Certificates"]
+            FIRST_REQ[First HTTPS request to service]
+            TRAEFIK_ACME[Traefik requests cert from step-ca]
+            STORE[Store in acme.json on GlusterFS]
+            AUTO_RENEW[Traefik auto-renews before expiry]
+        end
+    end
+
+    subgraph client["Client Setup (One-time)"]
+        TRUST[Install Root CA on client systems]
+        VERIFY[Browser trusts all lab certificates]
+    end
+
+    GEN --> DEPLOY_CA
+    DEPLOY_CA --> PUSH_ROOT
+    DEPLOY_CA --> CLOUDINIT
+    CLOUDINIT --> ACME_REQ
+    ACME_REQ --> INSTALL
+    INSTALL --> CRON
+    CRON -->|"Renew if < 30 days"| ACME_REQ
+
+    DEPLOY_CA --> FIRST_REQ
+    FIRST_REQ --> TRAEFIK_ACME
+    TRAEFIK_ACME --> STORE
+    STORE --> AUTO_RENEW
+    AUTO_RENEW -->|"Renew before expiry"| TRAEFIK_ACME
+
+    PUSH_ROOT --> TRUST
+    TRUST --> VERIFY
 ```
 
 ## Viewing Certificate Information
 
 ```bash
 # View certificate details
-openssl x509 -in /etc/ssl/certs/myservice.crt -text -noout
+openssl x509 -in /etc/ssl/certs/nomad01.crt -text -noout
 
 # Check expiration date
-openssl x509 -in /etc/ssl/certs/myservice.crt -enddate -noout
+openssl x509 -in /etc/ssl/certs/nomad01.crt -enddate -noout
 
 # Verify certificate chain
-openssl verify -CAfile /usr/local/share/ca-certificates/proxmox-lab-ca.crt \
-  /etc/ssl/certs/myservice.crt
+openssl verify -CAfile /usr/local/share/ca-certificates/root_ca.crt \
+  /etc/ssl/certs/nomad01.crt
 
-# Test TLS connection
-openssl s_client -connect myservice.mylab.lan:443 -servername myservice.mylab.lan
+# Test TLS connection to a service
+openssl s_client -connect vault.mylab.lan:443 -servername vault.mylab.lan
+
+# View Traefik's stored certificates
+# (SSH to nomad01, then inspect the acme.json file)
+cat /srv/gluster/nomad-data/traefik/acme.json | jq '.Certificates'
 ```
 
 ## Troubleshooting Certificates
 
 ??? question "Certificate not trusted in browser"
-    The Root CA is not installed on your system.
-    See [Install on Systems](#install-on-systems) above.
+    The Root CA is not installed on your client system.
+    See [Install on Client Systems](#install-on-client-systems) above.
 
-??? question "ACME challenge failed"
+??? question "ACME challenge failed (acme.sh)"
     - Verify DNS resolves: `nslookup ca.mylab.lan`
-    - Check Step-CA is running: `curl -k https://ca.mylab.lan/health`
-    - Ensure port 443 is not in use during challenge
+    - Check step-ca is running: `curl -k https://ca.mylab.lan/health`
+    - Ensure port 443 is not already in use on the node during TLS-ALPN-01 challenge
+    - Check acme.sh logs: `cat ~/.acme.sh/acme.sh.log`
+
+??? question "ACME challenge failed (Traefik)"
+    - Ensure DNS for the service (e.g., `vault.mylab.lan`) resolves to nomad01
+    - Check Traefik logs: `nomad alloc logs -job traefik`
+    - Verify step-ca is reachable from nomad01
+    - Clear stale ACME data: `rm /srv/gluster/nomad-data/traefik/acme.json` and restart Traefik
+    - Verify `LEGO_CA_CERTIFICATES` points to the correct root CA file
 
 ??? question "Certificate expired"
     ```bash
-    # Force renewal
-    ~/.acme.sh/acme.sh --renew -d myservice.mylab.lan --force
+    # Force renewal with acme.sh
+    ~/.acme.sh/acme.sh --renew -d nomad01.mylab.lan --force
 
     # Check cron is running
     systemctl status cron
     ```
 
+    For Traefik-managed certificates, restart the Traefik job:
+    ```bash
+    nomad job restart traefik
+    ```
+
 ## Next Steps
 
-- [:octicons-arrow-right-24: Certificate Operations](../operations/certificate-operations.md) - Day-to-day certificate management
-- [:octicons-arrow-right-24: Troubleshooting](../troubleshooting/common-issues.md) - Common certificate issues
+- [:octicons-arrow-right-24: Certificate Operations](../operations/certificate-operations.md) -- Day-to-day certificate management
+- [:octicons-arrow-right-24: Service Relationships](service-relationships.md) -- How services interact
+- [:octicons-arrow-right-24: Troubleshooting](../troubleshooting/common-issues.md) -- Common issues and fixes
