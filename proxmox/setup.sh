@@ -352,7 +352,22 @@ function installCloudInitImage() {
     --agent enabled=1 \
     --scsihw virtio-scsi-pci
   qm importdisk $VMID "${IMG_NAME}.qcow2" "$STORE" --format qcow2
-  qm set $VMID --scsi0 "$STORE:vm-${VMID}-disk-0"
+
+  # Determine disk reference format based on storage type
+  # Directory-based storage (nfs, dir, cifs) uses: storage:VMID/vm-VMID-disk-0.qcow2
+  # Block-based storage (lvm, lvmthin, zfs) uses: storage:vm-VMID-disk-0
+  local STORAGE_TYPE=$(pvesm status --storage "$STORE" -o json 2>/dev/null | jq -r '.[0].type // "unknown"')
+  local DISK_REF
+  case "$STORAGE_TYPE" in
+    dir|nfs|cifs|glusterfs|cephfs)
+      DISK_REF="$STORE:$VMID/vm-${VMID}-disk-0.qcow2"
+      ;;
+    *)
+      DISK_REF="$STORE:vm-${VMID}-disk-0"
+      ;;
+  esac
+
+  qm set $VMID --scsi0 "$DISK_REF"
   qm set $VMID --boot order=scsi0
   qm set $VMID --ide2 "$STORE:cloudinit"
   # Use template password from config, or generate a random one
