@@ -27,10 +27,18 @@ job "samba-dc" {
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
+    # Restart policy - handle transient failures during domain provisioning
+    restart {
+      attempts = 3
+      interval = "5m"
+      delay    = "30s"
+      mode     = "delay"
+    }
+
     network {
       mode = "host"
-      # Using port 5353 for internal DNS to avoid conflict with Pi-hole on 53
-      port "dns"      { static = 5353 }
+      # Samba DNS binds to port 53 by default in host network mode
+      port "dns"      { static = 53 }
       port "kerberos" { static = 88 }
       port "ldap"     { static = 389 }
       port "ldaps"    { static = 636 }
@@ -46,13 +54,15 @@ job "samba-dc" {
       kill_timeout = "120s"
 
       config {
-        image        = "nowsci/samba-domain:latest"
+        image        = "${SAMBA_AD_IMAGE}"
         network_mode = "host"
         privileged   = true
 
+        # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
+        # which GlusterFS FUSE doesn't provide. Each DC stores data locally.
         volumes = [
-          "/srv/gluster/nomad-data/samba-dc01/samba:/var/lib/samba",
-          "/srv/gluster/nomad-data/samba-dc01/krb5:/etc/krb5",
+          "/opt/samba-dc01/samba:/var/lib/samba",
+          "/opt/samba-dc01/krb5:/etc/krb5",
         ]
       }
 
@@ -62,6 +72,7 @@ job "samba-dc" {
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
 DOMAIN=${AD_REALM}
+DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD01_IP}
 DNSFORWARDER=${DNS_FORWARDER}
 JOIN=false
@@ -128,10 +139,18 @@ EOH
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
+    # Restart policy - handle transient failures during domain join
+    restart {
+      attempts = 3
+      interval = "5m"
+      delay    = "30s"
+      mode     = "delay"
+    }
+
     network {
       mode = "host"
-      # Using port 5354 for internal DNS to avoid conflict
-      port "dns"      { static = 5354 }
+      # Samba DNS binds to port 53 by default in host network mode
+      port "dns"      { static = 53 }
       port "kerberos" { static = 88 }
       port "ldap"     { static = 389 }
       port "ldaps"    { static = 636 }
@@ -147,13 +166,14 @@ EOH
       kill_timeout = "120s"
 
       config {
-        image        = "nowsci/samba-domain:latest"
+        image        = "${SAMBA_AD_IMAGE}"
         network_mode = "host"
         privileged   = true
 
+        # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
         volumes = [
-          "/srv/gluster/nomad-data/samba-dc02/samba:/var/lib/samba",
-          "/srv/gluster/nomad-data/samba-dc02/krb5:/etc/krb5",
+          "/opt/samba-dc02/samba:/var/lib/samba",
+          "/opt/samba-dc02/krb5:/etc/krb5",
         ]
       }
 
@@ -163,8 +183,10 @@ EOH
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
 DOMAIN=${AD_REALM}
+DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD02_IP}
 DNSFORWARDER=${NOMAD01_IP}
+DCIP=${NOMAD01_IP}
 JOIN=true
 JOINSITE=Default-First-Site-Name
 INSECURELDAP=true

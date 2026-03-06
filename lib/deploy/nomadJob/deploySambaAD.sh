@@ -105,6 +105,18 @@ EOF
     DNS_FORWARDER="1.1.1.1"  # Fallback to Cloudflare
   fi
 
+  # Samba AD Docker image - use custom image from cluster-info.json or default
+  local SAMBA_AD_IMAGE
+  SAMBA_AD_IMAGE=$(jq -r '.samba_ad_image // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  if [ -z "$SAMBA_AD_IMAGE" ] || [ "$SAMBA_AD_IMAGE" = "null" ]; then
+    # Default to the original image until custom image is configured
+    SAMBA_AD_IMAGE="nowsci/samba-domain:latest"
+    info "Using default Samba AD image: $SAMBA_AD_IMAGE"
+    info "To use custom image, set samba_ad_image in cluster-info.json"
+  else
+    info "Using custom Samba AD image: $SAMBA_AD_IMAGE"
+  fi
+
   # Create Vault policy for samba-dc
   doing "Creating Vault policy for Samba DC..."
   local SAMBA_POLICY
@@ -204,11 +216,12 @@ ROLE_JSON
     info "AD Administrator password saved to Vault (retrieve with: vault kv get secret/samba-ad)"
   fi
 
-  # Create storage directories for DC01
-  doing "Preparing DC01 storage directories on nomad01..."
+  # Create storage directories for DC01 (using local storage, not GlusterFS)
+  # Samba AD requires POSIX ACL support which GlusterFS FUSE doesn't provide
+  doing "Preparing DC01 local storage directories on nomad01..."
 
   if ! sshScript "$VM_USER" "$NOMAD01_IP" <<'REMOTE_SCRIPT'
-    DC01_DIR="/srv/gluster/nomad-data/samba-dc01"
+    DC01_DIR="/opt/samba-dc01"
 
     # Clean up any stale data from previous deployments
     if [ -d "$DC01_DIR" ]; then
@@ -216,11 +229,11 @@ ROLE_JSON
       sudo rm -rf "$DC01_DIR"
     fi
 
-    # Create required directories
+    # Create required directories on local filesystem (supports ACLs)
     sudo mkdir -p "$DC01_DIR"/{samba,krb5}
     sudo chmod -R 755 "$DC01_DIR"
 
-    echo "DC01 storage directories prepared"
+    echo "DC01 local storage directories prepared at $DC01_DIR"
 REMOTE_SCRIPT
   then
     error "Failed to prepare DC01 storage"
@@ -229,10 +242,10 @@ REMOTE_SCRIPT
 
   # Create storage directories for DC02 (if nomad02 exists)
   if [ -n "$NOMAD02_IP" ] && [ "$NOMAD02_IP" != "null" ]; then
-    doing "Preparing DC02 storage directories on nomad02..."
+    doing "Preparing DC02 local storage directories on nomad02..."
 
     if ! sshScript "$VM_USER" "$NOMAD02_IP" <<'REMOTE_SCRIPT'
-      DC02_DIR="/srv/gluster/nomad-data/samba-dc02"
+      DC02_DIR="/opt/samba-dc02"
 
       # Clean up any stale data from previous deployments
       if [ -d "$DC02_DIR" ]; then
@@ -240,11 +253,11 @@ REMOTE_SCRIPT
         sudo rm -rf "$DC02_DIR"
       fi
 
-      # Create required directories
+      # Create required directories on local filesystem (supports ACLs)
       sudo mkdir -p "$DC02_DIR"/{samba,krb5}
       sudo chmod -R 755 "$DC02_DIR"
 
-      echo "DC02 storage directories prepared"
+      echo "DC02 local storage directories prepared at $DC02_DIR"
 REMOTE_SCRIPT
     then
       warn "Failed to prepare DC02 storage - continuing with DC01 only"
@@ -270,7 +283,7 @@ REMOTE_SCRIPT
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
 
   # Export variables for envsubst
-  export AD_REALM AD_DOMAIN DNS_FORWARDER AD_REALM_LOWER DNS_POSTFIX NOMAD01_IP NOMAD02_IP
+  export AD_REALM AD_DOMAIN DNS_FORWARDER AD_REALM_LOWER DNS_POSTFIX NOMAD01_IP NOMAD02_IP SAMBA_AD_IMAGE
 
   # Check if we're deploying single DC or dual DC setup
   local DEPLOY_REPLICA=false
@@ -279,41 +292,46 @@ REMOTE_SCRIPT
     info "Multi-node cluster detected - deploying dual DC setup"
     info "  DC01 (primary) on nomad01: provisions new domain"
     info "  DC02 (replica) on nomad02: joins existing domain"
+    info ""
+    info "Sequential deployment: DC01 first, then DC02 (required for fresh provisioning)"
   else
     info "Single node deployment - deploying primary DC only (DC01 on nomad01)"
   fi
 
-  # Generate the job file dynamically
-  generateSambaDCJob "$DEPLOY_REPLICA" > "/tmp/samba-dc-rendered.nomad.hcl"
+  # ==========================================================================
+  # Phase 1: Deploy DC01 only (provisions the domain)
+  # ==========================================================================
+  doing "Phase 1: Deploying DC01 (primary domain controller)..."
+
+  # Generate DC01-only job file
+  generateSambaDCJob "false" > "/tmp/samba-dc-rendered.nomad.hcl"
 
   # Apply variable substitution
-  envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP}' \
+  envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP} ${SAMBA_AD_IMAGE}' \
     < "/tmp/samba-dc-rendered.nomad.hcl" \
     > "/tmp/samba-dc-final.nomad.hcl"
   mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
 
   # Copy to Nomad node
   scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
-  rm -f "/tmp/samba-dc-rendered.nomad.hcl"
 
-  # Deploy the job
-  doing "Deploying Samba DC job to Nomad cluster..."
+  # Deploy DC01 only
   if ! sshRun "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
-    error "Failed to deploy Samba DC job"
+    error "Failed to deploy DC01"
+    rm -f "/tmp/samba-dc-rendered.nomad.hcl"
     return 1
   fi
 
-  # Clean up remote file
-  sshRun "$VM_USER" "$NOMAD01_IP" "rm -f /tmp/samba-dc.nomad.hcl"
+  # Wait for DC01 to become healthy in Nomad
+  doing "Waiting for DC01 to provision AD domain and become healthy..."
 
-  # Wait for primary DC to provision domain
-  doing "Waiting for DC01 to provision AD domain (this may take a few minutes)..."
-
-  local DC01_READY=false
+  local DC01_HEALTHY=false
   for attempt in {1..60}; do
-    # Check if LDAP is responding
-    if sshRun "$VM_USER" "$NOMAD01_IP" "timeout 5 bash -c 'echo | nc -v localhost 389' 2>/dev/null | grep -q 'succeeded'" 2>/dev/null; then
-      DC01_READY=true
+    # Check Nomad deployment status for dc01 healthy count (4th column in dc01 row)
+    local dc01_healthy
+    dc01_healthy=$(sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc01/{print \$4}' | head -1" 2>/dev/null || echo "0")
+    if [ "$dc01_healthy" = "1" ]; then
+      DC01_HEALTHY=true
       break
     fi
     echo -n "."
@@ -321,15 +339,72 @@ REMOTE_SCRIPT
   done
   echo
 
-  if [ "$DC01_READY" = "false" ]; then
-    warn "DC01 LDAP not responding yet - domain provisioning may still be in progress"
-    info "Check status with: nomad alloc logs -job samba-dc"
-  else
-    success "DC01 is responding on LDAP port"
+  if [ "$DC01_HEALTHY" = "false" ]; then
+    error "DC01 failed to become healthy within timeout"
+    info "Check logs with: nomad alloc logs -job samba-dc"
+    sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | tail -20"
+    rm -f "/tmp/samba-dc-rendered.nomad.hcl"
+    return 1
+  fi
+  success "DC01 is healthy and domain is provisioned"
+
+  # ==========================================================================
+  # Phase 2: Add DC02 if multi-node setup
+  # ==========================================================================
+  if [ "$DEPLOY_REPLICA" = "true" ]; then
+    doing "Phase 2: Adding DC02 (replica domain controller)..."
+
+    # Generate full job with both DCs
+    generateSambaDCJob "true" > "/tmp/samba-dc-rendered.nomad.hcl"
+
+    # Apply variable substitution
+    envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP} ${SAMBA_AD_IMAGE}' \
+      < "/tmp/samba-dc-rendered.nomad.hcl" \
+      > "/tmp/samba-dc-final.nomad.hcl"
+    mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
+
+    # Copy updated job to Nomad node
+    scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
+
+    # Deploy updated job (adds DC02)
+    if ! sshRun "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
+      error "Failed to deploy DC02"
+      rm -f "/tmp/samba-dc-rendered.nomad.hcl"
+      return 1
+    fi
+
+    # Wait for DC02 to become healthy
+    doing "Waiting for DC02 to join domain and become healthy..."
+
+    local DC02_HEALTHY=false
+    for attempt in {1..60}; do
+      # Check Nomad deployment status for dc02 healthy count (4th column in dc02 row)
+      local dc02_healthy
+      dc02_healthy=$(sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc02/{print \$4}' | head -1" 2>/dev/null || echo "0")
+      if [ "$dc02_healthy" = "1" ]; then
+        DC02_HEALTHY=true
+        break
+      fi
+      echo -n "."
+      sleep 5
+    done
+    echo
+
+    if [ "$DC02_HEALTHY" = "false" ]; then
+      warn "DC02 did not become healthy within timeout"
+      info "DC01 is running - DC02 may still be joining the domain"
+      info "Check logs with: nomad alloc logs -job samba-dc"
+    else
+      success "DC02 is healthy and joined the domain"
+    fi
   fi
 
-  # Show job status
-  doing "Current job status:"
+  # Clean up
+  sshRun "$VM_USER" "$NOMAD01_IP" "rm -f /tmp/samba-dc.nomad.hcl"
+  rm -f "/tmp/samba-dc-rendered.nomad.hcl"
+
+  # Show final job status
+  doing "Final job status:"
   sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | head -30"
 
   # Update DNS records for AD
@@ -457,13 +532,11 @@ function updateADDNSRecords() {
   # Configure conditional forwarding for AD domain
   doing "Configuring conditional forwarding for $AD_REALM_LOWER..."
 
-  # Pi-hole v6 uses dnsmasq.d for custom configs
-  local FORWARD_CONFIG="server=/${AD_REALM_LOWER}/${NOMAD01_IP}#5353"
-  if [ -n "$NOMAD02_IP" ] && [ "$NOMAD02_IP" != "null" ]; then
-    FORWARD_CONFIG="${FORWARD_CONFIG}\nserver=/${AD_REALM_LOWER}/${NOMAD02_IP}#5354"
-  fi
+  # Pi-hole v6 uses misc.dnsmasq_lines for custom dnsmasq config
+  # Also need to disable dns.domain.local to allow forwarding queries for the local domain
+  local FORWARD_CONFIG="server=/${AD_REALM_LOWER}/${NOMAD01_IP}"
 
-  if sshRun "$REMOTE_USER" "$DNS_IP" "echo -e '$FORWARD_CONFIG' | sudo tee /etc/dnsmasq.d/10-ad-forward.conf && pihole restartdns"; then
+  if sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.domain.local false && pihole-FTL --config misc.dnsmasq_lines '[\"$FORWARD_CONFIG\"]' && systemctl restart pihole-FTL"; then
     success "Conditional forwarding configured for $AD_REALM_LOWER"
   else
     warn "Failed to configure conditional forwarding"
@@ -604,10 +677,18 @@ job "samba-dc" {
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
+    # Restart policy - handle transient failures during domain provisioning
+    restart {
+      attempts = 3
+      interval = "5m"
+      delay    = "30s"
+      mode     = "delay"
+    }
+
     network {
       mode = "host"
-      # Using port 5353 for internal DNS to avoid conflict with Pi-hole on 53
-      port "dns"      { static = 5353 }
+      # Samba DNS binds to port 53 by default in host network mode
+      port "dns"      { static = 53 }
       port "kerberos" { static = 88 }
       port "ldap"     { static = 389 }
       port "ldaps"    { static = 636 }
@@ -623,13 +704,16 @@ job "samba-dc" {
       kill_timeout = "120s"
 
       config {
-        image        = "nowsci/samba-domain:latest"
+        image        = "${SAMBA_AD_IMAGE}"
         network_mode = "host"
         privileged   = true
 
+        # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
+        # which GlusterFS FUSE doesn't provide. Each DC stores data locally and
+        # replicates via AD replication.
         volumes = [
-          "/srv/gluster/nomad-data/samba-dc01/samba:/var/lib/samba",
-          "/srv/gluster/nomad-data/samba-dc01/krb5:/etc/krb5",
+          "/opt/samba-dc01/samba:/var/lib/samba",
+          "/opt/samba-dc01/krb5:/etc/krb5",
         ]
       }
 
@@ -639,6 +723,7 @@ job "samba-dc" {
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
 DOMAIN=${AD_REALM}
+DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD01_IP}
 DNSFORWARDER=${DNS_FORWARDER}
 JOIN=false
@@ -710,10 +795,18 @@ EOF_JOB_START
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
+    # Restart policy - handle transient failures during domain join
+    restart {
+      attempts = 3
+      interval = "5m"
+      delay    = "30s"
+      mode     = "delay"
+    }
+
     network {
       mode = "host"
-      # Using port 5354 for internal DNS to avoid conflict
-      port "dns"      { static = 5354 }
+      # Samba DNS binds to port 53 by default in host network mode
+      port "dns"      { static = 53 }
       port "kerberos" { static = 88 }
       port "ldap"     { static = 389 }
       port "ldaps"    { static = 636 }
@@ -729,13 +822,14 @@ EOF_JOB_START
       kill_timeout = "120s"
 
       config {
-        image        = "nowsci/samba-domain:latest"
+        image        = "${SAMBA_AD_IMAGE}"
         network_mode = "host"
         privileged   = true
 
+        # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
         volumes = [
-          "/srv/gluster/nomad-data/samba-dc02/samba:/var/lib/samba",
-          "/srv/gluster/nomad-data/samba-dc02/krb5:/etc/krb5",
+          "/opt/samba-dc02/samba:/var/lib/samba",
+          "/opt/samba-dc02/krb5:/etc/krb5",
         ]
       }
 
@@ -745,8 +839,10 @@ EOF_JOB_START
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
 DOMAIN=${AD_REALM}
+DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD02_IP}
 DNSFORWARDER=${NOMAD01_IP}
+DCIP=${NOMAD01_IP}
 JOIN=true
 JOINSITE=Default-First-Site-Name
 INSECURELDAP=true
