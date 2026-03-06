@@ -351,21 +351,18 @@ function installCloudInitImage() {
     --ostype l26 \
     --agent enabled=1 \
     --scsihw virtio-scsi-pci
-  qm importdisk $VMID "${IMG_NAME}.qcow2" "$STORE" --format qcow2
+  # Import disk and capture the actual disk reference from output
+  local IMPORT_OUTPUT=$(qm importdisk $VMID "${IMG_NAME}.qcow2" "$STORE" --format qcow2 2>&1)
+  echo "$IMPORT_OUTPUT"
 
-  # Determine disk reference format based on storage type
-  # Directory-based storage (nfs, dir, cifs) uses: storage:VMID/vm-VMID-disk-0.qcow2
-  # Block-based storage (lvm, lvmthin, zfs) uses: storage:vm-VMID-disk-0
-  local STORAGE_TYPE=$(pvesm status --storage "$STORE" -o json 2>/dev/null | jq -r '.[0].type // "unknown"')
-  local DISK_REF
-  case "$STORAGE_TYPE" in
-    dir|nfs|cifs|glusterfs|cephfs)
-      DISK_REF="$STORE:$VMID/vm-${VMID}-disk-0.qcow2"
-      ;;
-    *)
-      DISK_REF="$STORE:vm-${VMID}-disk-0"
-      ;;
-  esac
+  # Parse the disk reference from: "unused0: successfully imported disk 'storage:path'"
+  # Extract text between single quotes after "successfully imported disk"
+  local DISK_REF=$(echo "$IMPORT_OUTPUT" | sed -n "s/.*successfully imported disk '\([^']*\)'.*/\1/p")
+
+  if [ -z "$DISK_REF" ]; then
+    echo "    - ERROR: Could not parse disk reference from import output"
+    return 1
+  fi
 
   qm set $VMID --scsi0 "$DISK_REF"
   qm set $VMID --boot order=scsi0
