@@ -90,9 +90,17 @@ function runProxmoxSetupOnAll() {
   doing "Running cluster-wide Proxmox setup on ${CLUSTER_NODES[0]} ($PRIMARY_IP)..."
 
   scpTo "proxmox/setup.sh" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-setup.sh"
-  # Note: Using raw ssh here because we need -t for interactive script
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@${PRIMARY_IP}" \
-    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'"
+
+  # Run setup and capture output for token extraction
+  local SETUP_OUTPUT
+  SETUP_OUTPUT=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
+    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'" 2>&1) || true
+
+  # Display the output
+  echo "$SETUP_OUTPUT"
+
+  # Extract and save API token credentials
+  saveProxmoxCredentials "$SETUP_OUTPUT" "$PRIMARY_IP"
 
   # Per-node setup (run on each node) - pass config for storage/bridge settings
   for i in "${!CLUSTER_NODES[@]}"; do
@@ -107,4 +115,84 @@ function runProxmoxSetupOnAll() {
   done
 
   success "Proxmox setup complete on all nodes"
+}
+
+function saveProxmoxCredentials() {
+  local SETUP_OUTPUT="$1"
+  local PROXMOX_IP="$2"
+  local CREDS_FILE="$CRYPTO_DIR/proxmox-credentials.json"
+
+  # Extract token info from output: PROXMOX_TOKEN_INFO:user!token:secret
+  local TOKEN_LINE
+  TOKEN_LINE=$(echo "$SETUP_OUTPUT" | grep "^PROXMOX_TOKEN_INFO:" | tail -1)
+
+  if [ -z "$TOKEN_LINE" ]; then
+    warn "Could not extract API token from Proxmox setup output"
+    return 1
+  fi
+
+  local TOKEN_ID TOKEN_SECRET
+  TOKEN_ID=$(echo "$TOKEN_LINE" | cut -d':' -f2)
+  TOKEN_SECRET=$(echo "$TOKEN_LINE" | cut -d':' -f3)
+
+  # Ensure crypto directory exists
+  mkdir -p "$CRYPTO_DIR"
+
+  # Build credentials JSON
+  local API_URL="https://${PROXMOX_IP}:8006/api2/json"
+
+  if [ "$TOKEN_SECRET" = "EXISTING" ]; then
+    # Token exists but we don't have the secret
+    if [ -f "$CREDS_FILE" ]; then
+      info "API token exists on Proxmox; using existing credentials from $CREDS_FILE"
+      return 0
+    else
+      warn "API token exists but no saved credentials found"
+      warn "To regenerate: ssh to Proxmox and run: REGENERATE_TOKEN=true /tmp/proxmox-setup.sh cluster-init"
+      # Create placeholder file
+      jq -n \
+        --arg url "$API_URL" \
+        --arg token_id "$TOKEN_ID" \
+        --arg token_secret "RETRIEVE_FROM_PROXMOX_OR_REGENERATE" \
+        --arg note "Token exists but secret not available. Set REGENERATE_TOKEN=true to recreate." \
+        '{
+          proxmox_api_url: $url,
+          proxmox_api_token_id: $token_id,
+          proxmox_api_token_secret: $token_secret,
+          note: $note,
+          created_at: (now | todate)
+        }' > "$CREDS_FILE"
+      return 1
+    fi
+  elif [ "$TOKEN_SECRET" = "MANUAL" ] || [ "$TOKEN_SECRET" = "UNKNOWN" ]; then
+    warn "Could not automatically capture API token secret"
+    warn "Please manually update $CREDS_FILE with the token secret shown above"
+    jq -n \
+      --arg url "$API_URL" \
+      --arg token_id "$TOKEN_ID" \
+      --arg token_secret "PASTE_TOKEN_SECRET_HERE" \
+      '{
+        proxmox_api_url: $url,
+        proxmox_api_token_id: $token_id,
+        proxmox_api_token_secret: $token_secret,
+        created_at: (now | todate)
+      }' > "$CREDS_FILE"
+    return 1
+  else
+    # We have the actual token secret
+    jq -n \
+      --arg url "$API_URL" \
+      --arg token_id "$TOKEN_ID" \
+      --arg token_secret "$TOKEN_SECRET" \
+      '{
+        proxmox_api_url: $url,
+        proxmox_api_token_id: $token_id,
+        proxmox_api_token_secret: $token_secret,
+        created_at: (now | todate)
+      }' > "$CREDS_FILE"
+
+    chmod 600 "$CREDS_FILE"
+    success "Proxmox API credentials saved to $CREDS_FILE"
+    return 0
+  fi
 }

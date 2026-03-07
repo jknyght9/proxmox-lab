@@ -387,6 +387,7 @@ function createHashicorpUser() {
   local USER="hashicorp@pam"
   local ROLE="HashicorpBuild"
   local TOKEN_ID="hashicorp-token"
+  local REGENERATE_TOKEN="${REGENERATE_TOKEN:-false}"
 
   has_user()   { pveum user list --output-format json 2>/dev/null | jq -e ".[] | select(.userid == \"$USER\")" > /dev/null 2>&1; }
   has_role()   { pveum role list --output-format json 2>/dev/null | jq -e ".[] | select(.roleid == \"$ROLE\")" > /dev/null 2>&1; }
@@ -419,11 +420,39 @@ function createHashicorpUser() {
   fi
 
   echo "[*] Ensuring API token: ${USER}!${TOKEN_ID}"
+
+  # Check if we should regenerate the token (for credential recovery)
+  if [ "$REGENERATE_TOKEN" = "true" ] && has_token; then
+    echo "    - regenerating token (deleting old one)..."
+    pveum user token remove "$USER" "$TOKEN_ID" 2>/dev/null || true
+  fi
+
   if has_token; then
-    echo "    - token exists (secret cannot be retrieved; delete & recreate if needed)"
+    echo "    - token exists (secret cannot be retrieved; set REGENERATE_TOKEN=true to recreate)"
+    # Output empty token info so caller knows token exists but secret unavailable
+    echo "PROXMOX_TOKEN_INFO:${USER}!${TOKEN_ID}:EXISTING"
   else
-    echo "    - creating token (SAVE the secret now; it will not be shown again)"
-    pveum user token add "$USER" "$TOKEN_ID" --privsep=0
+    echo "    - creating new API token..."
+    local TOKEN_OUTPUT
+    TOKEN_OUTPUT=$(pveum user token add "$USER" "$TOKEN_ID" --privsep=0 --output-format json 2>/dev/null)
+
+    if [ -n "$TOKEN_OUTPUT" ]; then
+      local TOKEN_SECRET
+      TOKEN_SECRET=$(echo "$TOKEN_OUTPUT" | jq -r '.value // empty')
+      if [ -n "$TOKEN_SECRET" ]; then
+        echo "    - token created successfully"
+        # Output token info in a parseable format for the calling script
+        echo "PROXMOX_TOKEN_INFO:${USER}!${TOKEN_ID}:${TOKEN_SECRET}"
+      else
+        echo "    - WARNING: token created but could not extract secret"
+        echo "PROXMOX_TOKEN_INFO:${USER}!${TOKEN_ID}:UNKNOWN"
+      fi
+    else
+      # Fallback for older Proxmox versions that don't support JSON output
+      pveum user token add "$USER" "$TOKEN_ID" --privsep=0
+      echo "    - token created (check output above for secret)"
+      echo "PROXMOX_TOKEN_INFO:${USER}!${TOKEN_ID}:MANUAL"
+    fi
   fi
   echo
 }
@@ -509,7 +538,10 @@ case "$MODE" in
     createHashicorpUser
 
     echo
-    read -n 1 -s -p "[!] Ensure that you update the proxmox token in the 'packer.auto.pkvars.hcl' and 'terraform.tfvars' files. Press enter when completed."
+    echo "[+] Setup complete!"
+    echo "    If you ran this through the main setup.sh, API credentials are auto-saved."
+    echo "    If you ran this manually on Proxmox, note the token secret shown above"
+    echo "    and update packer.auto.pkrvars.hcl and terraform.tfvars accordingly."
     echo
     ;;
 esac

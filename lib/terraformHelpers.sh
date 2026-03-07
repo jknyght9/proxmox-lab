@@ -170,6 +170,7 @@ function updateTerraformFromClusterInfo() {
   doing "Updating terraform.tfvars from cluster configuration..."
 
   local TFVARS_FILE="terraform/terraform.tfvars"
+  local CREDS_FILE="$CRYPTO_DIR/proxmox-credentials.json"
 
   # Check if cluster-info.json exists
   if [ ! -f "$CLUSTER_INFO_FILE" ]; then
@@ -187,6 +188,14 @@ function updateTerraformFromClusterInfo() {
   local BRIDGE_VAL=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
   local STORAGE_VAL=$(jq -r '.storage.selected // "local-lvm"' "$CLUSTER_INFO_FILE")
   local STORAGE_TYPE_VAL=$(jq -r '.storage.type // "lvm"' "$CLUSTER_INFO_FILE")
+
+  # Load API credentials if available
+  local API_URL="" API_TOKEN_ID="" API_TOKEN_SECRET=""
+  if [ -f "$CREDS_FILE" ]; then
+    API_URL=$(jq -r '.proxmox_api_url // ""' "$CREDS_FILE")
+    API_TOKEN_ID=$(jq -r '.proxmox_api_token_id // ""' "$CREDS_FILE")
+    API_TOKEN_SECRET=$(jq -r '.proxmox_api_token_secret // ""' "$CREDS_FILE")
+  fi
 
   # Copy from example if doesn't exist
   if [ ! -f "$TFVARS_FILE" ]; then
@@ -207,6 +216,26 @@ function updateTerraformFromClusterInfo() {
       sed -i '' "$@"
     fi
   }
+
+  # Update Proxmox API credentials (if available)
+  if [ -n "$API_URL" ] && [ -n "$API_TOKEN_ID" ] && [ -n "$API_TOKEN_SECRET" ] && \
+     [ "$API_TOKEN_SECRET" != "RETRIEVE_FROM_PROXMOX_OR_REGENERATE" ] && \
+     [ "$API_TOKEN_SECRET" != "PASTE_TOKEN_SECRET_HERE" ]; then
+    sed_inplace "s|^proxmox_api_url[[:space:]]*=.*|proxmox_api_url      = \"$API_URL\"|" "$TFVARS_FILE"
+    sed_inplace "s|^proxmox_api_token_id[[:space:]]*=.*|proxmox_api_token_id = \"$API_TOKEN_ID\"|" "$TFVARS_FILE"
+    sed_inplace "s|^proxmox_api_token[[:space:]]*=.*|proxmox_api_token    = \"$API_TOKEN_SECRET\"|" "$TFVARS_FILE"
+    info "  proxmox_api_url = \"$API_URL\""
+    info "  proxmox_api_token_id = \"$API_TOKEN_ID\""
+    info "  proxmox_api_token = \"<set from credentials>\""
+  else
+    warn "  Proxmox API credentials not available - update terraform.tfvars manually"
+  fi
+
+  # Update proxmox_target_node (primary node)
+  if [ ${#CLUSTER_NODES[@]} -gt 0 ]; then
+    sed_inplace "s|^proxmox_target_node[[:space:]]*=.*|proxmox_target_node  = \"${CLUSTER_NODES[0]}\"|" "$TFVARS_FILE"
+    info "  proxmox_target_node = \"${CLUSTER_NODES[0]}\""
+  fi
 
   # Update network_gateway_address
   sed_inplace "s|^network_gateway_address = .*|network_gateway_address = \"$EXT_GW\"|" "$TFVARS_FILE"

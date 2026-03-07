@@ -112,11 +112,12 @@ function runEverything() {
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
 
-  # Update terraform.tfvars from cluster-info.json
-  updateTerraformFromClusterInfo
-
-  # Run Proxmox setup on all nodes
+  # Run Proxmox setup on all nodes (creates API token and captures credentials)
   runProxmoxSetupOnAll
+
+  # Update terraform.tfvars and packer.auto.pkrvars.hcl with cluster config and API credentials
+  updateTerraformFromClusterInfo
+  updatePackerFromClusterInfo
 
   # Optional post-install script
   proxmoxPostInstall
@@ -169,11 +170,12 @@ function runEverythingButSSH() {
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
 
-  # Update terraform.tfvars from cluster-info.json
-  updateTerraformFromClusterInfo
-
-  # Run Proxmox setup on all nodes
+  # Run Proxmox setup on all nodes (creates API token and captures credentials)
   runProxmoxSetupOnAll
+
+  # Update terraform.tfvars and packer.auto.pkrvars.hcl with cluster config and API credentials
+  updateTerraformFromClusterInfo
+  updatePackerFromClusterInfo
 
   # Optional post-install script
   proxmoxPostInstall
