@@ -51,10 +51,12 @@ function generateSSHKeys() {
 
 function installSSHKeys() {
   doing "Installing SSH public key..."
-  sshpass -p "$PROXMOX_PASS" ssh "$REMOTE_USER@$PROXMOX_HOST" "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-  sshpass -p "$PROXMOX_PASS" scp "$PUBKEY_PATH" "$REMOTE_USER@$PROXMOX_HOST":/root/.ssh/$KEY_NAME.pub
-  sshpass -p "$PROXMOX_PASS" ssh "$REMOTE_USER@$PROXMOX_HOST" \
-  "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys \
-    || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
+  sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$PROXMOX_HOST" "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
+  sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$PUBKEY_PATH" "$REMOTE_USER@$PROXMOX_HOST":/root/.ssh/$KEY_NAME.pub
+  sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$PROXMOX_HOST" \
+    "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
+      || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)"
   success "Public key installed successfully on $PROXMOX_HOST.\n"
 }
