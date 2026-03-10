@@ -11,7 +11,8 @@ This will COMPLETELY remove all lab infrastructure and reset Proxmox nodes
 to their pre-install state:
 
   - All VMs and LXC containers
-  - Cloud-init snippets
+  - Packer templates (9001, 9002)
+  - Cloud-init snippets (all .yml/.yaml files)
   - ACME certificates
   - Step-CA root certificate from trust store
   - DNS configuration
@@ -44,9 +45,9 @@ EOF
   warn "Starting complete deployment purge..."
   echo
 
-  # Step 1: Purge all VMs and LXC containers
-  doing "Step 1/8: Purging all VMs and LXC containers..."
-  purgeClusterResources --auto || true
+  # Step 1: Purge all VMs, LXC containers, and Packer templates
+  doing "Step 1/8: Purging all VMs, LXC containers, and templates..."
+  purgeClusterResources --auto --include-templates || true
 
   # Step 2: Remove cloud-init snippets
   doing "Step 2/8: Removing cloud-init snippets..."
@@ -54,7 +55,8 @@ EOF
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Cleaning snippets on $node..."
-    sshRun "$REMOTE_USER" "$ip" "rm -rf /var/lib/vz/snippets/*-user-data.yml 2>/dev/null" || true
+    # Remove all cloud-init snippets (user-data, meta-data, network-config, vendor-data)
+    sshRun "$REMOTE_USER" "$ip" "rm -f /var/lib/vz/snippets/*.yml /var/lib/vz/snippets/*.yaml 2>/dev/null" || true
   done
   success "Cloud-init snippets removed"
 
