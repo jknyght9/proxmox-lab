@@ -50,22 +50,12 @@ EOF
     done
   fi
 
-  # Prompt for Pi-hole password
-  while true; do
-    read -rsp "$(question "Enter Pi-hole admin password: ")" PIHOLE_PASSWORD
-    echo ""
-    if [ -z "$PIHOLE_PASSWORD" ]; then
-      warn "Password cannot be empty"
-      continue
-    fi
-    read -rsp "$(question "Confirm Pi-hole admin password: ")" PIHOLE_PASSWORD_CONFIRM
-    echo ""
-    if [ "$PIHOLE_PASSWORD" != "$PIHOLE_PASSWORD_CONFIRM" ]; then
-      warn "Passwords do not match"
-      continue
-    fi
-    break
-  done
+  # Load pre-generated service passwords
+  if ! loadServicePasswords; then
+    error "Service passwords not generated. Run setup.sh first."
+    return 1
+  fi
+  PIHOLE_PASSWORD="$PIHOLE_ADMIN_PASSWORD"
 
   # Display configuration summary
   cat <<EOF
@@ -74,7 +64,8 @@ EOF
 Deployment Configuration:
 --------------------------------------
 DNS suffix:               $DNS_POSTFIX
-Pi-hole admin pass:       [set]
+Pi-hole admin pass:       [auto-generated]
+Credentials file:         $CRYPTO_DIR/service-passwords.json
 ======================================
 
 EOF

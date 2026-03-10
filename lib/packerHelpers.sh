@@ -107,5 +107,19 @@ function updatePackerFromClusterInfo() {
   sed_inplace "s|^template_storage_type[[:space:]]*=.*|template_storage_type = \"$STORAGE_TYPE_VAL\"|" "$PACKER_FILE"
   info "  template_storage_type = \"$STORAGE_TYPE_VAL\""
 
+  # Load and apply packer passwords from crypto/service-passwords.json
+  local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
+  if [ -f "$PASSWORDS_FILE" ]; then
+    local PACKER_ROOT=$(jq -r '.packer_root_password' "$PASSWORDS_FILE")
+    local PACKER_SSH=$(jq -r '.packer_ssh_password' "$PASSWORDS_FILE")
+
+    sed_inplace "s|^root_password[[:space:]]*=.*|root_password = \"$PACKER_ROOT\"|" "$PACKER_FILE"
+    sed_inplace "s|^ssh_password[[:space:]]*=.*|ssh_password = \"$PACKER_SSH\"|" "$PACKER_FILE"
+
+    info "  Packer passwords populated from $PASSWORDS_FILE"
+  else
+    warn "  Service passwords file not found - packer passwords not auto-populated"
+  fi
+
   success "Packer configuration updated from cluster-info.json"
 }

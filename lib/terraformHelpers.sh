@@ -348,5 +348,23 @@ function updateTerraformFromClusterInfo() {
     info "  dns_labnet_nodes updated"
   fi
 
+  # Load and apply service passwords from crypto/service-passwords.json
+  local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
+  if [ -f "$PASSWORDS_FILE" ]; then
+    local PIHOLE_ADMIN=$(jq -r '.pihole_admin_password' "$PASSWORDS_FILE")
+    local PIHOLE_ROOT=$(jq -r '.pihole_root_password' "$PASSWORDS_FILE")
+    local STEPCA_ROOT=$(jq -r '.["step-ca_root_password"]' "$PASSWORDS_FILE")
+    local KASM_ADMIN=$(jq -r '.kasm_admin_password' "$PASSWORDS_FILE")
+
+    sed_inplace "s|^pihole_admin_password[[:space:]]*=.*|pihole_admin_password = \"$PIHOLE_ADMIN\"|" "$TFVARS_FILE"
+    sed_inplace "s|^pihole_root_password[[:space:]]*=.*|pihole_root_password  = \"$PIHOLE_ROOT\"|" "$TFVARS_FILE"
+    sed_inplace "s|^step-ca_root_password[[:space:]]*=.*|step-ca_root_password  = \"$STEPCA_ROOT\"|" "$TFVARS_FILE"
+    sed_inplace "s|^kasm_admin_password[[:space:]]*=.*|kasm_admin_password = \"$KASM_ADMIN\"|" "$TFVARS_FILE"
+
+    info "  Service passwords populated from $PASSWORDS_FILE"
+  else
+    warn "  Service passwords file not found - passwords not auto-populated"
+  fi
+
   success "Terraform configuration updated from cluster-info.json"
 }

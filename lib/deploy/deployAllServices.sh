@@ -86,24 +86,15 @@ EOF
     fi
   fi
 
-  # Only prompt for Pi-hole password if DNS is not already deployed
-  if [ "$DNS_ALREADY_DEPLOYED" = "false" ]; then
-    while true; do
-      read -rsp "$(question "Enter Pi-hole admin password: ")" PIHOLE_PASSWORD
-      echo ""
-      if [ -z "$PIHOLE_PASSWORD" ]; then
-        warn "Password cannot be empty"
-        continue
-      fi
-      read -rsp "$(question "Confirm Pi-hole admin password: ")" PIHOLE_PASSWORD_CONFIRM
-      echo ""
-      if [ "$PIHOLE_PASSWORD" != "$PIHOLE_PASSWORD_CONFIRM" ]; then
-        warn "Passwords do not match"
-        continue
-      fi
-      break
-    done
+  # Load pre-generated service passwords
+  if ! loadServicePasswords; then
+    error "Service passwords not generated. Run setup.sh first."
+    return 1
+  fi
+  PIHOLE_PASSWORD="$PIHOLE_ADMIN_PASSWORD"
 
+  # Only show deployment prompt if DNS is not already deployed
+  if [ "$DNS_ALREADY_DEPLOYED" = "false" ]; then
     # Display configuration summary
     cat <<EOF
 
@@ -111,7 +102,8 @@ EOF
 Deployment Configuration:
 --------------------------------------
 DNS suffix:               $DNS_POSTFIX
-Pi-hole admin pass:       $PIHOLE_PASSWORD
+Pi-hole admin pass:       [auto-generated]
+Credentials file:         $CRYPTO_DIR/service-passwords.json
 ======================================
 
 EOF
@@ -120,11 +112,7 @@ EOF
     CONFIRM=${CONFIRM:-Y}
     [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
   else
-    # DNS exists, use existing password from terraform.tfvars
-    if [ -f "terraform/terraform.tfvars" ]; then
-      PIHOLE_PASSWORD=$(grep "^pihole_admin_password" terraform/terraform.tfvars | cut -d'"' -f2)
-    fi
-    info "Using existing DNS deployment, skipping password prompt"
+    info "Using existing DNS deployment"
   fi
 
   # Load cluster info if not already loaded

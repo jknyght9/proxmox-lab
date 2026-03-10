@@ -133,7 +133,12 @@ function displayDeploymentSummary() {
 
   echo "------------------------------------------------------------------------------"
   echo "  Domain: ${DNS_POSTFIX:-not set}"
-  echo "  Credentials: terraform/terraform.tfvars"
+  echo "  Credentials:"
+  echo "    - Service passwords: crypto/service-passwords.json"
+  echo "    - Terraform config:  terraform/terraform.tfvars"
+  if [ -f "crypto/vault-credentials.json" ]; then
+    echo "    - Vault credentials: crypto/vault-credentials.json"
+  fi
   echo "=============================================================================="
 }
 

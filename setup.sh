@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "$SCRIPT_DIR/lib/ca/updateRootCertificates.sh"
 source "$SCRIPT_DIR/lib/ca/util.sh"
+source "$SCRIPT_DIR/lib/credentials.sh"
 source "$SCRIPT_DIR/lib/deploy/deployAllServices.sh"
 source "$SCRIPT_DIR/lib/deploy/deployCriticalServices.sh"
 source "$SCRIPT_DIR/lib/deploy/deployNomadJob.sh"
@@ -75,6 +76,7 @@ DEPLOY_PHASE=0
 function runEverything() {
   checkRequirements
   generateSSHKeys
+  generateServicePasswords
   checkProxmox
   installSSHKeys
 
@@ -133,6 +135,7 @@ function runEverything() {
 
 function runEverythingButSSH() {
   checkRequirements
+  generateServicePasswords
   checkProxmox
 
   # Check if we have existing cluster info
