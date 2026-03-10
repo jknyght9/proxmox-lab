@@ -232,6 +232,52 @@ graph LR
     LAB -.-> DNS
 ```
 
+## Tailscale Integration
+
+Proxmox Lab supports running Tailscale on Proxmox cluster nodes for remote access while maintaining local DNS resolution.
+
+### Automatic DNS Coexistence
+
+When you update DNS records (setup.sh option 10 "Build DNS records"), the setup script automatically:
+
+1. Detects if Tailscale is installed on any Proxmox cluster nodes
+2. Runs `tailscale set --accept-dns=false` to disable MagicDNS management
+3. Prevents Tailscale from overwriting `/etc/resolv.conf` with its DNS server (100.100.100.100)
+4. Allows the system to use your manually configured Pi-hole DNS servers
+
+### Tailscale Networking
+
+After disabling DNS management:
+
+- Tailscale networking remains fully functional for remote access
+- You can still connect to nodes via Tailscale IPs (e.g., `100.x.x.x`)
+- VPN tunnel and peer-to-peer connections continue working normally
+- Only MagicDNS name resolution (e.g., `node.tailnet.ts.net`) is disabled on cluster nodes
+
+### Workarounds for MagicDNS
+
+If you need to resolve Tailscale MagicDNS names from your Proxmox nodes:
+
+1. **Use Tailscale IPs directly** - Access nodes via their `100.x.x.x` addresses
+2. **Add local DNS records** - Configure Pi-hole to resolve your Tailscale hostnames:
+   ```bash
+   # On dns-01, add Tailscale hosts to Pi-hole
+   pihole-FTL --config dns.hosts '["100.x.x.x myhost myhost.tail-scale.ts.net"]'
+   ```
+3. **Use /etc/hosts** - Add static entries to individual nodes if needed
+
+### Why Disable Tailscale DNS?
+
+Tailscale's MagicDNS feature automatically configures DNS servers on connected devices. For Proxmox Lab:
+
+- Local services must resolve via Pi-hole for proper DNS records
+- Pi-hole provides ad-blocking and custom local domain resolution
+- Proxmox nodes need consistent DNS configuration for cluster operations
+- Preventing DNS conflicts ensures reliable service discovery
+
+!!! tip "Best Practice"
+    Run the DNS update (setup.sh option 10) after installing or updating Tailscale on Proxmox nodes to ensure proper DNS configuration.
+
 ## Next Steps
 
 - [:octicons-arrow-right-24: Service Relationships](service-relationships.md) - How services depend on each other
