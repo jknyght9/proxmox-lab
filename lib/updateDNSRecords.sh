@@ -155,7 +155,7 @@ function updateDNSRecords() {
     for i in "${!CLUSTER_NODES[@]}"; do
       local node="${CLUSTER_NODES[$i]}"
       local ip="${CLUSTER_NODE_IPS[$i]}"
-      sshRun "$REMOTE_USER" "$ip" "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
+      sshRun "$REMOTE_USER" "$ip" "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf"
       echo "  - $node: DNS set to $DNS_IP"
     done
     success "Proxmox DNS settings updated"
