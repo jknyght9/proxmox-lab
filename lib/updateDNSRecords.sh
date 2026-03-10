@@ -148,6 +148,9 @@ function updateDNSRecords() {
   UPDATE_PROXMOX=${UPDATE_PROXMOX:-Y}
 
   if [[ "$UPDATE_PROXMOX" =~ ^[Yy]$ ]]; then
+    # Disable Tailscale DNS if present (prevents overwriting resolv.conf)
+    disableTailscaleDNS
+
     doing "Updating Proxmox nodes' DNS settings..."
     for i in "${!CLUSTER_NODES[@]}"; do
       local node="${CLUSTER_NODES[$i]}"
