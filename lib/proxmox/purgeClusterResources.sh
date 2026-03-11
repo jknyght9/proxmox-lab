@@ -48,11 +48,11 @@ function purgeClusterResources() {
   )
 
   # Packer templates (separate so user can choose)
+  # NOTE: Only includes project-generated templates, NOT base cloud-init images
+  # (9997-9999 are user-provided base images that Packer clones from)
   local TEMPLATE_VMIDS=(
     9001              # docker-template
     9002              # nomad-template
-    9997 9998         # dev/scratch templates
-    9999              # Ubuntu base template
   )
 
   # Collect findings

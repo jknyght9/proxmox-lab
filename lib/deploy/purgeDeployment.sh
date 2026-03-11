@@ -11,7 +11,7 @@ This will COMPLETELY remove all lab infrastructure and reset Proxmox nodes
 to their pre-install state:
 
   - All VMs and LXC containers
-  - Packer templates (9001, 9002)
+  - Packer templates (9001, 9002) - NOT base cloud images (9997-9999)
   - Cloud-init snippets (all .yml/.yaml files)
   - ACME certificates
   - Step-CA root certificate from trust store
