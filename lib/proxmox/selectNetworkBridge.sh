@@ -64,20 +64,14 @@ function selectNetworkBridge() {
     done
     echo
 
-    local DEFAULT_BRIDGE="${ALL_BRIDGES[0]}"
-    read -rp "$(question "Select network bridge [$DEFAULT_BRIDGE]: ")" BRIDGE_CHOICE
-    BRIDGE_CHOICE=${BRIDGE_CHOICE:-$DEFAULT_BRIDGE}
+    read -rp "$(question "Select network bridge [1]: ")" BRIDGE_CHOICE
+    BRIDGE_CHOICE=${BRIDGE_CHOICE:-1}
 
-    # Check if user entered a number or a name
-    if [[ "$BRIDGE_CHOICE" =~ ^[0-9]+$ ]]; then
-      if [ "$BRIDGE_CHOICE" -le "${#ALL_BRIDGES[@]}" ] && [ "$BRIDGE_CHOICE" -ge 1 ]; then
-        NETWORK_BRIDGE="${ALL_BRIDGES[$((BRIDGE_CHOICE - 1))]}"
-      else
-        NETWORK_BRIDGE="$DEFAULT_BRIDGE"
-      fi
+    if [[ "$BRIDGE_CHOICE" =~ ^[0-9]+$ ]] && [ "$BRIDGE_CHOICE" -ge 1 ] && [ "$BRIDGE_CHOICE" -le "${#ALL_BRIDGES[@]}" ]; then
+      NETWORK_BRIDGE="${ALL_BRIDGES[$((BRIDGE_CHOICE - 1))]}"
     else
-      # Assume they typed the bridge name
-      NETWORK_BRIDGE="$BRIDGE_CHOICE"
+      warn "Invalid selection, using ${ALL_BRIDGES[0]}"
+      NETWORK_BRIDGE="${ALL_BRIDGES[0]}"
     fi
   fi
 
