@@ -52,8 +52,13 @@ resource "proxmox_lxc" "dns" {
     gw     = each.value.gw
   }
 
-  features {
-    nesting = true
+  # Nesting only needed for unprivileged containers
+  # Privileged containers with feature flags require root@pam (not API tokens)
+  dynamic "features" {
+    for_each = var.enable_ha_vip ? [] : [1]
+    content {
+      nesting = true
+    }
   }
 
   tags = "terraform,lxc,dns,${var.cluster_name}"
