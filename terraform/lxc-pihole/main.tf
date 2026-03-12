@@ -31,7 +31,8 @@ resource "proxmox_lxc" "dns" {
   ostemplate      = var.ostemplate
   password        = var.root_password
   ssh_public_keys = file("/crypto/lab-deploy.pub")
-  unprivileged    = true
+  # HA with keepalived requires NET_ADMIN capability, which needs privileged mode
+  unprivileged    = !var.enable_ha_vip
 
   cores  = var.cores
   memory = var.memory
@@ -603,6 +604,242 @@ DNSSCRIPT
 
       ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
         "pct push ${var.vmid_start} /tmp/dns-config-sdn.sh /tmp/dns-config.sh && pct exec ${var.vmid_start} -- bash /tmp/dns-config.sh"
+    EOT
+  }
+}
+
+# ============================================================================
+# keepalived HA Configuration (VIP failover)
+# ============================================================================
+
+# Direct SSH keepalived setup (non-SDN networks)
+resource "null_resource" "keepalived_setup" {
+  for_each   = var.enable_ha_vip && var.ha_vip_address != "" && !var.is_sdn_network ? local.nodes_map : {}
+  depends_on = [null_resource.direct_provision, null_resource.nebula_sync_setup]
+
+  triggers = {
+    vmid           = proxmox_lxc.dns[each.key].vmid
+    ha_vip_address = var.ha_vip_address
+  }
+
+  connection {
+    type        = "ssh"
+    user        = "root"
+    private_key = file("/crypto/lab-deploy")
+    host        = each.value.ip_bare
+  }
+
+  provisioner "remote-exec" {
+    inline = [<<-EOT
+      set -e
+      export DEBIAN_FRONTEND=noninteractive
+
+      echo "[+] Installing keepalived on ${each.key}..."
+
+      # Ensure we have DNS for package installation
+      echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
+
+      apt-get update -qq
+      apt-get install -y -qq keepalived
+
+      # Calculate priority based on node index (first node = 100, decreasing by 10)
+      PRIORITY=$((100 - ${each.value.index} * 10))
+
+      # Determine state (first node is MASTER, others are BACKUP)
+      if [ ${each.value.index} -eq 0 ]; then
+        STATE="MASTER"
+      else
+        STATE="BACKUP"
+      fi
+
+      echo "[+] Configuring keepalived: $STATE with priority $PRIORITY"
+
+      # Extract VIP without CIDR for health check
+      VIP_BARE=$(echo "${var.ha_vip_address}" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+
+      # Create health check script
+      cat > /usr/local/bin/check-pihole-health.sh <<'HEALTHSCRIPT'
+#!/bin/bash
+# Check if pihole-FTL is running
+systemctl is-active --quiet pihole-FTL || exit 1
+
+# Check if DNS queries work
+dig @127.0.0.1 +short +time=2 +tries=1 google.com >/dev/null 2>&1 || exit 1
+
+exit 0
+HEALTHSCRIPT
+      chmod +x /usr/local/bin/check-pihole-health.sh
+
+      # Create keepalived configuration
+      cat > /etc/keepalived/keepalived.conf <<KEEPCONF
+global_defs {
+  router_id ${each.key}
+  script_user root
+  enable_script_security
+}
+
+vrrp_script check_pihole {
+  script "/usr/local/bin/check-pihole-health.sh"
+  interval 5
+  weight -20
+  fall 2
+  rise 2
+}
+
+vrrp_instance VI_DNS {
+  state $STATE
+  interface eth0
+  virtual_router_id ${var.ha_vrrp_router_id}
+  priority $PRIORITY
+  advert_int 1
+
+  authentication {
+    auth_type PASS
+    auth_pass ${var.ha_vrrp_password != "" ? var.ha_vrrp_password : "pihole"}
+  }
+
+  virtual_ipaddress {
+    ${var.ha_vip_address}
+  }
+
+  track_script {
+    check_pihole
+  }
+
+  # Send gratuitous ARP on state change
+  garp_master_delay 1
+  garp_master_repeat 3
+}
+KEEPCONF
+
+      # Enable and start keepalived
+      systemctl enable keepalived
+      systemctl restart keepalived
+
+      # Restore local DNS
+      echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+      # Verify keepalived is running
+      sleep 2
+      if systemctl is-active --quiet keepalived; then
+        echo "[OK] keepalived configured on ${each.key} ($STATE, priority $PRIORITY)"
+        echo "     VIP: ${var.ha_vip_address}"
+      else
+        echo "[!] keepalived failed to start - check 'journalctl -u keepalived'"
+        exit 1
+      fi
+    EOT
+    ]
+  }
+}
+
+# SDN keepalived setup (via pct exec)
+resource "null_resource" "sdn_keepalived_setup" {
+  for_each   = var.enable_ha_vip && var.ha_vip_address != "" && var.is_sdn_network ? local.nodes_map : {}
+  depends_on = [null_resource.sdn_provision, null_resource.sdn_nebula_sync_setup]
+
+  triggers = {
+    vmid           = proxmox_lxc.dns[each.key].vmid
+    ha_vip_address = var.ha_vip_address
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Calculate priority based on node index (first node = 100, decreasing by 10)
+      PRIORITY=$((100 - ${each.value.index} * 10))
+
+      # Determine state (first node is MASTER, others are BACKUP)
+      if [ ${each.value.index} -eq 0 ]; then
+        STATE="MASTER"
+      else
+        STATE="BACKUP"
+      fi
+
+      # Extract VIP without CIDR
+      VIP_BARE=$(echo "${var.ha_vip_address}" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+
+      cat > /tmp/keepalived-${each.key}.sh <<KEEPSCRIPT
+#!/bin/bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[+] Installing keepalived on ${each.key}..."
+
+echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
+
+apt-get update -qq
+apt-get install -y -qq keepalived
+
+echo "[+] Configuring keepalived: $STATE with priority $PRIORITY"
+
+# Create health check script
+cat > /usr/local/bin/check-pihole-health.sh <<'HEALTHSCRIPT'
+#!/bin/bash
+systemctl is-active --quiet pihole-FTL || exit 1
+dig @127.0.0.1 +short +time=2 +tries=1 google.com >/dev/null 2>&1 || exit 1
+exit 0
+HEALTHSCRIPT
+chmod +x /usr/local/bin/check-pihole-health.sh
+
+# Create keepalived configuration
+cat > /etc/keepalived/keepalived.conf <<KEEPCONF
+global_defs {
+  router_id ${each.key}
+  script_user root
+  enable_script_security
+}
+
+vrrp_script check_pihole {
+  script "/usr/local/bin/check-pihole-health.sh"
+  interval 5
+  weight -20
+  fall 2
+  rise 2
+}
+
+vrrp_instance VI_DNS {
+  state $STATE
+  interface eth0
+  virtual_router_id ${var.ha_vrrp_router_id}
+  priority $PRIORITY
+  advert_int 1
+
+  authentication {
+    auth_type PASS
+    auth_pass ${var.ha_vrrp_password != "" ? var.ha_vrrp_password : "pihole"}
+  }
+
+  virtual_ipaddress {
+    ${var.ha_vip_address}
+  }
+
+  track_script {
+    check_pihole
+  }
+
+  garp_master_delay 1
+  garp_master_repeat 3
+}
+KEEPCONF
+
+systemctl enable keepalived
+systemctl restart keepalived
+
+echo "nameserver 127.0.0.1" > /etc/resolv.conf
+
+sleep 2
+if systemctl is-active --quiet keepalived; then
+  echo "[OK] keepalived configured on ${each.key} ($STATE, priority $PRIORITY)"
+else
+  echo "[!] keepalived failed to start"
+  exit 1
+fi
+KEEPSCRIPT
+
+      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/keepalived-${each.key}.sh root@${each.value.ssh_host}:/tmp/keepalived-${each.key}.sh
+
+      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
+        "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_lxc.dns[each.key].vmid} -- bash /tmp/keepalived-setup.sh"
     EOT
   }
 }

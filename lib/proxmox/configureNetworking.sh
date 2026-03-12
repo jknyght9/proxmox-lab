@@ -28,13 +28,43 @@ function configureNetworking() {
   read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
   EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
 
-  # Calculate default service IPs from CIDR
-  local DEFAULT_DNS_START="${CIDR_BASE}3"
-  local DEFAULT_SVC_START="${CIDR_BASE}6"
+  # DNS High Availability option
+  echo
+  info "DNS High Availability (keepalived)"
+  info "(Optional: Provides a Virtual IP that fails over between Pi-hole nodes)"
+  echo
+
+  read -rp "$(question "Enable DNS HA with keepalived VIP? [y/N]: ")" ENABLE_HA_INPUT
+  ENABLE_HA_INPUT=${ENABLE_HA_INPUT:-N}
+
+  local ENABLE_HA=false
+  local HA_VIP=""
+
+  if [[ "$ENABLE_HA_INPUT" =~ ^[Yy]$ ]]; then
+    ENABLE_HA=true
+    # When HA enabled: VIP at .3, DNS nodes start at .4, services at .7
+    local DEFAULT_HA_VIP="${CIDR_BASE}3"
+    local DEFAULT_DNS_START="${CIDR_BASE}4"
+    local DEFAULT_SVC_START="${CIDR_BASE}7"
+
+    read -rp "$(question "DNS VIP address (failover endpoint) [$DEFAULT_HA_VIP]: ")" HA_VIP
+    HA_VIP=${HA_VIP:-$DEFAULT_HA_VIP}
+
+    info "Note: DNS containers will use privileged mode for keepalived"
+  else
+    # When HA disabled: DNS nodes start at .3, services at .6
+    local DEFAULT_DNS_START="${CIDR_BASE}3"
+    local DEFAULT_SVC_START="${CIDR_BASE}6"
+  fi
 
   echo
   info "Service IP Allocation"
   info "(IP addresses for Pi-hole containers and other services)"
+  if $ENABLE_HA; then
+    info "  .3 = VIP (keepalived failover), .4+ = DNS nodes, .7+ = services"
+  else
+    info "  .3+ = DNS nodes, .6+ = services"
+  fi
   echo
 
   read -rp "$(question "Pi-hole containers start IP [$DEFAULT_DNS_START]: ")" DNS_START_IP
@@ -154,6 +184,18 @@ Network Configuration Summary:
 External Network:
   CIDR:              $EXT_CIDR
   Gateway:           $EXT_GATEWAY
+EOF
+
+  if $ENABLE_HA; then
+    cat <<EOF
+
+DNS High Availability:
+  VIP (failover IP): $HA_VIP
+  Containers:        privileged (required for keepalived)
+EOF
+  fi
+
+  cat <<EOF
 
 Service IP Allocation:
   Pi-hole start IP:  $DNS_START_IP
@@ -195,6 +237,8 @@ EOF
      --arg ext_gw "$EXT_GATEWAY" \
      --arg dns_start "$DNS_START_IP" \
      --arg svc_start "$SVC_START_IP" \
+     --argjson ha_enabled "$ENABLE_HA" \
+     --arg ha_vip "$HA_VIP" \
      --argjson create_sdn "$CREATE_SDN" \
      --arg int_cidr "$INT_CIDR" \
      --arg int_gw "$INT_GATEWAY" \
@@ -207,7 +251,9 @@ EOF
            cidr: $ext_cidr,
            gateway: $ext_gw,
            dns_start_ip: $dns_start,
-           services_start_ip: $svc_start
+           services_start_ip: $svc_start,
+           ha_enabled: $ha_enabled,
+           ha_vip: $ha_vip
          },
          labnet: {
            enabled: $create_sdn,

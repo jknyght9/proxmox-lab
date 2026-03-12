@@ -131,3 +131,32 @@ variable "dhcp_lease_time" {
   description = "DHCP lease time in seconds"
   default     = "86400"
 }
+
+# ============================================================================
+# High Availability (keepalived) Configuration
+# ============================================================================
+
+variable "enable_ha_vip" {
+  type        = bool
+  description = "Enable keepalived VIP for Pi-hole HA (requires privileged containers)"
+  default     = false
+}
+
+variable "ha_vip_address" {
+  type        = string
+  description = "Virtual IP address for DNS HA with CIDR (e.g., '10.1.50.3/24')"
+  default     = ""
+}
+
+variable "ha_vrrp_router_id" {
+  type        = number
+  description = "VRRP router ID (must be unique on network, 1-255)"
+  default     = 51
+}
+
+variable "ha_vrrp_password" {
+  type        = string
+  sensitive   = true
+  description = "VRRP authentication password (8 chars max)"
+  default     = ""
+}

@@ -148,3 +148,55 @@ variable "labnet_dhcp_lease_time" {
   description = "DHCP lease time in seconds"
   default     = "86400"
 }
+
+# DNS HA Configuration (keepalived VIP)
+variable "enable_dns_ha_vip" {
+  type        = bool
+  description = "Enable keepalived VIP for Pi-hole HA (requires privileged containers)"
+  default     = false
+}
+
+variable "dns_ha_vip_address" {
+  type        = string
+  description = "Virtual IP address for DNS HA with CIDR (e.g., '10.1.50.3/24')"
+  default     = ""
+}
+
+variable "dns_ha_vrrp_router_id" {
+  type        = number
+  description = "VRRP router ID for main DNS cluster (must be unique on network, 1-255)"
+  default     = 51
+}
+
+variable "dns_ha_vrrp_password" {
+  type        = string
+  sensitive   = true
+  description = "VRRP authentication password for main DNS (8 chars max)"
+  default     = ""
+}
+
+# Labnet DNS HA Configuration
+variable "labnet_enable_dns_ha_vip" {
+  type        = bool
+  description = "Enable keepalived VIP for labnet Pi-hole HA"
+  default     = false
+}
+
+variable "labnet_dns_ha_vip_address" {
+  type        = string
+  description = "Virtual IP address for labnet DNS HA with CIDR (e.g., '172.16.0.3/24')"
+  default     = ""
+}
+
+variable "labnet_dns_ha_vrrp_router_id" {
+  type        = number
+  description = "VRRP router ID for labnet DNS cluster (must be unique, 1-255)"
+  default     = 52
+}
+
+variable "labnet_dns_ha_vrrp_password" {
+  type        = string
+  sensitive   = true
+  description = "VRRP authentication password for labnet DNS (8 chars max)"
+  default     = ""
+}

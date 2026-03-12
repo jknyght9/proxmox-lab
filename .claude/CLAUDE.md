@@ -133,6 +133,47 @@ Labnet SDN DNS cluster (max 2 nodes on internal network):
 - Provisioned via pct exec (SDN not directly reachable)
 - **DHCP Server**: labnet-dns-01 serves DHCP for the SDN (default range: .100-.200)
 
+**High Availability with keepalived (Optional):**
+- Uses VRRP to provide a Virtual IP (VIP) that fails over between Pi-hole nodes
+- Clients configure only the VIP as their DNS server
+- Automatic failover when primary node's Pi-hole fails health check
+- Requires privileged LXC containers (for NET_ADMIN capability)
+
+**HA IP Allocation Scheme** (when enabled):
+```
+.1  - Gateway (router)
+.2  - Reserved
+.3  - keepalived VIP (DNS failover endpoint)
+.4  - dns-01
+.5  - dns-02
+.6  - dns-03
+.7  - step-ca
+.8+ - Other services
+```
+
+**HA Configuration** (in `terraform.tfvars`):
+```hcl
+enable_dns_ha_vip      = true
+dns_ha_vip_address     = "10.1.50.3/24"
+dns_ha_vrrp_router_id  = 51
+dns_ha_vrrp_password   = "secure-pass"
+```
+
+**Verification**:
+```bash
+# Check VIP is bound on master node
+ip addr show eth0 | grep VIP_ADDRESS
+
+# Test failover by stopping Pi-hole on master
+systemctl stop pihole-FTL
+
+# Verify DNS still responds
+dig @VIP_ADDRESS google.com
+
+# Check keepalived status
+journalctl -u keepalived -f
+```
+
 ### Labnet SDN Configuration
 The labnet SDN is a Proxmox Software Defined Network for isolated lab environments.
 

@@ -32,6 +32,12 @@ module "dns-main" {
   node_ip_map      = local.node_ip_map
   dns_zone         = var.dns_postfix
   bootstrap_dns    = var.bootstrap_dns
+
+  # HA Configuration (keepalived VIP)
+  enable_ha_vip     = var.enable_dns_ha_vip
+  ha_vip_address    = var.dns_ha_vip_address
+  ha_vrrp_router_id = var.dns_ha_vrrp_router_id
+  ha_vrrp_password  = var.dns_ha_vrrp_password
 }
 
 # Labnet SDN DNS cluster (max 2 nodes on SDN network)
@@ -60,6 +66,12 @@ module "dns-labnet" {
   dhcp_end         = var.labnet_dhcp_end
   dhcp_router      = var.labnet_dhcp_router
   dhcp_lease_time  = var.labnet_dhcp_lease_time
+
+  # HA Configuration (keepalived VIP)
+  enable_ha_vip     = var.labnet_enable_dns_ha_vip
+  ha_vip_address    = var.labnet_dns_ha_vip_address
+  ha_vrrp_router_id = var.labnet_dns_ha_vrrp_router_id
+  ha_vrrp_password  = var.labnet_dns_ha_vrrp_password
 }
 
 module "step-ca" {

@@ -297,6 +297,25 @@ function updateTerraformFromClusterInfo() {
   sed_inplace "s|^step-ca_eth0_ipv4_cidr[[:space:]]*=.*|step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\"|" "$TFVARS_FILE"
   info "  step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\""
 
+  # Update DNS HA VIP settings if configured
+  local HA_VIP=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE")
+  local HA_ENABLED=$(jq -r '.network.external.ha_enabled // false' "$CLUSTER_INFO_FILE")
+  if [ "$HA_ENABLED" = "true" ] && [ -n "$HA_VIP" ]; then
+    if grep -q "^enable_dns_ha_vip" "$TFVARS_FILE"; then
+      sed_inplace "s|^enable_dns_ha_vip[[:space:]]*=.*|enable_dns_ha_vip      = true|" "$TFVARS_FILE"
+      sed_inplace "s|^dns_ha_vip_address[[:space:]]*=.*|dns_ha_vip_address     = \"${HA_VIP}${CIDR_MASK}\"|" "$TFVARS_FILE"
+    else
+      echo "" >> "$TFVARS_FILE"
+      echo "# DNS High Availability (auto-generated)" >> "$TFVARS_FILE"
+      echo "enable_dns_ha_vip      = true" >> "$TFVARS_FILE"
+      echo "dns_ha_vip_address     = \"${HA_VIP}${CIDR_MASK}\"" >> "$TFVARS_FILE"
+      echo "dns_ha_vrrp_router_id  = 51" >> "$TFVARS_FILE"
+      echo "dns_ha_vrrp_password   = \"pihole\"" >> "$TFVARS_FILE"
+    fi
+    info "  enable_dns_ha_vip = true"
+    info "  dns_ha_vip_address = \"${HA_VIP}${CIDR_MASK}\""
+  fi
+
   # Build and update proxmox_node_ips map
   local NODE_IPS_MAP="{\n"
   for i in "${!CLUSTER_NODES[@]}"; do
