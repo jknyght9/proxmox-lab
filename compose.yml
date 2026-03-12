@@ -18,7 +18,7 @@ services:
     container_name: nomad
     working_dir: /nomad
     volumes:
-      - ./nomad:/nomad
+      - ./nomad:/nomad:z
     environment:
       NOMAD_ADDR: "http://10.1.50.114:4646" # Update to your nomad01 IP
     entrypoint: ["nomad"]
@@ -29,8 +29,8 @@ services:
     container_name: packer
     working_dir: /packer
     volumes:
-      - ./packer:/packer # where your packer configs are stored
-      - ./packer/.config:/root/.config
+      - ./packer:/packer:z # where your packer configs are stored
+      - ./packer/.config:/root/.config:z
       - ./crypto:/crypto:ro # for SSH keys if needed
       - ./terraform/lxc-step-ca/step-ca/certs:/step-ca-certs:ro # CA certs for packer builds
       - /var/run/docker.sock:/var/run/docker.sock # if using Docker builds
@@ -44,7 +44,7 @@ services:
     user: root
     container_name: step-ca
     volumes:
-      - ./terraform/lxc-step-ca/step-ca:/etc/step-ca
+      - ./terraform/lxc-step-ca/step-ca:/etc/step-ca:z
       - ./terraform/lxc-step-ca/init-step-ca.sh:/init-step-ca.sh:ro
     environment:
       STEPPATH: "/etc/step-ca"
@@ -55,8 +55,8 @@ services:
     working_dir: /terraform
     volumes:
       - ./crypto:/crypto:ro
-      - ./terraform:/terraform
-      - ./logs:/logs
+      - ./terraform:/terraform:z
+      - ./logs:/logs:z
     environment:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
