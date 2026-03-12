@@ -19,6 +19,8 @@ SDN_SUBNET_PREFIX="lab.lan"
 BRIDGE_NAME=""
 BRIDGE_IP=""
 STORE=""
+SDN_EGRESS_BRIDGE=""
+SDN_EGRESS_IP=""
 
 # Ensure jq is installed before parsing config (needed for JSON parsing)
 if ! command -v jq &>/dev/null; then
@@ -46,6 +48,9 @@ if [ -n "$CONFIG_JSON" ]; then
     SDN_SUBNET="$INT_CIDR"
     SDN_SUBNET_CIDR=$(echo "$INT_CIDR" | grep -oE '[0-9]+$')
     SDN_SUBNET_PREFIX="$DNS_POSTFIX"
+    # Egress configuration for SNAT (which interface/IP to use for outbound traffic)
+    SDN_EGRESS_BRIDGE=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.egress_bridge // ""')
+    SDN_EGRESS_IP=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.egress_ip // ""')
   fi
 
   echo "[+] Config loaded: storage=$STORE, bridge=$BRIDGE_NAME"
@@ -228,13 +233,30 @@ EOF
   echo "[+] Applying SDN configuration..."
   pvesh set /cluster/sdn
 
-  # Verify SNAT rules were created
-  echo "[+] Verifying NAT rules..."
-  if iptables -t nat -L POSTROUTING -n 2>/dev/null | grep -q "MASQUERADE\|SNAT"; then
-    echo "    - NAT rules active"
+  # Verify and configure SNAT rules
+  echo "[+] Configuring NAT rules..."
+
+  # Remove any existing SNAT/MASQUERADE rules for this subnet to avoid duplicates
+  iptables -t nat -S POSTROUTING 2>/dev/null | grep -E "(-s ${SDN_SUBNET}.*MASQUERADE|-s ${SDN_SUBNET}.*SNAT)" | while read -r rule; do
+    # Convert -A to -D for deletion
+    delete_rule=$(echo "$rule" | sed 's/^-A/-D/')
+    iptables -t nat $delete_rule 2>/dev/null || true
+  done
+
+  # Add SNAT rule with explicit egress interface/IP if configured
+  if [ -n "$SDN_EGRESS_IP" ] && [ -n "$SDN_EGRESS_BRIDGE" ]; then
+    echo "    - Using SNAT via $SDN_EGRESS_BRIDGE ($SDN_EGRESS_IP)"
+    iptables -t nat -A POSTROUTING -s ${SDN_SUBNET} ! -d ${SDN_SUBNET} -o ${SDN_EGRESS_BRIDGE} -j SNAT --to-source ${SDN_EGRESS_IP}
   else
-    echo "    - WARNING: No NAT rules found, manually adding masquerade..."
+    echo "    - Using MASQUERADE (default route)"
     iptables -t nat -A POSTROUTING -s ${SDN_SUBNET} ! -d ${SDN_SUBNET} -j MASQUERADE
+  fi
+
+  # Make iptables rules persistent
+  if command -v iptables-save &>/dev/null; then
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    echo "    - NAT rules saved"
   fi
 
   echo -e "[+] SDN creation done\n"

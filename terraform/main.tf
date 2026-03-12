@@ -31,6 +31,7 @@ module "dns-main" {
   proxmox_ssh_host = local.proxmox_api_host
   node_ip_map      = local.node_ip_map
   dns_zone         = var.dns_postfix
+  bootstrap_dns    = var.bootstrap_dns
 }
 
 # Labnet SDN DNS cluster (max 2 nodes on SDN network)
@@ -51,6 +52,14 @@ module "dns-labnet" {
   proxmox_ssh_host = local.proxmox_api_host
   node_ip_map      = local.node_ip_map
   dns_zone         = var.dns_postfix
+  bootstrap_dns    = var.bootstrap_dns
+
+  # DHCP for labnet SDN (VMs need IP addresses)
+  dhcp_enabled     = var.labnet_dhcp_enabled
+  dhcp_start       = var.labnet_dhcp_start
+  dhcp_end         = var.labnet_dhcp_end
+  dhcp_router      = var.labnet_dhcp_router
+  dhcp_lease_time  = var.labnet_dhcp_lease_time
 }
 
 module "step-ca" {
@@ -64,6 +73,7 @@ module "step-ca" {
   dns_primary_ipv4    = var.dns_primary_ipv4
   proxmox_target_node = var.proxmox_target_node
   root_password       = var.step-ca_root_password
+  bootstrap_dns       = var.bootstrap_dns
   source              = "./lxc-step-ca"
 }
 

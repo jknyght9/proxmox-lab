@@ -280,6 +280,17 @@ function updateTerraformFromClusterInfo() {
   sed_inplace "s|^dns_primary_ipv4[[:space:]]*=.*|dns_primary_ipv4 = \"$DNS_START\"|" "$TFVARS_FILE"
   info "  dns_primary_ipv4 = \"$DNS_START\""
 
+  # Update bootstrap_dns (use gateway for initial provisioning before internal DNS is ready)
+  # This is critical for networks that block external DNS (1.1.1.1, 8.8.8.8, etc.)
+  if grep -q "^bootstrap_dns" "$TFVARS_FILE"; then
+    sed_inplace "s|^bootstrap_dns[[:space:]]*=.*|bootstrap_dns = \"$EXT_GW\"|" "$TFVARS_FILE"
+  else
+    echo "" >> "$TFVARS_FILE"
+    echo "# Bootstrap DNS for initial provisioning (auto-generated from gateway)" >> "$TFVARS_FILE"
+    echo "bootstrap_dns = \"$EXT_GW\"" >> "$TFVARS_FILE"
+  fi
+  info "  bootstrap_dns = \"$EXT_GW\""
+
   # Update step-ca_eth0_ipv4_cidr (service start IP with /24)
   local EXT_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
   local CIDR_MASK=$(echo "$EXT_CIDR_VAL" | grep -oE '/[0-9]+$')
@@ -346,6 +357,28 @@ function updateTerraformFromClusterInfo() {
     echo "# DNS cluster nodes - Labnet SDN cluster (auto-generated)" >> "$TFVARS_FILE"
     echo -e "dns_labnet_nodes = $LABNET_DNS_CONFIG" >> "$TFVARS_FILE"
     info "  dns_labnet_nodes updated"
+
+    # Configure labnet DHCP settings (auto-generated from labnet CIDR)
+    # DHCP range: .100 to .200, router is the gateway
+    local dhcp_start="${labnet_base}100"
+    local dhcp_end="${labnet_base}200"
+
+    # Update or add DHCP settings
+    if grep -q "^labnet_dhcp_enabled" "$TFVARS_FILE"; then
+      sed_inplace "s|^labnet_dhcp_enabled[[:space:]]*=.*|labnet_dhcp_enabled    = true|" "$TFVARS_FILE"
+      sed_inplace "s|^labnet_dhcp_start[[:space:]]*=.*|labnet_dhcp_start      = \"$dhcp_start\"|" "$TFVARS_FILE"
+      sed_inplace "s|^labnet_dhcp_end[[:space:]]*=.*|labnet_dhcp_end        = \"$dhcp_end\"|" "$TFVARS_FILE"
+      sed_inplace "s|^labnet_dhcp_router[[:space:]]*=.*|labnet_dhcp_router     = \"$INT_GW\"|" "$TFVARS_FILE"
+    else
+      echo "" >> "$TFVARS_FILE"
+      echo "# Labnet DHCP Configuration (auto-generated)" >> "$TFVARS_FILE"
+      echo "labnet_dhcp_enabled    = true" >> "$TFVARS_FILE"
+      echo "labnet_dhcp_start      = \"$dhcp_start\"" >> "$TFVARS_FILE"
+      echo "labnet_dhcp_end        = \"$dhcp_end\"" >> "$TFVARS_FILE"
+      echo "labnet_dhcp_router     = \"$INT_GW\"" >> "$TFVARS_FILE"
+      echo "labnet_dhcp_lease_time = \"86400\"" >> "$TFVARS_FILE"
+    fi
+    info "  labnet_dhcp settings updated (range: $dhcp_start - $dhcp_end, router: $INT_GW)"
   fi
 
   # Load and apply service passwords from crypto/service-passwords.json

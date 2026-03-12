@@ -60,10 +60,42 @@ function configureNetworking() {
 
     read -rp "$(question "Internal gateway [172.16.0.1]: ")" INT_GATEWAY
     INT_GATEWAY=${INT_GATEWAY:-172.16.0.1}
+
+    echo
+    info "Labnet Egress Configuration"
+    info "(Which physical bridge should labnet traffic use for internet access?)"
+    info "Use the external bridge ($BRIDGE_VAL) unless you have a dedicated routing interface."
+    echo
+
+    read -rp "$(question "Labnet egress bridge [$BRIDGE_VAL]: ")" INT_EGRESS_BRIDGE
+    INT_EGRESS_BRIDGE=${INT_EGRESS_BRIDGE:-$BRIDGE_VAL}
+
+    # Try to get the IP of the egress bridge from Proxmox
+    local DETECTED_EGRESS_IP=""
+    if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+      # Query the first node to get the IP address of the egress bridge
+      DETECTED_EGRESS_IP=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+        "ip -4 addr show $INT_EGRESS_BRIDGE 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$DETECTED_EGRESS_IP" ]; then
+      info "Detected IP for $INT_EGRESS_BRIDGE: $DETECTED_EGRESS_IP"
+      read -rp "$(question "Labnet egress source IP [$DETECTED_EGRESS_IP]: ")" INT_EGRESS_IP
+      INT_EGRESS_IP=${INT_EGRESS_IP:-$DETECTED_EGRESS_IP}
+    else
+      warn "Could not detect IP for $INT_EGRESS_BRIDGE - please enter manually"
+      read -rp "$(question "Labnet egress source IP: ")" INT_EGRESS_IP
+      while [ -z "$INT_EGRESS_IP" ]; do
+        warn "Egress IP is required for SNAT"
+        read -rp "$(question "Labnet egress source IP: ")" INT_EGRESS_IP
+      done
+    fi
   else
     CREATE_SDN=false
     INT_CIDR=""
     INT_GATEWAY=""
+    INT_EGRESS_BRIDGE=""
+    INT_EGRESS_IP=""
   fi
 
   echo
@@ -98,6 +130,8 @@ EOF
 Internal SDN Network:
   CIDR:              $INT_CIDR
   Gateway:           $INT_GATEWAY
+  Egress Bridge:     $INT_EGRESS_BRIDGE
+  Egress IP (SNAT):  $INT_EGRESS_IP
 EOF
   fi
 
@@ -128,6 +162,8 @@ EOF
      --argjson create_sdn "$CREATE_SDN" \
      --arg int_cidr "$INT_CIDR" \
      --arg int_gw "$INT_GATEWAY" \
+     --arg int_egress_bridge "$INT_EGRESS_BRIDGE" \
+     --arg int_egress_ip "$INT_EGRESS_IP" \
      --arg dns_postfix "$DNS_POSTFIX" \
      '. + {
        network: {
@@ -140,7 +176,9 @@ EOF
          labnet: {
            enabled: $create_sdn,
            cidr: $int_cidr,
-           gateway: $int_gw
+           gateway: $int_gw,
+           egress_bridge: $int_egress_bridge,
+           egress_ip: $int_egress_ip
          }
        },
        dns_postfix: $dns_postfix

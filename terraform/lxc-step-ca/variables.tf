@@ -58,3 +58,9 @@ variable "vmid" {
   type = number
   default = 902
 }
+
+variable "bootstrap_dns" {
+  type        = string
+  description = "DNS server to use during initial provisioning (before internal DNS is ready)"
+  default     = "1.1.1.1"
+}

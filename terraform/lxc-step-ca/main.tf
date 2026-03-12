@@ -48,7 +48,7 @@ resource "proxmox_lxc" "step-ca" {
       bash -c "set -euxo pipefail
         # Use public DNS for package installation (internal DNS may not be ready)
         cp /etc/resolv.conf /etc/resolv.conf.bak
-        echo 'nameserver 1.1.1.1' > /etc/resolv.conf
+        echo 'nameserver ${var.bootstrap_dns}' > /etc/resolv.conf
 
         apt-get update && apt-get install -y --no-install-recommends curl gpg ca-certificates
         curl -fsSL https://packages.smallstep.com/keys/apt/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/smallstep.asc

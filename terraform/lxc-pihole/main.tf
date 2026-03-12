@@ -88,7 +88,7 @@ resource "null_resource" "direct_provision" {
 
       # Use public DNS for package installation
       cp /etc/resolv.conf /etc/resolv.conf.bak || true
-      echo "nameserver 1.1.1.1" > /etc/resolv.conf
+      echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
 
       echo "[+] Updating package lists..."
       apt-get update
@@ -135,6 +135,17 @@ SETUPVARS
       pihole-FTL --config dns.listeningMode ALL
       pihole-FTL --config webserver.api.password '${var.admin_password}'
 
+%{if var.dhcp_enabled && var.dhcp_start != "" && var.dhcp_end != ""}
+      echo "[+] Configuring DHCP server..."
+      pihole-FTL --config dhcp.active true
+      pihole-FTL --config dhcp.start '${var.dhcp_start}'
+      pihole-FTL --config dhcp.end '${var.dhcp_end}'
+      pihole-FTL --config dhcp.router '${var.dhcp_router}'
+      pihole-FTL --config dhcp.leaseTime '${var.dhcp_lease_time}'
+      echo "    DHCP range: ${var.dhcp_start} - ${var.dhcp_end}"
+      echo "    DHCP router: ${var.dhcp_router}"
+%{endif}
+
       systemctl restart pihole-FTL
 
       # Keep public DNS for now - will be restored after gravity sync setup
@@ -164,7 +175,7 @@ resource "null_resource" "nebula_sync_setup" {
       export PATH="/usr/local/bin:$PATH"
 
       # Ensure we have public DNS for downloading
-      echo "nameserver 1.1.1.1" > /etc/resolv.conf
+      echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
 
       echo "[+] Installing Nebula-Sync on primary node (${local.primary_node.hostname})..."
 
@@ -360,7 +371,7 @@ export PATH="/usr/local/bin:$PATH"
 
 # Use public DNS for package installation
 cp /etc/resolv.conf /etc/resolv.conf.bak || true
-echo "nameserver 1.1.1.1" > /etc/resolv.conf
+echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
 
 echo "[+] Updating package lists..."
 apt-get update
@@ -403,6 +414,17 @@ pihole-FTL --config dns.upstreams '["127.0.0.1#5335"]'
 pihole-FTL --config dns.listeningMode ALL
 pihole-FTL --config webserver.api.password '${var.admin_password}'
 
+%{if var.dhcp_enabled && var.dhcp_start != "" && var.dhcp_end != ""}
+echo "[+] Configuring DHCP server..."
+pihole-FTL --config dhcp.active true
+pihole-FTL --config dhcp.start '${var.dhcp_start}'
+pihole-FTL --config dhcp.end '${var.dhcp_end}'
+pihole-FTL --config dhcp.router '${var.dhcp_router}'
+pihole-FTL --config dhcp.leaseTime '${var.dhcp_lease_time}'
+echo "    DHCP range: ${var.dhcp_start} - ${var.dhcp_end}"
+echo "    DHCP router: ${var.dhcp_router}"
+%{endif}
+
 systemctl restart pihole-FTL
 
 echo "[OK] Pi-hole + Unbound installation complete"
@@ -435,7 +457,7 @@ resource "null_resource" "sdn_nebula_sync_setup" {
 set -e
 export PATH="/usr/local/bin:\$PATH"
 
-echo "nameserver 1.1.1.1" > /etc/resolv.conf
+echo "nameserver ${var.bootstrap_dns}" > /etc/resolv.conf
 
 echo "[+] Installing Nebula-Sync on primary node..."
 

@@ -94,3 +94,40 @@ variable "dns_zone" {
   description = "Primary DNS zone to create (e.g., 'lab', 'mylab.lan')"
   default     = ""
 }
+
+variable "bootstrap_dns" {
+  type        = string
+  description = "DNS server to use during initial provisioning (before Pi-hole is running)"
+  default     = "1.1.1.1"
+}
+
+# DHCP Configuration (primarily for labnet/SDN networks)
+variable "dhcp_enabled" {
+  type        = bool
+  description = "Enable DHCP server on Pi-hole (for labnet SDN networks)"
+  default     = false
+}
+
+variable "dhcp_start" {
+  type        = string
+  description = "Start of DHCP IP range (e.g., '172.16.0.100')"
+  default     = ""
+}
+
+variable "dhcp_end" {
+  type        = string
+  description = "End of DHCP IP range (e.g., '172.16.0.200')"
+  default     = ""
+}
+
+variable "dhcp_router" {
+  type        = string
+  description = "DHCP gateway/router IP (usually the SDN gateway)"
+  default     = ""
+}
+
+variable "dhcp_lease_time" {
+  type        = string
+  description = "DHCP lease time in seconds"
+  default     = "86400"
+}
