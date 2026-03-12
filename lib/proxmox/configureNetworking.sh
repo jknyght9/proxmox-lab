@@ -64,11 +64,11 @@ function configureNetworking() {
     echo
     info "Labnet Egress Configuration"
     info "(Which physical bridge should labnet traffic use for internet access?)"
-    info "Use the external bridge ($BRIDGE_VAL) unless you have a dedicated routing interface."
+    info "Usually vmbr0 unless you have a dedicated routing interface."
     echo
 
-    read -rp "$(question "Labnet egress bridge [$BRIDGE_VAL]: ")" INT_EGRESS_BRIDGE
-    INT_EGRESS_BRIDGE=${INT_EGRESS_BRIDGE:-$BRIDGE_VAL}
+    read -rp "$(question "Labnet egress bridge [vmbr0]: ")" INT_EGRESS_BRIDGE
+    INT_EGRESS_BRIDGE=${INT_EGRESS_BRIDGE:-vmbr0}
 
     # Try to get the IP of the egress bridge from Proxmox
     local DETECTED_EGRESS_IP=""
