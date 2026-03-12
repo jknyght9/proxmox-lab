@@ -1,5 +1,7 @@
 .cache_ggshield
-.claude
+# Claude Code local settings (but keep CLAUDE.md for project instructions)
+.claude/*
+!.claude/CLAUDE.md
 .DS_Store
 .terraform
 cluster-info.json
