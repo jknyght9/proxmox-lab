@@ -333,6 +333,19 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Labnet traffic using wrong interface**: Configure `egress_bridge` and `egress_ip` in cluster-info.json, then re-run proxmox/setup.sh
 - **Verify SNAT rules**: `iptables -t nat -L POSTROUTING -n | grep -E "172\.16\.0"` (should show SNAT to egress IP)
 
+### Purge/Rollback
+The complete purge (setup.sh option 15) removes all project resources:
+1. VMs, LXC containers, Packer templates
+2. Cloud-init snippets
+3. ACME certificates
+4. Step-CA root certificate from trust store
+5. DNS configuration (reset to 1.1.1.1)
+6. Hashicorp API user AND HashicorpBuild role
+7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules)
+8. Local config (terraform.tfvars auto-generated sections, cluster-info.json network config)
+9. Tailscale DNS override (re-enables MagicDNS)
+10. SSH keys from nodes (last step)
+
 ### Samba AD Issues
 - **DC won't start**: Check GlusterFS mount, ports 88/389/445 availability, and container logs
 - **Replication failing**: Run `samba-tool drs showrepl` inside container to diagnose
