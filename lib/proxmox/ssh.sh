@@ -3,6 +3,10 @@
 function distributeSSHKeys() {
   doing "Distributing SSH keys to all cluster nodes..."
 
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+  local pubkey_content
+  pubkey_content=$(cat "$PUBKEY_PATH")
+
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -14,11 +18,27 @@ function distributeSSHKeys() {
     fi
 
     doing "  $node ($ip): Installing SSH keys..."
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>/dev/null
-    sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$ip" \
-      "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
-        || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>/dev/null
+
+    # Create .ssh directory
+    if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$ip" "mkdir -p ~/.ssh && chmod 700 ~/.ssh" 2>&1; then
+      warn "  $node ($ip): Failed to create .ssh directory (check password)"
+      continue
+    fi
+
+    # Copy public key file
+    if ! sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>&1; then
+      warn "  $node ($ip): Failed to copy public key file"
+      continue
+    fi
+
+    # Add to authorized_keys if not already present
+    if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$ip" \
+      "grep -qF '${pubkey_content}' ~/.ssh/authorized_keys 2>/dev/null \
+        || (echo '${pubkey_content}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>&1; then
+      warn "  $node ($ip): Failed to add key to authorized_keys"
+      continue
+    fi
+
     success "  $node ($ip): Keys installed"
   done
 
