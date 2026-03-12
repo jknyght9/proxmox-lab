@@ -407,7 +407,7 @@ function createHashicorpUser() {
     echo "    - exists"
   else
     pveum roleadd "$ROLE" -privs \
-      "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Datastore.Audit,Datastore.Allocate,Datastore.AllocateTemplate,Datastore.AllocateSpace,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.Cloudinit,VM.Config.CPU,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.PowerMgmt,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,Permissions.Modify"
+      "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Audit,Datastore.Allocate,Datastore.AllocateTemplate,Datastore.AllocateSpace,VM.Allocate,VM.Audit,VM.Clone,VM.Migrate,VM.Config.CDROM,VM.Config.Cloudinit,VM.Config.CPU,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.PowerMgmt,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,Permissions.Modify"
     echo "    - created"
   fi
 
