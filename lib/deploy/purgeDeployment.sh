@@ -169,11 +169,19 @@ EOF
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Removing SSH key on $node..."
-    # Get the public key content to remove from authorized_keys
+    # Get the key comment (last field) to identify the key - more reliable than matching full key
     if [ -f "${KEY_PATH}.pub" ]; then
-      local pubkey
-      pubkey=$(cat "${KEY_PATH}.pub")
-      sshRun "$REMOTE_USER" "$ip" "grep -v '$pubkey' /root/.ssh/authorized_keys > /tmp/ak_tmp && mv /tmp/ak_tmp /root/.ssh/authorized_keys" 2>/dev/null || true
+      local key_comment
+      key_comment=$(awk '{print $NF}' "${KEY_PATH}.pub")
+      if [ -n "$key_comment" ]; then
+        # Remove lines containing the key comment (e.g., "lab-deploy" or "user@host")
+        sshRun "$REMOTE_USER" "$ip" "grep -v '${key_comment}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
+      else
+        # Fallback: remove by key type and first 20 chars of key (avoids special char issues)
+        local key_prefix
+        key_prefix=$(awk '{print $1" "substr($2,1,20)}' "${KEY_PATH}.pub")
+        sshRun "$REMOTE_USER" "$ip" "grep -v '${key_prefix}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
+      fi
     fi
   done
   success "SSH keys removed from nodes"
