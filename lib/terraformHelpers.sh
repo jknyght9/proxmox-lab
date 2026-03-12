@@ -238,11 +238,11 @@ function updateTerraformFromClusterInfo() {
   fi
 
   # Update network_gateway_address
-  sed_inplace "s|^network_gateway_address = .*|network_gateway_address = \"$EXT_GW\"|" "$TFVARS_FILE"
+  sed_inplace "s|^network_gateway_address[[:space:]]*=.*|network_gateway_address = \"$EXT_GW\"|" "$TFVARS_FILE"
   info "  network_gateway_address = \"$EXT_GW\""
 
   # Update network_interface_bridge
-  sed_inplace "s|^network_interface_bridge = .*|network_interface_bridge = \"$BRIDGE_VAL\"|" "$TFVARS_FILE"
+  sed_inplace "s|^network_interface_bridge[[:space:]]*=.*|network_interface_bridge = \"$BRIDGE_VAL\"|" "$TFVARS_FILE"
   info "  network_interface_bridge = \"$BRIDGE_VAL\""
 
   # Update lxc_storage - LXC containers require local block storage (not NFS)
@@ -255,7 +255,7 @@ function updateTerraformFromClusterInfo() {
     LXC_STORAGE_VAL="$STORAGE_VAL"
   fi
   if grep -q "^lxc_storage" "$TFVARS_FILE"; then
-    sed_inplace "s|^lxc_storage = .*|lxc_storage = \"$LXC_STORAGE_VAL\"|" "$TFVARS_FILE"
+    sed_inplace "s|^lxc_storage[[:space:]]*=.*|lxc_storage = \"$LXC_STORAGE_VAL\"|" "$TFVARS_FILE"
   else
     echo "" >> "$TFVARS_FILE"
     echo "lxc_storage = \"$LXC_STORAGE_VAL\"" >> "$TFVARS_FILE"
@@ -264,7 +264,7 @@ function updateTerraformFromClusterInfo() {
 
   # Update vm_storage (for VM disks - should match template storage)
   if grep -q "^vm_storage" "$TFVARS_FILE"; then
-    sed_inplace "s|^vm_storage = .*|vm_storage = \"$STORAGE_VAL\"|" "$TFVARS_FILE"
+    sed_inplace "s|^vm_storage[[:space:]]*=.*|vm_storage = \"$STORAGE_VAL\"|" "$TFVARS_FILE"
   else
     echo "" >> "$TFVARS_FILE"
     echo "# VM storage (should match template storage for fast cloning)" >> "$TFVARS_FILE"
@@ -273,17 +273,17 @@ function updateTerraformFromClusterInfo() {
   info "  vm_storage = \"$STORAGE_VAL\""
 
   # Update dns_postfix
-  sed_inplace "s|^dns_postfix = .*|dns_postfix = \"$DNS_POSTFIX_VAL\"|" "$TFVARS_FILE"
+  sed_inplace "s|^dns_postfix[[:space:]]*=.*|dns_postfix = \"$DNS_POSTFIX_VAL\"|" "$TFVARS_FILE"
   info "  dns_postfix = \"$DNS_POSTFIX_VAL\""
 
   # Update dns_primary_ipv4
-  sed_inplace "s|^dns_primary_ipv4 = .*|dns_primary_ipv4 = \"$DNS_START\"|" "$TFVARS_FILE"
+  sed_inplace "s|^dns_primary_ipv4[[:space:]]*=.*|dns_primary_ipv4 = \"$DNS_START\"|" "$TFVARS_FILE"
   info "  dns_primary_ipv4 = \"$DNS_START\""
 
   # Update step-ca_eth0_ipv4_cidr (service start IP with /24)
   local EXT_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
   local CIDR_MASK=$(echo "$EXT_CIDR_VAL" | grep -oE '/[0-9]+$')
-  sed_inplace "s|^step-ca_eth0_ipv4_cidr = .*|step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\"|" "$TFVARS_FILE"
+  sed_inplace "s|^step-ca_eth0_ipv4_cidr[[:space:]]*=.*|step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\"|" "$TFVARS_FILE"
   info "  step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\""
 
   # Build and update proxmox_node_ips map
