@@ -15,8 +15,10 @@ to their pre-install state:
   - Cloud-init snippets (all .yml/.yaml files)
   - ACME certificates
   - Step-CA root certificate from trust store
-  - DNS configuration
-  - Hashicorp API user
+  - DNS configuration (resolv.conf reset)
+  - Hashicorp API user and HashicorpBuild role
+  - Labnet SDN (zone, vnet, subnets, iptables SNAT rules)
+  - Tailscale DNS override (re-enables MagicDNS)
   - SSH keys (removed last)
   - Local configuration files
 
@@ -46,11 +48,11 @@ EOF
   echo
 
   # Step 1: Purge all VMs, LXC containers, and Packer templates
-  doing "Step 1/8: Purging all VMs, LXC containers, and templates..."
+  doing "Step 1/10: Purging all VMs, LXC containers, and templates..."
   purgeClusterResources --auto --include-templates || true
 
   # Step 2: Remove cloud-init snippets
-  doing "Step 2/8: Removing cloud-init snippets..."
+  doing "Step 2/10: Removing cloud-init snippets..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -61,7 +63,7 @@ EOF
   success "Cloud-init snippets removed"
 
   # Step 3: Remove ACME certificates
-  doing "Step 3/8: Removing ACME certificates..."
+  doing "Step 3/10: Removing ACME certificates..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -71,7 +73,7 @@ EOF
   success "ACME certificates removed"
 
   # Step 4: Remove step-ca root cert from trust store
-  doing "Step 4/8: Removing step-ca root certificate from trust store..."
+  doing "Step 4/10: Removing step-ca root certificate from trust store..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -81,7 +83,7 @@ EOF
   success "Step-CA root certificate removed"
 
   # Step 5: Reset node DNS configuration
-  doing "Step 5/8: Resetting DNS configuration..."
+  doing "Step 5/10: Resetting DNS configuration..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -90,25 +92,53 @@ EOF
   done
   success "DNS configuration reset"
 
-  # Step 6: Remove hashicorp API user
-  doing "Step 6/8: Removing hashicorp API user..."
-  sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" "pveum user delete hashicorp@pam 2>/dev/null; pveum token delete hashicorp@pam hashicorp-token 2>/dev/null" || true
-  success "Hashicorp API user removed"
+  # Step 6: Remove hashicorp API user and role
+  doing "Step 6/10: Removing hashicorp API user and role..."
+  sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" "pveum user delete hashicorp@pam 2>/dev/null; pveum token delete hashicorp@pam hashicorp-token 2>/dev/null; pveum role delete HashicorpBuild 2>/dev/null" || true
+  success "Hashicorp API user and role removed"
 
-  # Step 7: Clean local files
-  doing "Step 7/8: Cleaning local configuration files..."
+  # Step 7: Remove labnet SDN
+  doing "Step 7/10: Removing labnet SDN configuration..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  Removing iptables SNAT rules on $node..."
+    # Remove SNAT/MASQUERADE rules for labnet subnet (172.16.0.0/24 default, also check cluster-info)
+    local labnet_cidr="172.16.0.0/24"
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      labnet_cidr=$(jq -r '.network.labnet.cidr // "172.16.0.0/24"' "$CLUSTER_INFO_FILE")
+    fi
+    sshRun "$REMOTE_USER" "$ip" "iptables -t nat -S POSTROUTING 2>/dev/null | grep -E '(-s ${labnet_cidr}.*MASQUERADE|-s ${labnet_cidr}.*SNAT)' | while read -r rule; do iptables -t nat \$(echo \"\$rule\" | sed 's/^-A/-D/') 2>/dev/null || true; done" || true
+    # Save iptables rules
+    sshRun "$REMOTE_USER" "$ip" "mkdir -p /etc/iptables; iptables-save > /etc/iptables/rules.v4 2>/dev/null" || true
+  done
+  # Remove SDN from cluster (only needs to run on one node)
+  info "  Removing SDN zone and vnet..."
+  sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" "
+    rm -f /etc/pve/sdn/subnets.cfg 2>/dev/null
+    touch /etc/pve/sdn/subnets.cfg
+    pvesh delete /cluster/sdn/vnets/labnet 2>/dev/null || true
+    pvesh delete /cluster/sdn/zones/labzone 2>/dev/null || true
+    pvesh set /cluster/sdn 2>/dev/null || true
+  " || true
+  success "Labnet SDN removed"
+
+  # Step 8: Clean local files
+  doing "Step 8/10: Cleaning local configuration files..."
   rm -f hosts.json 2>/dev/null || true
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
     sed -i.bak '/# Proxmox cluster node IPs (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
     sed -i.bak '/# DNS cluster nodes - Main cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
     sed -i.bak '/# DNS cluster nodes - Labnet SDN cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed -i.bak '/# Labnet DHCP Configuration (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed -i.bak '/# Bootstrap DNS for initial provisioning (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
     rm -f terraform/terraform.tfvars.bak 2>/dev/null || true
   fi
-  # Remove storage config from cluster-info.json
+  # Remove storage and network config from cluster-info.json
   if [ -f "$CLUSTER_INFO_FILE" ]; then
     local tmp=$(mktemp)
-    jq 'del(.storage)' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
+    jq 'del(.storage) | del(.network) | del(.dns_postfix) | del(.ad_config)' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
   fi
   # Clean packer storage settings
   if [ -f "packer/packer.auto.pkrvars.hcl" ]; then
@@ -121,8 +151,20 @@ EOF
   done
   success "Local files cleaned"
 
-  # Step 8: Remove SSH keys (LAST - we need SSH for all previous steps!)
-  doing "Step 8/8: Removing SSH keys from nodes..."
+  # Step 9: Remove Tailscale DNS override (if configured)
+  doing "Step 9/10: Resetting Tailscale DNS settings..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    if sshRun "$REMOTE_USER" "$ip" "command -v tailscale" &>/dev/null; then
+      info "  Re-enabling Tailscale DNS on $node..."
+      sshRun "$REMOTE_USER" "$ip" "tailscale set --accept-dns=true 2>/dev/null" || true
+    fi
+  done
+  success "Tailscale DNS settings reset"
+
+  # Step 10: Remove SSH keys (LAST - we need SSH for all previous steps!)
+  doing "Step 10/10: Removing SSH keys from nodes..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
