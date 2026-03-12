@@ -64,22 +64,58 @@ function configureNetworking() {
     echo
     info "Labnet Egress Configuration"
     info "(Which physical bridge should labnet traffic use for internet access?)"
-    info "Usually vmbr0 unless you have a dedicated routing interface."
     echo
 
-    read -rp "$(question "Labnet egress bridge [vmbr0]: ")" INT_EGRESS_BRIDGE
-    INT_EGRESS_BRIDGE=${INT_EGRESS_BRIDGE:-vmbr0}
+    # Detect available bridges from the primary node
+    local AVAILABLE_BRIDGES=()
+    local primary_node="${CLUSTER_NODES[0]}"
+    if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+      while IFS= read -r bridge; do
+        [[ -n "$bridge" ]] && AVAILABLE_BRIDGES+=("$bridge")
+      done < <(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+        "pvesh get /nodes/$primary_node/network --output-format json 2>/dev/null" | \
+        jq -r '.[] | select(.type == "bridge") | .iface' 2>/dev/null)
+    fi
 
-    # Try to get the IP of the egress bridge from Proxmox
+    # Select egress bridge
+    if [ ${#AVAILABLE_BRIDGES[@]} -eq 0 ]; then
+      warn "Could not detect bridges, using vmbr0"
+      INT_EGRESS_BRIDGE="vmbr0"
+    elif [ ${#AVAILABLE_BRIDGES[@]} -eq 1 ]; then
+      INT_EGRESS_BRIDGE="${AVAILABLE_BRIDGES[0]}"
+      info "Only one bridge available: $INT_EGRESS_BRIDGE"
+    else
+      info "Available bridges:"
+      echo
+      for i in "${!AVAILABLE_BRIDGES[@]}"; do
+        # Get IP for this bridge to help user identify it
+        local bridge_ip
+        bridge_ip=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+          "ip -4 addr show ${AVAILABLE_BRIDGES[$i]} 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1" 2>/dev/null || echo "no IP")
+        echo "    $((i + 1)). ${AVAILABLE_BRIDGES[$i]} ($bridge_ip)"
+      done
+      echo
+
+      read -rp "$(question "Select egress bridge [1]: ")" BRIDGE_CHOICE
+      BRIDGE_CHOICE=${BRIDGE_CHOICE:-1}
+
+      if [[ "$BRIDGE_CHOICE" =~ ^[0-9]+$ ]] && [ "$BRIDGE_CHOICE" -ge 1 ] && [ "$BRIDGE_CHOICE" -le "${#AVAILABLE_BRIDGES[@]}" ]; then
+        INT_EGRESS_BRIDGE="${AVAILABLE_BRIDGES[$((BRIDGE_CHOICE - 1))]}"
+      else
+        warn "Invalid selection, using ${AVAILABLE_BRIDGES[0]}"
+        INT_EGRESS_BRIDGE="${AVAILABLE_BRIDGES[0]}"
+      fi
+    fi
+
+    # Get the IP of the selected egress bridge
     local DETECTED_EGRESS_IP=""
     if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
-      # Query the first node to get the IP address of the egress bridge
       DETECTED_EGRESS_IP=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
         "ip -4 addr show $INT_EGRESS_BRIDGE 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1" 2>/dev/null || echo "")
     fi
 
     if [ -n "$DETECTED_EGRESS_IP" ]; then
-      info "Detected IP for $INT_EGRESS_BRIDGE: $DETECTED_EGRESS_IP"
+      info "Using egress bridge: $INT_EGRESS_BRIDGE ($DETECTED_EGRESS_IP)"
       read -rp "$(question "Labnet egress source IP [$DETECTED_EGRESS_IP]: ")" INT_EGRESS_IP
       INT_EGRESS_IP=${INT_EGRESS_IP:-$DETECTED_EGRESS_IP}
     else
