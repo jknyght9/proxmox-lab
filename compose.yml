@@ -26,6 +26,7 @@ services:
   packer:
     build: ./packer
     #image: hashicorp/packer:latest
+    userns_mode: host  # Bypass userns-remap for volume write access
     container_name: packer
     working_dir: /packer
     volumes:
@@ -42,6 +43,7 @@ services:
   step-ca:
     image: smallstep/step-ca
     user: root
+    userns_mode: host  # Bypass userns-remap for volume write access
     container_name: step-ca
     volumes:
       - ./terraform/lxc-step-ca/step-ca:/etc/step-ca:z
@@ -51,6 +53,7 @@ services:
     entrypoint: ["/bin/bash", "/init-step-ca.sh"]
   terraform:
     image: hashicorp/terraform
+    userns_mode: host  # Bypass userns-remap for volume write access
     container_name: terraform
     working_dir: /terraform
     volumes:
