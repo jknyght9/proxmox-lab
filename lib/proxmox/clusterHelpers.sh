@@ -127,6 +127,7 @@ function detectAndSaveCluster() {
   fi
 
   # Capture DNS configuration for each node
+  # Note: At this point, SSH keys may only be installed on primary node, so use password for others
   doing "Capturing DNS configuration per node..."
   local nodes_array="["
   local failed_nodes=()
@@ -135,10 +136,14 @@ function detectAndSaveCluster() {
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
+    # Use key-based SSH for primary node, password-based for others
+    local ssh_func="sshRunWithPassword"
+    [ "$ip" = "$PROXMOX_HOST" ] && ssh_func="sshRun"
+
     # Get current DNS config
     local dns1="" dns2="" search=""
     local dns_json
-    dns_json=$(sshRun "$REMOTE_USER" "$ip" "pvesh get /nodes/$node/dns --output-format json 2>/dev/null" || echo "{}")
+    dns_json=$($ssh_func "$REMOTE_USER" "$ip" "pvesh get /nodes/$node/dns --output-format json 2>/dev/null" || echo "{}")
 
     dns1=$(echo "$dns_json" | jq -r '.dns1 // ""')
     dns2=$(echo "$dns_json" | jq -r '.dns2 // ""')
@@ -146,7 +151,7 @@ function detectAndSaveCluster() {
 
     # Test connectivity
     local connectivity="unknown"
-    if sshRun "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
+    if $ssh_func "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
       connectivity="ok"
       success "  $node ($ip): Connectivity OK, DNS1=$dns1, DNS2=$dns2"
     else
@@ -184,8 +189,12 @@ function detectAndSaveCluster() {
         [ $idx -ge 0 ] || continue
         local ip="${CLUSTER_NODE_IPS[$idx]}"
 
+        # Use password for secondary nodes since keys aren't distributed yet
+        local ssh_func="sshRunWithPassword"
+        [ "$ip" = "$PROXMOX_HOST" ] && ssh_func="sshRun"
+
         doing "  Setting DNS on $node..."
-        sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
+        $ssh_func "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
           success "  $node: DNS updated" || warn "  $node: Failed to update DNS"
       done
     fi

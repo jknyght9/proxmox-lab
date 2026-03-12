@@ -74,6 +74,14 @@ function sshRun() {
       -o LogLevel=ERROR -o ConnectTimeout=5 "$1@$2" "$3"
 }
 
+# SSH command wrapper using password (for early setup before keys are distributed)
+# Arguments: $1 - user, $2 - host, $3 - command
+# Requires: PROXMOX_PASS to be set
+function sshRunWithPassword() {
+  sshpass -p "$PROXMOX_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o LogLevel=ERROR -o ConnectTimeout=10 "$1@$2" "$3"
+}
+
 # SSH with heredoc/multiline script support (reads from stdin)
 # Arguments: $1 - user, $2 - host, remaining args passed to remote bash
 # Usage: sshScript user host <<'SCRIPT' ... SCRIPT
