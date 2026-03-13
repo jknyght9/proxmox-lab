@@ -101,13 +101,17 @@ function configureNetworking() {
     # Append CIDR if not present
     [[ "$TRAEFIK_HA_VIP" != */* ]] && TRAEFIK_HA_VIP="${TRAEFIK_HA_VIP}${CIDR_PREFIX}"
 
-    read -rp "$(question "VRRP router ID (1-255, must be unique) [53]: ")" TRAEFIK_HA_VRRP_ROUTER_ID
-    TRAEFIK_HA_VRRP_ROUTER_ID=${TRAEFIK_HA_VRRP_ROUTER_ID:-53}
+    # Auto-generate VRRP router ID (53 for Traefik, avoiding 51/52 used by DNS HA)
+    TRAEFIK_HA_VRRP_ROUTER_ID=53
 
-    read -rp "$(question "VRRP password (8 chars max) [traefik]: ")" TRAEFIK_HA_VRRP_PASSWORD
-    TRAEFIK_HA_VRRP_PASSWORD=${TRAEFIK_HA_VRRP_PASSWORD:-traefik}
+    # Auto-generate random 8-character password
+    TRAEFIK_HA_VRRP_PASSWORD=$(head -c 100 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8)
 
-    info "Note: Traefik will run on all Nomad nodes, VIP will float to active node"
+    echo
+    info "Auto-generated VRRP settings:"
+    info "  Router ID: $TRAEFIK_HA_VRRP_ROUTER_ID"
+    info "  Password:  $TRAEFIK_HA_VRRP_PASSWORD"
+    info "Traefik will run on all Nomad nodes, VIP will float to active node"
   fi
 
   echo
@@ -287,7 +291,6 @@ EOF
 
 Nomad Traefik High Availability:
   VIP (failover IP): $TRAEFIK_HA_VIP
-  VRRP Router ID:    $TRAEFIK_HA_VRRP_ROUTER_ID
   Traefik mode:      system job (runs on all Nomad nodes)
 EOF
   fi
