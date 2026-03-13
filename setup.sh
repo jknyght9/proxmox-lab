@@ -193,6 +193,51 @@ function runEverythingButSSH() {
   displayDeploymentSummary
 }
 
+function reconfigureNetworking() {
+  cat <<EOF
+
+############################################################################
+Network Configuration
+
+Configure network settings including:
+- External network CIDR and gateway
+- DNS High Availability (keepalived VIP)
+- Traefik High Availability (keepalived VIP)
+- Internal SDN network (labnet)
+- DNS domain suffix
+
+This does NOT redeploy any services - it only updates configuration files.
+After changing settings, you may need to redeploy affected services.
+#############################################################################
+
+EOF
+
+  # Load existing cluster info
+  if [ ! -f "$CLUSTER_INFO_FILE" ]; then
+    error "cluster-info.json not found. Run option 1 or 2 first to initialize the cluster."
+    return 1
+  fi
+
+  loadClusterInfo
+
+  # Run network configuration
+  configureNetworking
+
+  # Update terraform.tfvars with new settings
+  doing "Updating terraform.tfvars..."
+  updateTerraformFromClusterInfo
+  success "Network configuration updated"
+
+  cat <<EOF
+
+Next steps:
+- If you changed Traefik HA settings: Redeploy Nomad (option 5) then Traefik (option 7)
+- If you changed DNS HA settings: Redeploy DNS (option 4)
+- If you only changed the DNS domain: Rebuild DNS records (option 12)
+
+EOF
+}
+
 function showMenu() {
   echo
   echo "=========================================="
@@ -216,6 +261,7 @@ function showMenu() {
   echo " 15) Rollback service deployment (Terraform)"
   echo " 16) Purge service deployment (Emergency)"
   echo " 17) Purge entire deployment"
+  echo " 18) Configure networking"
   echo "  0) Exit"
   echo
 }
@@ -224,7 +270,7 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-17]: ")" choice
+  read -rp "$(question "Select an option [0-18]: ")" choice
 
   case $choice in
     1) runEverything;;
@@ -244,6 +290,7 @@ while true; do
     15) rollbackManual;;
     16) purgeClusterResources;;
     17) purgeDeployment;;
+    18) reconfigureNetworking;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
