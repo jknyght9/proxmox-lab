@@ -85,13 +85,27 @@ function configureNetworking() {
   local ENABLE_TRAEFIK_HA=false
   local TRAEFIK_HA_VIP=""
 
+  local TRAEFIK_HA_VRRP_ROUTER_ID=""
+  local TRAEFIK_HA_VRRP_PASSWORD=""
+
   if [[ "$ENABLE_TRAEFIK_HA_INPUT" =~ ^[Yy]$ ]]; then
     ENABLE_TRAEFIK_HA=true
     # Suggest VIP in the services range (after step-ca)
     local DEFAULT_TRAEFIK_VIP="${CIDR_BASE}100"
+    # Extract CIDR prefix from EXT_CIDR (e.g., /24 from 10.1.50.0/24)
+    local CIDR_PREFIX
+    CIDR_PREFIX=$(echo "$EXT_CIDR" | grep -oE '/[0-9]+$')
 
-    read -rp "$(question "Traefik VIP address (failover endpoint) [$DEFAULT_TRAEFIK_VIP]: ")" TRAEFIK_HA_VIP
+    read -rp "$(question "Traefik VIP address [$DEFAULT_TRAEFIK_VIP]: ")" TRAEFIK_HA_VIP
     TRAEFIK_HA_VIP=${TRAEFIK_HA_VIP:-$DEFAULT_TRAEFIK_VIP}
+    # Append CIDR if not present
+    [[ "$TRAEFIK_HA_VIP" != */* ]] && TRAEFIK_HA_VIP="${TRAEFIK_HA_VIP}${CIDR_PREFIX}"
+
+    read -rp "$(question "VRRP router ID (1-255, must be unique) [53]: ")" TRAEFIK_HA_VRRP_ROUTER_ID
+    TRAEFIK_HA_VRRP_ROUTER_ID=${TRAEFIK_HA_VRRP_ROUTER_ID:-53}
+
+    read -rp "$(question "VRRP password (8 chars max) [traefik]: ")" TRAEFIK_HA_VRRP_PASSWORD
+    TRAEFIK_HA_VRRP_PASSWORD=${TRAEFIK_HA_VRRP_PASSWORD:-traefik}
 
     info "Note: Traefik will run on all Nomad nodes, VIP will float to active node"
   fi
@@ -273,6 +287,7 @@ EOF
 
 Nomad Traefik High Availability:
   VIP (failover IP): $TRAEFIK_HA_VIP
+  VRRP Router ID:    $TRAEFIK_HA_VRRP_ROUTER_ID
   Traefik mode:      system job (runs on all Nomad nodes)
 EOF
   fi
@@ -338,6 +353,8 @@ EOF
      --arg int_egress_gw "$INT_EGRESS_GW" \
      --argjson traefik_ha_enabled "$ENABLE_TRAEFIK_HA" \
      --arg traefik_ha_vip "$TRAEFIK_HA_VIP" \
+     --arg traefik_ha_vrrp_router_id "$TRAEFIK_HA_VRRP_ROUTER_ID" \
+     --arg traefik_ha_vrrp_password "$TRAEFIK_HA_VRRP_PASSWORD" \
      --arg dns_postfix "$DNS_POSTFIX" \
      '. + {
        network: {
@@ -359,7 +376,9 @@ EOF
          },
          nomad: {
            traefik_ha_enabled: $traefik_ha_enabled,
-           traefik_ha_vip: $traefik_ha_vip
+           traefik_ha_vip: $traefik_ha_vip,
+           traefik_ha_vrrp_router_id: ($traefik_ha_vrrp_router_id | if . == "" then null else tonumber end),
+           traefik_ha_vrrp_password: (if $traefik_ha_vrrp_password == "" then null else $traefik_ha_vrrp_password end)
          }
        },
        dns_postfix: $dns_postfix

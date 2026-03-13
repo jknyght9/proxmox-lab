@@ -350,13 +350,21 @@ Optional HA configuration for Traefik using keepalived VRRP:
 - VIP floats to the highest-priority node with healthy Traefik
 - DNS points to VIP instead of individual nodes
 
-**Configuration** (in `terraform.tfvars`):
-```hcl
-nomad_traefik_ha_enabled        = true
-nomad_traefik_ha_vip            = "10.1.50.100/24"
-nomad_traefik_ha_vrrp_router_id = 53
-nomad_traefik_ha_vrrp_password  = "secure-pass"
+**Configuration** (in `cluster-info.json`, set via setup.sh networking):
+```json
+{
+  "network": {
+    "nomad": {
+      "traefik_ha_enabled": true,
+      "traefik_ha_vip": "10.1.50.100/24",
+      "traefik_ha_vrrp_router_id": 53,
+      "traefik_ha_vrrp_password": "secure-pass"
+    }
+  }
+}
 ```
+
+Keepalived is installed and configured on Nomad nodes when deploying Traefik (option 7).
 
 **Verification**:
 ```bash

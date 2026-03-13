@@ -107,18 +107,6 @@ labnet_dns_ha_vrrp_router_id  = 52       # Must be different from main cluster
 labnet_dns_ha_vrrp_password   = ""
 
 # -----------------------------------------------------------------------------
-# Nomad Traefik High Availability (keepalived VIP)
-# -----------------------------------------------------------------------------
-# Enables automatic failover for Traefik across Nomad nodes using VRRP.
-# Clients use the VIP for all Traefik-fronted services (vault, auth, etc.)
-# NOTE: Traefik runs as a system job on all nodes when HA is enabled.
-
-nomad_traefik_ha_enabled       = false       # Set to true to enable HA
-nomad_traefik_ha_vip           = ""          # e.g., "10.1.50.100/24"
-nomad_traefik_ha_vrrp_router_id = 53         # Unique ID for this VRRP instance (1-255)
-nomad_traefik_ha_vrrp_password  = ""         # VRRP auth password (8 chars max)
-
-# -----------------------------------------------------------------------------
 # Step-CA (Certificate Authority) Configuration
 # -----------------------------------------------------------------------------
 step-ca_root_password  = "CHANGE-THIS-PASSWORD"

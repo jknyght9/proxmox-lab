@@ -64,29 +64,3 @@ variable "vm_configs" {
     "nomad03" = { vm_id = 907, name = "nomad03", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
   }
 }
-
-# Traefik HA Configuration (keepalived VIP)
-variable "traefik_ha_enabled" {
-  type        = bool
-  description = "Enable Traefik HA with keepalived VIP"
-  default     = false
-}
-
-variable "traefik_ha_vip" {
-  type        = string
-  description = "Virtual IP address for Traefik HA with CIDR"
-  default     = ""
-}
-
-variable "traefik_ha_vrrp_router_id" {
-  type        = number
-  description = "VRRP router ID for Traefik HA"
-  default     = 53
-}
-
-variable "traefik_ha_vrrp_password" {
-  type        = string
-  sensitive   = true
-  description = "VRRP authentication password for Traefik HA"
-  default     = ""
-}
