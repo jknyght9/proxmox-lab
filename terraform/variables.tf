@@ -107,6 +107,24 @@ variable step-ca_eth0_ipv4_cidr {
   type = string
   description = "IPv4 address with CIDR notation for Step CA"
 }
+
+# Optional second NIC for step-ca (for ACME validation across networks)
+variable "step-ca_eth1_enabled" {
+  type        = bool
+  description = "Enable a second network interface on step-ca for ACME validation"
+  default     = false
+}
+variable "step-ca_eth1_vmbr" {
+  type        = string
+  description = "Proxmox bridge for step-ca eth1"
+  default     = "vmbr0"
+}
+variable "step-ca_eth1_ipv4_cidr" {
+  type        = string
+  description = "IPv4 address with CIDR for step-ca eth1"
+  default     = ""
+}
+
 variable "ssh_public_key_file" {
   type = string
   default = "/crypto/lab-deploy.pub"

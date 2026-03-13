@@ -30,6 +30,16 @@ resource "proxmox_lxc" "step-ca" {
     gw      = var.eth0_gateway
   }
 
+  # Optional second NIC for ACME validation to reach Proxmox management network
+  dynamic "network" {
+    for_each = var.eth1_enabled ? [1] : []
+    content {
+      name   = "eth1"
+      bridge = var.eth1_vmbr
+      ip     = var.eth1_ipv4_cidr
+    }
+  }
+
   features {
     nesting         = true
   }

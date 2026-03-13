@@ -64,3 +64,22 @@ variable "bootstrap_dns" {
   description = "DNS server to use during initial provisioning (before internal DNS is ready)"
   default     = "1.1.1.1"
 }
+
+# Optional second NIC for ACME validation across networks
+variable "eth1_enabled" {
+  type        = bool
+  description = "Enable a second network interface"
+  default     = false
+}
+
+variable "eth1_vmbr" {
+  type        = string
+  description = "Proxmox bridge interface for eth1"
+  default     = ""
+}
+
+variable "eth1_ipv4_cidr" {
+  type        = string
+  description = "IPv4 address with CIDR notation for eth1"
+  default     = ""
+}

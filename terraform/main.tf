@@ -86,6 +86,12 @@ module "step-ca" {
   proxmox_target_node = var.proxmox_target_node
   root_password       = var.step-ca_root_password
   bootstrap_dns       = var.bootstrap_dns
+
+  # Optional second NIC for ACME validation to Proxmox management network
+  eth1_enabled        = var.step-ca_eth1_enabled
+  eth1_vmbr           = var.step-ca_eth1_vmbr
+  eth1_ipv4_cidr      = var.step-ca_eth1_ipv4_cidr
+
   source              = "./lxc-step-ca"
 }
 
