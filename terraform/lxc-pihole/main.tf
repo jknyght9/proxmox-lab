@@ -64,10 +64,39 @@ resource "proxmox_lxc" "dns" {
   tags = "terraform,lxc,dns,${var.cluster_name}"
 }
 
+# Enable nesting feature for privileged containers (required for Pi-hole FTL)
+# API tokens can't set features at creation time for privileged containers,
+# so we add it after creation via pct set on the Proxmox host
+resource "null_resource" "enable_nesting" {
+  for_each   = var.enable_ha_vip ? local.nodes_map : {}
+  depends_on = [proxmox_lxc.dns]
+
+  triggers = {
+    vmid = proxmox_lxc.dns[each.key].vmid
+  }
+
+  connection {
+    type        = "ssh"
+    user        = "root"
+    private_key = file("/crypto/lab-deploy")
+    host        = each.value.ssh_host
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '[+] Enabling nesting feature for container ${proxmox_lxc.dns[each.key].vmid}...'",
+      "pct set ${proxmox_lxc.dns[each.key].vmid} -features nesting=1",
+      "pct reboot ${proxmox_lxc.dns[each.key].vmid}",
+      "sleep 5",
+      "echo '[+] Nesting enabled and container rebooted'"
+    ]
+  }
+}
+
 # Direct SSH provisioning (only for non-SDN networks)
 resource "null_resource" "direct_provision" {
   for_each   = var.is_sdn_network ? {} : local.nodes_map
-  depends_on = [proxmox_lxc.dns]
+  depends_on = [proxmox_lxc.dns, null_resource.enable_nesting]
 
   triggers = {
     vmid = proxmox_lxc.dns[each.key].vmid
@@ -332,7 +361,7 @@ resource "null_resource" "configure_local_dns" {
 # SDN provisioning via pct exec (only for SDN networks)
 resource "null_resource" "sdn_provision" {
   for_each   = var.is_sdn_network ? local.nodes_map : {}
-  depends_on = [proxmox_lxc.dns]
+  depends_on = [proxmox_lxc.dns, null_resource.enable_nesting]
 
   triggers = {
     vmid = proxmox_lxc.dns[each.key].vmid
