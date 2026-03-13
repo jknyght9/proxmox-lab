@@ -73,6 +73,29 @@ function configureNetworking() {
   read -rp "$(question "Other services start IP (step-ca, kasm) [$DEFAULT_SVC_START]: ")" SVC_START_IP
   SVC_START_IP=${SVC_START_IP:-$DEFAULT_SVC_START}
 
+  # Nomad Traefik High Availability option
+  echo
+  info "Nomad Traefik High Availability (keepalived)"
+  info "(Optional: Provides a Virtual IP that fails over between Nomad nodes for Traefik)"
+  echo
+
+  read -rp "$(question "Enable Traefik HA with keepalived VIP? [y/N]: ")" ENABLE_TRAEFIK_HA_INPUT
+  ENABLE_TRAEFIK_HA_INPUT=${ENABLE_TRAEFIK_HA_INPUT:-N}
+
+  local ENABLE_TRAEFIK_HA=false
+  local TRAEFIK_HA_VIP=""
+
+  if [[ "$ENABLE_TRAEFIK_HA_INPUT" =~ ^[Yy]$ ]]; then
+    ENABLE_TRAEFIK_HA=true
+    # Suggest VIP in the services range (after step-ca)
+    local DEFAULT_TRAEFIK_VIP="${CIDR_BASE}100"
+
+    read -rp "$(question "Traefik VIP address (failover endpoint) [$DEFAULT_TRAEFIK_VIP]: ")" TRAEFIK_HA_VIP
+    TRAEFIK_HA_VIP=${TRAEFIK_HA_VIP:-$DEFAULT_TRAEFIK_VIP}
+
+    info "Note: Traefik will run on all Nomad nodes, VIP will float to active node"
+  fi
+
   echo
   # Internal/SDN network
   read -rp "$(question "Create internal SDN network (labnet)? [Y/n]: ")" CREATE_SDN_INPUT
@@ -245,6 +268,15 @@ DNS High Availability:
 EOF
   fi
 
+  if $ENABLE_TRAEFIK_HA; then
+    cat <<EOF
+
+Nomad Traefik High Availability:
+  VIP (failover IP): $TRAEFIK_HA_VIP
+  Traefik mode:      system job (runs on all Nomad nodes)
+EOF
+  fi
+
   cat <<EOF
 
 Service IP Allocation:
@@ -304,6 +336,8 @@ EOF
      --arg int_egress_bridge "$INT_EGRESS_BRIDGE" \
      --arg int_egress_ip "$INT_EGRESS_IP" \
      --arg int_egress_gw "$INT_EGRESS_GW" \
+     --argjson traefik_ha_enabled "$ENABLE_TRAEFIK_HA" \
+     --arg traefik_ha_vip "$TRAEFIK_HA_VIP" \
      --arg dns_postfix "$DNS_POSTFIX" \
      '. + {
        network: {
@@ -322,6 +356,10 @@ EOF
            egress_bridge: $int_egress_bridge,
            egress_ip: $int_egress_ip,
            egress_gateway: $int_egress_gw
+         },
+         nomad: {
+           traefik_ha_enabled: $traefik_ha_enabled,
+           traefik_ha_vip: $traefik_ha_vip
          }
        },
        dns_postfix: $dns_postfix

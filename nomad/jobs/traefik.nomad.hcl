@@ -1,15 +1,12 @@
 job "traefik" {
   datacenters = ["dc1"]
-  type        = "service"
+  # System job runs on all nodes for HA (keepalived VIP handles failover)
+  # Note: Set to "service" with count=1 and hostname constraint if HA is disabled
+  type        = "system"
 
   group "traefik" {
-    count = 1
+    # System jobs don't use count - they run on all eligible nodes
 
-    # Run on a single node to avoid ACME challenge distribution issues
-    constraint {
-      attribute = "${attr.unique.hostname}"
-      value     = "nomad01"
-    }
     network {
       mode = "host"
       port "http"      { static = 80 }

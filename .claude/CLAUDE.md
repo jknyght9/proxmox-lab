@@ -306,7 +306,7 @@ Located in module directories (e.g., `terraform/vm-nomad/cloudinit/`). Templates
 ## Nomad Jobs Architecture
 
 ### Job Constraints
-All Nomad service jobs (Traefik, Vault, Authentik) are **pinned to nomad01** using constraints:
+Nomad service jobs (Vault, Authentik) are **pinned to nomad01** using constraints:
 ```hcl
 constraint {
   attribute = "${attr.unique.hostname}"
@@ -314,16 +314,67 @@ constraint {
 }
 ```
 This ensures:
-- Consistent DNS (all service DNS points to nomad01)
-- ACME challenges work (single Traefik instance handles all challenges)
-- No cross-node routing complexity
+- Consistent DNS (service DNS points to nomad01 or VIP)
+- ACME challenges work (Traefik handles all challenges)
+- No cross-node routing complexity for stateful services
 
 ### Traefik Configuration
-- **Type**: `service` (single instance, not system job)
+- **Type**: `system` job (runs on all Nomad nodes for HA) or `service` (single instance if HA disabled)
 - **Nomad Provider**: Discovers services via `http://127.0.0.1:4646`
 - **ACME**: Uses HTTP challenge with step-ca (`--certificatesresolvers.step-ca.acme.httpchallenge=true`)
 - **CA Trust**: Root CA mounted at `/data/certs/root_ca.crt` via `SSL_CERT_FILE` and `LEGO_CA_CERTIFICATES` env vars
 - **Host Matching**: Routers accept both FQDN and short name: `Host(\`vault.jdclabs.lan\`) || Host(\`vault\`)`
+
+### Traefik High Availability (keepalived VIP)
+Optional HA configuration for Traefik using keepalived VRRP:
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Clients → VIP (10.1.50.100) → Traefik (active) → Services  │
+│                                                              │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐               │
+│  │ nomad01  │    │ nomad02  │    │ nomad03  │               │
+│  │ Traefik  │    │ Traefik  │    │ Traefik  │               │
+│  │ MASTER   │    │ BACKUP   │    │ BACKUP   │               │
+│  │ VIP ●    │    │          │    │          │               │
+│  │ pri=101  │    │ pri=100  │    │ pri=99   │               │
+│  └──────────┘    └──────────┘    └──────────┘               │
+│                                                              │
+│  On failover: VIP moves to highest-priority healthy node    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+- Keepalived runs on each Nomad VM
+- Traefik runs as a system job on all nodes
+- Health check script monitors Traefik's `/ping` endpoint
+- VIP floats to the highest-priority node with healthy Traefik
+- DNS points to VIP instead of individual nodes
+
+**Configuration** (in `terraform.tfvars`):
+```hcl
+nomad_traefik_ha_enabled        = true
+nomad_traefik_ha_vip            = "10.1.50.100/24"
+nomad_traefik_ha_vrrp_router_id = 53
+nomad_traefik_ha_vrrp_password  = "secure-pass"
+```
+
+**Verification**:
+```bash
+# Check VIP is bound on master node
+ssh labadmin@nomad01 "ip addr show eth0 | grep 10.1.50.100"
+
+# Check keepalived status
+ssh labadmin@nomad01 "systemctl status keepalived"
+
+# Test failover by stopping Traefik on master
+ssh labadmin@nomad01 "docker stop \$(docker ps -q --filter ancestor=traefik)"
+
+# Verify VIP moved to backup
+ssh labadmin@nomad02 "ip addr show eth0 | grep 10.1.50.100"
+
+# Verify services still work via VIP
+curl -v http://10.1.50.100/
+```
 
 ### Vault Configuration
 - **Privileged Mode**: Required for GlusterFS volume writes (`privileged = true`)
@@ -370,12 +421,14 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 - **Vault Integration**: Job uses `vault { role = "authentik" }` stanza; secrets injected via templates
 
 ### DNS for Nomad Services
-The `updateDNSRecords` function adds service DNS entries pointing to nomad01:
-- `vault.<dns_postfix>` → nomad01 IP
-- `auth.<dns_postfix>` → nomad01 IP
-- `traefik.<dns_postfix>` → nomad01 IP
+The `updateDNSRecords` function adds service DNS entries:
+- `vault.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
+- `auth.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
+- `traefik.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `samba-dc01.<ad_realm>` → nomad01 IP
 - `samba-dc02.<ad_realm>` → nomad02 IP
+
+When Traefik HA is enabled, DNS points to the VIP instead of nomad01, providing automatic failover.
 
 ## Bash Helper Functions (lib/util.sh)
 
@@ -403,6 +456,14 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **404 errors**: Check Traefik API for routers: `curl http://nomad01:8081/api/http/routers | jq .`
 - **ACME challenges failing**: Ensure DNS resolves to Traefik node, clear stale acme.json: `rm /srv/gluster/nomad-data/traefik/acme.json`
 - **Service not discovered**: Verify service registered in Nomad: `nomad service list`
+
+### Traefik HA Issues
+- **VIP not on any node**: Check keepalived status: `systemctl status keepalived` on all Nomad nodes
+- **VIP on wrong node**: Check priorities - nomad01 should have priority 101, nomad02=100, nomad03=99
+- **Failover not working**: Verify health check script: `/usr/local/bin/check-traefik-health.sh` should return 0 when Traefik healthy
+- **VRRP authentication failing**: Check password matches across all nodes (8 char max)
+- **Multiple masters (split-brain)**: Check network connectivity between nodes, verify VRRP router ID is unique
+- **Check keepalived logs**: `journalctl -u keepalived -f`
 
 ### DNS Issues
 - **FQDN not resolving but short name works**: Add hosts file entry or configure router to accept both names

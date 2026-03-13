@@ -1,6 +1,8 @@
 locals {
   proxmox_api_host = regex("^https?://([^:/]+)", var.proxmox_api_url)[0]
   nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.name}.${var.dns_postfix}\""])
+  # Sort VM configs to ensure consistent node indexing for keepalived priority
+  sorted_vm_keys   = sort(keys(var.vm_configs))
 }
 
 resource "local_file" "nomad_user_data" {
@@ -18,6 +20,12 @@ resource "local_file" "nomad_user_data" {
     nomad_bootstrap_expect = length(var.vm_configs)
     nomad_servers         = local.nomad_servers
     gluster_mount         = var.gluster_mount_path
+    # Traefik HA (keepalived) configuration
+    traefik_ha_enabled    = var.traefik_ha_enabled
+    traefik_ha_vip        = var.traefik_ha_vip
+    traefik_ha_node_index = index(local.sorted_vm_keys, each.key)
+    traefik_ha_vrrp_router_id = var.traefik_ha_vrrp_router_id
+    traefik_ha_vrrp_password  = var.traefik_ha_vrrp_password
   })
 }
 

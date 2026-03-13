@@ -218,3 +218,29 @@ variable "labnet_dns_ha_vrrp_password" {
   description = "VRRP authentication password for labnet DNS (8 chars max)"
   default     = ""
 }
+
+# Nomad Traefik HA Configuration (keepalived VIP)
+variable "nomad_traefik_ha_enabled" {
+  type        = bool
+  description = "Enable Traefik HA with keepalived VIP on Nomad nodes"
+  default     = false
+}
+
+variable "nomad_traefik_ha_vip" {
+  type        = string
+  description = "Virtual IP address for Traefik HA with CIDR (e.g., '10.1.50.100/24')"
+  default     = ""
+}
+
+variable "nomad_traefik_ha_vrrp_router_id" {
+  type        = number
+  description = "VRRP router ID for Traefik HA (must be unique on network, 1-255)"
+  default     = 53
+}
+
+variable "nomad_traefik_ha_vrrp_password" {
+  type        = string
+  sensitive   = true
+  description = "VRRP authentication password for Traefik HA (8 chars max)"
+  default     = ""
+}

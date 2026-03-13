@@ -71,25 +71,41 @@ function updateDNSRecords() {
   DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
 
   # Add Nomad service DNS records (services fronted by Traefik)
-  # All services pinned to nomad01, so DNS points there
+  # Use VIP if Traefik HA is enabled, otherwise use nomad01
   local NOMAD_IP=""
   local NOMAD02_IP=""
+  local TRAEFIK_VIP=""
+  local TRAEFIK_IP=""
   local NOMAD_SERVICES_JSON="[]"
+
+  # Check for Traefik HA VIP in cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    TRAEFIK_VIP=$(jq -r '.network.nomad.traefik_ha_vip // ""' "$CLUSTER_INFO_FILE" | cut -d'/' -f1)
+  fi
+
   if [ -s hosts.json ]; then
-    # Always use nomad01 since all services are constrained there
     NOMAD_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
     NOMAD02_IP=$(jq -r '.external[] | select(.hostname == "nomad02") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-    if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ]; then
+
+    # Use VIP for Traefik services if HA is enabled, otherwise use nomad01
+    if [ -n "$TRAEFIK_VIP" ] && [ "$TRAEFIK_VIP" != "null" ]; then
+      TRAEFIK_IP="$TRAEFIK_VIP"
+      echo "  Traefik HA enabled, using VIP: $TRAEFIK_IP"
+    else
+      TRAEFIK_IP="$NOMAD_IP"
+    fi
+
+    if [ -n "$TRAEFIK_IP" ] && [ "$TRAEFIK_IP" != "null" ]; then
       # Add common Nomad service names
-      NOMAD_SERVICES_JSON="$(jq -c -n --arg ip "$NOMAD_IP" --arg suffix "$DNS_POSTFIX" '[
+      NOMAD_SERVICES_JSON="$(jq -c -n --arg ip "$TRAEFIK_IP" --arg suffix "$DNS_POSTFIX" '[
         "\($ip) vault vault.\($suffix)",
         "\($ip) auth auth.\($suffix)",
         "\($ip) traefik traefik.\($suffix)"
       ]')"
-      echo "  Nomad services (via Traefik @ $NOMAD_IP):"
-      echo "    - vault.$DNS_POSTFIX -> $NOMAD_IP"
-      echo "    - auth.$DNS_POSTFIX -> $NOMAD_IP"
-      echo "    - traefik.$DNS_POSTFIX -> $NOMAD_IP"
+      echo "  Nomad services (via Traefik @ $TRAEFIK_IP):"
+      echo "    - vault.$DNS_POSTFIX -> $TRAEFIK_IP"
+      echo "    - auth.$DNS_POSTFIX -> $TRAEFIK_IP"
+      echo "    - traefik.$DNS_POSTFIX -> $TRAEFIK_IP"
     fi
   fi
 

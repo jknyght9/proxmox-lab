@@ -57,6 +57,40 @@ EOF
     return 1
   fi
 
+  # Start keepalived on all Nomad nodes if Traefik HA is enabled
+  local TRAEFIK_HA_ENABLED="false"
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    TRAEFIK_HA_ENABLED=$(jq -r '.network.nomad.traefik_ha_enabled // false' "$CLUSTER_INFO_FILE")
+  fi
+
+  if [ "$TRAEFIK_HA_ENABLED" = "true" ]; then
+    doing "Starting keepalived for Traefik HA on all Nomad nodes..."
+    local node_ips=()
+    while IFS= read -r ip; do
+      [[ -n "$ip" ]] && node_ips+=("$ip")
+    done < <(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json | cut -d'/' -f1)
+
+    for ip in "${node_ips[@]}"; do
+      sshRun "$VM_USER" "$ip" "sudo systemctl restart keepalived" && \
+        info "  Started keepalived on $ip" || \
+        warn "  Failed to start keepalived on $ip"
+    done
+
+    # Verify VIP is active
+    sleep 3
+    local vip
+    vip=$(jq -r '.network.nomad.traefik_ha_vip // ""' "$CLUSTER_INFO_FILE" | cut -d'/' -f1)
+    if [ -n "$vip" ]; then
+      doing "Verifying VIP ($vip) is active..."
+      for ip in "${node_ips[@]}"; do
+        if sshRun "$VM_USER" "$ip" "ip addr show eth0 | grep -q '$vip'" 2>/dev/null; then
+          success "VIP $vip is active on $ip"
+          break
+        fi
+      done
+    fi
+  fi
+
   # Update DNS records for traefik
   updateDNSRecords
 
