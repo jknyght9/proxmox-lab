@@ -281,6 +281,7 @@ function configurePBR() {
   fi
 
   echo "[+] Configuring Policy-Based Routing for labnet egress..."
+  echo "    - Labnet subnet: $SDN_SUBNET"
   echo "    - Egress bridge: $SDN_EGRESS_BRIDGE"
   echo "    - Egress IP: $SDN_EGRESS_IP"
   echo "    - Egress gateway: $SDN_EGRESS_GATEWAY"
@@ -298,22 +299,32 @@ function configurePBR() {
   fi
 
   # Step 2: Add routes to services table (idempotent)
+  # Must include: egress network, labnet subnet, and default gateway
   echo "[+] Adding routes to services table..."
-  ip route add $EGRESS_NETWORK dev $SDN_EGRESS_BRIDGE table services 2>/dev/null && echo "    - added network route" || echo "    - network route exists"
-  ip route add default via $SDN_EGRESS_GATEWAY table services 2>/dev/null && echo "    - added default route" || echo "    - default route exists"
+  ip route add $EGRESS_NETWORK dev $SDN_EGRESS_BRIDGE table services 2>/dev/null && echo "    - added egress network route ($EGRESS_NETWORK)" || echo "    - egress network route exists"
+  ip route add $SDN_SUBNET dev $SDN_VNET_NAME table services 2>/dev/null && echo "    - added labnet route ($SDN_SUBNET)" || echo "    - labnet route exists"
+  ip route add default via $SDN_EGRESS_GATEWAY table services 2>/dev/null && echo "    - added default route via $SDN_EGRESS_GATEWAY" || echo "    - default route exists"
 
-  # Step 3: Add policy rule (idempotent)
-  echo "[+] Adding policy routing rule..."
+  # Step 3: Add policy rules (idempotent)
+  # Rule for labnet subnet - traffic FROM labnet uses services table
+  echo "[+] Adding policy routing rules..."
+  if ! ip rule show | grep -q "from $SDN_SUBNET lookup services"; then
+    ip rule add from $SDN_SUBNET table services priority 99
+    echo "    - added rule: from $SDN_SUBNET lookup services (priority 99)"
+  else
+    echo "    - labnet subnet rule already exists"
+  fi
+  # Rule for egress IP - ensures return traffic uses correct gateway
   if ! ip rule show | grep -q "from $SDN_EGRESS_IP lookup services"; then
     ip rule add from $SDN_EGRESS_IP table services priority 100
-    echo "    - added rule: from $SDN_EGRESS_IP lookup services"
+    echo "    - added rule: from $SDN_EGRESS_IP lookup services (priority 100)"
   else
-    echo "    - rule already exists"
+    echo "    - egress IP rule already exists"
   fi
 
   # Step 4: Persist in /etc/network/interfaces
   echo "[+] Persisting PBR configuration..."
-  if grep -q "post-up ip rule add from $SDN_EGRESS_IP table services" /etc/network/interfaces 2>/dev/null; then
+  if grep -q "post-up ip rule add from $SDN_SUBNET table services" /etc/network/interfaces 2>/dev/null; then
     echo "    - already configured in interfaces"
   else
     # Backup interfaces file
@@ -326,8 +337,11 @@ function configurePBR() {
       sed -i "/iface $SDN_EGRESS_BRIDGE inet/a\\
 \\t# Policy-based routing for labnet egress (auto-generated)\\
 \\tpost-up ip route add $EGRESS_NETWORK dev $SDN_EGRESS_BRIDGE table services 2>/dev/null || true\\
+\\tpost-up ip route add $SDN_SUBNET dev $SDN_VNET_NAME table services 2>/dev/null || true\\
 \\tpost-up ip route add default via $SDN_EGRESS_GATEWAY table services 2>/dev/null || true\\
+\\tpost-up ip rule add from $SDN_SUBNET table services priority 99 2>/dev/null || true\\
 \\tpost-up ip rule add from $SDN_EGRESS_IP table services priority 100 2>/dev/null || true\\
+\\tpre-down ip rule del from $SDN_SUBNET table services priority 99 2>/dev/null || true\\
 \\tpre-down ip rule del from $SDN_EGRESS_IP table services priority 100 2>/dev/null || true" /etc/network/interfaces
       echo "    - added to /etc/network/interfaces"
     else
@@ -338,7 +352,7 @@ function configurePBR() {
   # Verify configuration
   echo "[+] Verifying PBR configuration..."
   echo "    - Policy rules:"
-  ip rule show | grep -E "services|$SDN_EGRESS_IP" | sed 's/^/      /'
+  ip rule show | grep -E "services" | sed 's/^/      /'
   echo "    - Services table routes:"
   ip route show table services 2>/dev/null | sed 's/^/      /' || echo "      (empty)"
 

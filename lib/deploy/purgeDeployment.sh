@@ -116,21 +116,20 @@ EOF
 
     # Remove policy-based routing configuration
     info "  Removing PBR configuration on $node..."
-    if [ -n "$egress_ip" ]; then
-      sshRun "$REMOTE_USER" "$ip" "
-        # Remove policy rule
-        ip rule del from $egress_ip table services priority 100 2>/dev/null || true
-        # Flush services routing table
-        ip route flush table services 2>/dev/null || true
-        # Remove PBR lines from /etc/network/interfaces
-        if [ -f /etc/network/interfaces ]; then
-          sed -i '/# Policy-based routing for labnet egress/d' /etc/network/interfaces 2>/dev/null || true
-          sed -i '/post-up ip route add.*table services/d' /etc/network/interfaces 2>/dev/null || true
-          sed -i '/post-up ip rule add.*table services/d' /etc/network/interfaces 2>/dev/null || true
-          sed -i '/pre-down ip rule del.*table services/d' /etc/network/interfaces 2>/dev/null || true
-        fi
-      " || true
-    fi
+    sshRun "$REMOTE_USER" "$ip" "
+      # Remove policy rules (both labnet subnet and egress IP)
+      ip rule del from ${labnet_cidr} table services priority 99 2>/dev/null || true
+      ip rule del from ${egress_ip:-0.0.0.0} table services priority 100 2>/dev/null || true
+      # Flush services routing table
+      ip route flush table services 2>/dev/null || true
+      # Remove PBR lines from /etc/network/interfaces
+      if [ -f /etc/network/interfaces ]; then
+        sed -i '/# Policy-based routing for labnet egress/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/post-up ip route add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/post-up ip rule add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/pre-down ip rule del.*table services/d' /etc/network/interfaces 2>/dev/null || true
+      fi
+    " || true
   done
   # Remove SDN from cluster (only needs to run on one node)
   info "  Removing SDN zone and vnet..."

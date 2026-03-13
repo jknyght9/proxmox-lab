@@ -215,13 +215,15 @@ When a multi-homed system is detected, the setup script creates policy-based rou
 │                      Proxmox Node                           │
 │                                                             │
 │  ┌─────────┐      ┌──────────────────────────────────────┐ │
-│  │ labnet  │──────│ SNAT to 10.10.0.101                  │ │
-│  │172.16.0x│      │                                      │ │
-│  └─────────┘      │  ip rule: from 10.10.0.101           │ │
-│                   │     → use table "services"           │ │
-│                   │                                      │ │
-│  ┌─────────┐      │  table "services":                   │ │
-│  │  vmbr1  │◄─────│     default via 10.10.0.1            │ │
+│  ┌─────────┐      ┌──────────────────────────────────────┐ │
+│  │ labnet  │──────│ ip rule: from 172.16.0.0/24          │ │
+│  │172.16.0x│      │     → use table "services"           │ │
+│  └─────────┘      │                                      │ │
+│                   │  table "services":                   │ │
+│       SNAT        │     172.16.0.0/24 dev labnet         │ │
+│         ↓         │     10.10.0.0/24 dev vmbr1           │ │
+│  ┌─────────┐      │     default via 10.10.0.1            │ │
+│  │  vmbr1  │◄─────│                                      │ │
 │  │10.10.0.x│      └──────────────────────────────────────┘ │
 │  └────┬────┘                                               │
 │       ▼                                                    │
@@ -229,8 +231,13 @@ When a multi-homed system is detected, the setup script creates policy-based rou
 └─────────────────────────────────────────────────────────────┘
 ```
 - Creates routing table `services` (table ID 200) in `/etc/iproute2/rt_tables`
-- Adds policy rule: `from <egress_ip> lookup services`
-- Adds default route to services table via egress gateway
+- Adds policy rules:
+  - `from 172.16.0.0/24 lookup services` (priority 99) - routes labnet traffic
+  - `from <egress_ip> lookup services` (priority 100) - handles return traffic
+- Adds routes to services table:
+  - `172.16.0.0/24 dev labnet` - labnet subnet
+  - `<egress_network> dev <egress_bridge>` - egress network
+  - `default via <egress_gateway>` - internet access
 - Persists configuration in `/etc/network/interfaces`
 
 ### Nomad Cluster Architecture
