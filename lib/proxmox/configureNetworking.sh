@@ -92,8 +92,9 @@ function configureNetworking() {
     INT_GATEWAY=${INT_GATEWAY:-172.16.0.1}
 
     echo
-    info "Labnet Egress Configuration"
-    info "(Which physical bridge should labnet traffic use for internet access?)"
+    info "Labnet SDN Egress Bridge"
+    info "This is the bridge labnet VMs use for OUTBOUND internet traffic (via SNAT)."
+    info "This can be different from the service bridge selected earlier."
     echo
 
     # Detect available bridges from the primary node

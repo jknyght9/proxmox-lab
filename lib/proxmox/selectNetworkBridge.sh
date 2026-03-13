@@ -56,15 +56,27 @@ function selectNetworkBridge() {
     info "Only one common bridge found: $NETWORK_BRIDGE"
   else
     echo
-    info "Network Bridge Selection"
+    info "Service Network Bridge Selection"
+    info "This bridge is where VMs and containers will connect (DNS, Nomad, step-ca, etc.)"
+    info "This is NOT the labnet SDN egress bridge - that is configured separately."
+    echo
     info "Available bridges (present on all nodes):"
     echo
+
+    # Get IPs for each bridge from first node to help identify them
     for i in "${!ALL_BRIDGES[@]}"; do
-      echo "    $((i + 1)). ${ALL_BRIDGES[$i]}"
+      local bridge_ip=""
+      bridge_ip=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+        "ip -4 addr show ${ALL_BRIDGES[$i]} 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1" 2>/dev/null || echo "")
+      if [ -n "$bridge_ip" ]; then
+        echo "    $((i + 1)). ${ALL_BRIDGES[$i]} ($bridge_ip)"
+      else
+        echo "    $((i + 1)). ${ALL_BRIDGES[$i]} (no IP)"
+      fi
     done
     echo
 
-    read -rp "$(question "Select network bridge [1]: ")" BRIDGE_CHOICE
+    read -rp "$(question "Select service network bridge [1]: ")" BRIDGE_CHOICE
     BRIDGE_CHOICE=${BRIDGE_CHOICE:-1}
 
     if [[ "$BRIDGE_CHOICE" =~ ^[0-9]+$ ]] && [ "$BRIDGE_CHOICE" -ge 1 ] && [ "$BRIDGE_CHOICE" -le "${#ALL_BRIDGES[@]}" ]; then
