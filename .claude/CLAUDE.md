@@ -190,14 +190,41 @@ labnet_dhcp_lease_time = "86400"
 ```json
 "labnet": {
   "egress_bridge": "vmbr1",
-  "egress_ip": "10.10.0.101"
+  "egress_ip": "10.10.0.101",
+  "egress_gateway": "10.10.0.1"
 }
 ```
 - `egress_bridge`: Physical bridge interface for labnet outbound traffic
 - `egress_ip`: Source IP for SNAT (must be an IP on the egress bridge)
+- `egress_gateway`: Gateway for the egress network (required for policy-based routing)
 - If not configured, defaults to MASQUERADE via default route
 
 **Why egress matters**: Networks with multiple bridges (e.g., vmbr0 for management, vmbr1 for lab traffic) need explicit SNAT configuration. Without it, labnet traffic may route through the wrong interface.
+
+**Policy-Based Routing (PBR)**:
+When `egress_gateway` is configured, the setup script creates policy-based routing rules to ensure SNAT'd traffic uses the correct gateway:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Proxmox Node                           │
+│                                                             │
+│  ┌─────────┐      ┌──────────────────────────────────────┐ │
+│  │ labnet  │──────│ SNAT to 10.10.0.101                  │ │
+│  │172.16.0x│      │                                      │ │
+│  └─────────┘      │  ip rule: from 10.10.0.101           │ │
+│                   │     → use table "services"           │ │
+│                   │                                      │ │
+│  ┌─────────┐      │  table "services":                   │ │
+│  │  vmbr1  │◄─────│     default via 10.10.0.1            │ │
+│  │10.10.0.x│      └──────────────────────────────────────┘ │
+│  └────┬────┘                                               │
+│       ▼                                                    │
+│  10.10.0.1 (gateway) → Internet                           │
+└─────────────────────────────────────────────────────────────┘
+```
+- Creates routing table `services` (table ID 200) in `/etc/iproute2/rt_tables`
+- Adds policy rule: `from <egress_ip> lookup services`
+- Adds default route to services table via egress gateway
+- Persists configuration in `/etc/network/interfaces`
 
 ### Nomad Cluster Architecture
 3-node cluster where each node is both server and client:
@@ -371,8 +398,11 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 ### Labnet SDN Issues
 - **VMs not getting DHCP addresses**: Verify labnet-dns-01 has DHCP enabled: `pihole-FTL --config dhcp.active`
 - **Labnet can't reach internet**: Check IP forwarding: `cat /proc/sys/net/ipv4/ip_forward` (should be 1)
-- **Labnet traffic using wrong interface**: Configure `egress_bridge` and `egress_ip` in cluster-info.json, then re-run proxmox/setup.sh
+- **Labnet traffic using wrong interface**: Configure `egress_bridge`, `egress_ip`, and `egress_gateway` in cluster-info.json, then re-run proxmox/setup.sh
 - **Verify SNAT rules**: `iptables -t nat -L POSTROUTING -n | grep -E "172\.16\.0"` (should show SNAT to egress IP)
+- **Verify PBR is active**: `ip rule show` (should show `from <egress_ip> lookup services`)
+- **Check services routing table**: `ip route show table services` (should show default via egress gateway)
+- **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
 
 ### Purge/Rollback
 The complete purge (setup.sh option 15) removes all project resources:
@@ -382,7 +412,7 @@ The complete purge (setup.sh option 15) removes all project resources:
 4. Step-CA root certificate from trust store
 5. DNS configuration (reset to 1.1.1.1)
 6. Hashicorp API user AND HashicorpBuild role
-7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules)
+7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules, policy-based routing)
 8. Local config (terraform.tfvars auto-generated sections, cluster-info.json network config)
 9. Tailscale DNS override (re-enables MagicDNS)
 10. SSH keys from nodes (last step)

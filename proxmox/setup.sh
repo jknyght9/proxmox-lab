@@ -21,6 +21,7 @@ BRIDGE_IP=""
 STORE=""
 SDN_EGRESS_BRIDGE=""
 SDN_EGRESS_IP=""
+SDN_EGRESS_GATEWAY=""
 
 # Ensure jq is installed before parsing config (needed for JSON parsing)
 if ! command -v jq &>/dev/null; then
@@ -51,6 +52,7 @@ if [ -n "$CONFIG_JSON" ]; then
     # Egress configuration for SNAT (which interface/IP to use for outbound traffic)
     SDN_EGRESS_BRIDGE=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.egress_bridge // ""')
     SDN_EGRESS_IP=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.egress_ip // ""')
+    SDN_EGRESS_GATEWAY=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.egress_gateway // ""')
   fi
 
   echo "[+] Config loaded: storage=$STORE, bridge=$BRIDGE_NAME"
@@ -260,6 +262,83 @@ EOF
   fi
 
   echo -e "[+] SDN creation done\n"
+
+  # Configure policy-based routing if egress gateway is specified
+  if [ -n "$SDN_EGRESS_GATEWAY" ] && [ -n "$SDN_EGRESS_IP" ] && [ -n "$SDN_EGRESS_BRIDGE" ]; then
+    configurePBR
+  fi
+}
+
+function configurePBR() {
+  # Skip if labnet is disabled or egress gateway not configured
+  if [ -z "$SDN_EGRESS_GATEWAY" ] || [ -z "$SDN_EGRESS_IP" ] || [ -z "$SDN_EGRESS_BRIDGE" ]; then
+    echo "[!] PBR: Missing egress configuration, skipping"
+    return 0
+  fi
+
+  echo "[+] Configuring Policy-Based Routing for labnet egress..."
+  echo "    - Egress bridge: $SDN_EGRESS_BRIDGE"
+  echo "    - Egress IP: $SDN_EGRESS_IP"
+  echo "    - Egress gateway: $SDN_EGRESS_GATEWAY"
+
+  # Calculate network from egress IP (assume /24)
+  local EGRESS_NETWORK=$(echo "$SDN_EGRESS_IP" | sed 's/\.[0-9]*$/.0\/24/')
+
+  # Step 1: Create routing table if it doesn't exist
+  echo "[+] Creating 'services' routing table..."
+  if ! grep -q "^200 services" /etc/iproute2/rt_tables 2>/dev/null; then
+    echo "200 services" >> /etc/iproute2/rt_tables
+    echo "    - created"
+  else
+    echo "    - already exists"
+  fi
+
+  # Step 2: Add routes to services table (idempotent)
+  echo "[+] Adding routes to services table..."
+  ip route add $EGRESS_NETWORK dev $SDN_EGRESS_BRIDGE table services 2>/dev/null && echo "    - added network route" || echo "    - network route exists"
+  ip route add default via $SDN_EGRESS_GATEWAY table services 2>/dev/null && echo "    - added default route" || echo "    - default route exists"
+
+  # Step 3: Add policy rule (idempotent)
+  echo "[+] Adding policy routing rule..."
+  if ! ip rule show | grep -q "from $SDN_EGRESS_IP lookup services"; then
+    ip rule add from $SDN_EGRESS_IP table services priority 100
+    echo "    - added rule: from $SDN_EGRESS_IP lookup services"
+  else
+    echo "    - rule already exists"
+  fi
+
+  # Step 4: Persist in /etc/network/interfaces
+  echo "[+] Persisting PBR configuration..."
+  if grep -q "post-up ip rule add from $SDN_EGRESS_IP table services" /etc/network/interfaces 2>/dev/null; then
+    echo "    - already configured in interfaces"
+  else
+    # Backup interfaces file
+    cp /etc/network/interfaces /etc/network/interfaces.bak.pbr
+
+    # Add post-up/pre-down commands to the egress bridge stanza
+    # Use sed to append after the bridge definition line
+    if grep -q "iface $SDN_EGRESS_BRIDGE inet" /etc/network/interfaces; then
+      # Find the bridge stanza and add PBR commands
+      sed -i "/iface $SDN_EGRESS_BRIDGE inet/a\\
+\\t# Policy-based routing for labnet egress (auto-generated)\\
+\\tpost-up ip route add $EGRESS_NETWORK dev $SDN_EGRESS_BRIDGE table services 2>/dev/null || true\\
+\\tpost-up ip route add default via $SDN_EGRESS_GATEWAY table services 2>/dev/null || true\\
+\\tpost-up ip rule add from $SDN_EGRESS_IP table services priority 100 2>/dev/null || true\\
+\\tpre-down ip rule del from $SDN_EGRESS_IP table services priority 100 2>/dev/null || true" /etc/network/interfaces
+      echo "    - added to /etc/network/interfaces"
+    else
+      echo "    - WARNING: Could not find $SDN_EGRESS_BRIDGE stanza in interfaces"
+    fi
+  fi
+
+  # Verify configuration
+  echo "[+] Verifying PBR configuration..."
+  echo "    - Policy rules:"
+  ip rule show | grep -E "services|$SDN_EGRESS_IP" | sed 's/^/      /'
+  echo "    - Services table routes:"
+  ip route show table services 2>/dev/null | sed 's/^/      /' || echo "      (empty)"
+
+  echo -e "[+] PBR configuration done\n"
 }
 
 function deployLXCImages() {

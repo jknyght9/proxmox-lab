@@ -156,12 +156,43 @@ function configureNetworking() {
         read -rp "$(question "Labnet egress source IP: ")" INT_EGRESS_IP
       done
     fi
+
+    # Ask for egress gateway (required for policy-based routing)
+    echo
+    info "Egress Gateway Configuration"
+    info "(Gateway for the egress bridge - required for policy-based routing)"
+    echo
+
+    # Detect gateway for egress bridge
+    local DETECTED_EGRESS_GW=""
+    if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+      # Try to detect gateway from route table
+      DETECTED_EGRESS_GW=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+        "ip route show dev $INT_EGRESS_BRIDGE 2>/dev/null | grep -oP 'default via \K[0-9.]+' | head -1" 2>/dev/null || echo "")
+      # If no default route on that interface, try to infer from bridge IP (assume .1 gateway)
+      if [ -z "$DETECTED_EGRESS_GW" ] && [ -n "$INT_EGRESS_IP" ]; then
+        local EGRESS_BASE=$(echo "$INT_EGRESS_IP" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+        DETECTED_EGRESS_GW="${EGRESS_BASE}1"
+      fi
+    fi
+
+    if [ -n "$DETECTED_EGRESS_GW" ]; then
+      read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE [$DETECTED_EGRESS_GW]: ")" INT_EGRESS_GW
+      INT_EGRESS_GW=${INT_EGRESS_GW:-$DETECTED_EGRESS_GW}
+    else
+      read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE: ")" INT_EGRESS_GW
+      while [ -z "$INT_EGRESS_GW" ]; do
+        warn "Egress gateway is required for policy-based routing"
+        read -rp "$(question "Egress gateway: ")" INT_EGRESS_GW
+      done
+    fi
   else
     CREATE_SDN=false
     INT_CIDR=""
     INT_GATEWAY=""
     INT_EGRESS_BRIDGE=""
     INT_EGRESS_IP=""
+    INT_EGRESS_GW=""
   fi
 
   echo
@@ -210,6 +241,7 @@ Internal SDN Network:
   Gateway:           $INT_GATEWAY
   Egress Bridge:     $INT_EGRESS_BRIDGE
   Egress IP (SNAT):  $INT_EGRESS_IP
+  Egress Gateway:    $INT_EGRESS_GW
 EOF
   fi
 
@@ -244,6 +276,7 @@ EOF
      --arg int_gw "$INT_GATEWAY" \
      --arg int_egress_bridge "$INT_EGRESS_BRIDGE" \
      --arg int_egress_ip "$INT_EGRESS_IP" \
+     --arg int_egress_gw "$INT_EGRESS_GW" \
      --arg dns_postfix "$DNS_POSTFIX" \
      '. + {
        network: {
@@ -260,7 +293,8 @@ EOF
            cidr: $int_cidr,
            gateway: $int_gw,
            egress_bridge: $int_egress_bridge,
-           egress_ip: $int_egress_ip
+           egress_ip: $int_egress_ip,
+           egress_gateway: $int_egress_gw
          }
        },
        dns_postfix: $dns_postfix

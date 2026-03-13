@@ -105,12 +105,32 @@ EOF
     info "  Removing iptables SNAT rules on $node..."
     # Remove SNAT/MASQUERADE rules for labnet subnet (172.16.0.0/24 default, also check cluster-info)
     local labnet_cidr="172.16.0.0/24"
+    local egress_ip=""
     if [ -f "$CLUSTER_INFO_FILE" ]; then
       labnet_cidr=$(jq -r '.network.labnet.cidr // "172.16.0.0/24"' "$CLUSTER_INFO_FILE")
+      egress_ip=$(jq -r '.network.labnet.egress_ip // ""' "$CLUSTER_INFO_FILE")
     fi
     sshRun "$REMOTE_USER" "$ip" "iptables -t nat -S POSTROUTING 2>/dev/null | grep -E '(-s ${labnet_cidr}.*MASQUERADE|-s ${labnet_cidr}.*SNAT)' | while read -r rule; do iptables -t nat \$(echo \"\$rule\" | sed 's/^-A/-D/') 2>/dev/null || true; done" || true
     # Save iptables rules
     sshRun "$REMOTE_USER" "$ip" "mkdir -p /etc/iptables; iptables-save > /etc/iptables/rules.v4 2>/dev/null" || true
+
+    # Remove policy-based routing configuration
+    info "  Removing PBR configuration on $node..."
+    if [ -n "$egress_ip" ]; then
+      sshRun "$REMOTE_USER" "$ip" "
+        # Remove policy rule
+        ip rule del from $egress_ip table services priority 100 2>/dev/null || true
+        # Flush services routing table
+        ip route flush table services 2>/dev/null || true
+        # Remove PBR lines from /etc/network/interfaces
+        if [ -f /etc/network/interfaces ]; then
+          sed -i '/# Policy-based routing for labnet egress/d' /etc/network/interfaces 2>/dev/null || true
+          sed -i '/post-up ip route add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+          sed -i '/post-up ip rule add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+          sed -i '/pre-down ip rule del.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        fi
+      " || true
+    fi
   done
   # Remove SDN from cluster (only needs to run on one node)
   info "  Removing SDN zone and vnet..."
