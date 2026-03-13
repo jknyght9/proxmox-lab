@@ -316,6 +316,30 @@ function updateTerraformFromClusterInfo() {
     info "  dns_ha_vip_address = \"${HA_VIP}${CIDR_MASK}\""
   fi
 
+  # Update Nomad Traefik HA settings if configured
+  local TRAEFIK_HA_ENABLED=$(jq -r '.network.nomad.traefik_ha_enabled // false' "$CLUSTER_INFO_FILE")
+  local TRAEFIK_HA_VIP=$(jq -r '.network.nomad.traefik_ha_vip // ""' "$CLUSTER_INFO_FILE")
+  local TRAEFIK_HA_ROUTER_ID=$(jq -r '.network.nomad.traefik_ha_vrrp_router_id // 53' "$CLUSTER_INFO_FILE")
+  local TRAEFIK_HA_PASSWORD=$(jq -r '.network.nomad.traefik_ha_vrrp_password // "traefik"' "$CLUSTER_INFO_FILE")
+
+  if [ "$TRAEFIK_HA_ENABLED" = "true" ] && [ -n "$TRAEFIK_HA_VIP" ]; then
+    if grep -q "^nomad_traefik_ha_enabled" "$TFVARS_FILE"; then
+      sed_inplace "s|^nomad_traefik_ha_enabled[[:space:]]*=.*|nomad_traefik_ha_enabled        = true|" "$TFVARS_FILE"
+      sed_inplace "s|^nomad_traefik_ha_vip[[:space:]]*=.*|nomad_traefik_ha_vip            = \"$TRAEFIK_HA_VIP\"|" "$TFVARS_FILE"
+      sed_inplace "s|^nomad_traefik_ha_vrrp_router_id[[:space:]]*=.*|nomad_traefik_ha_vrrp_router_id = $TRAEFIK_HA_ROUTER_ID|" "$TFVARS_FILE"
+      sed_inplace "s|^nomad_traefik_ha_vrrp_password[[:space:]]*=.*|nomad_traefik_ha_vrrp_password  = \"$TRAEFIK_HA_PASSWORD\"|" "$TFVARS_FILE"
+    else
+      echo "" >> "$TFVARS_FILE"
+      echo "# Nomad Traefik High Availability (auto-generated)" >> "$TFVARS_FILE"
+      echo "nomad_traefik_ha_enabled        = true" >> "$TFVARS_FILE"
+      echo "nomad_traefik_ha_vip            = \"$TRAEFIK_HA_VIP\"" >> "$TFVARS_FILE"
+      echo "nomad_traefik_ha_vrrp_router_id = $TRAEFIK_HA_ROUTER_ID" >> "$TFVARS_FILE"
+      echo "nomad_traefik_ha_vrrp_password  = \"$TRAEFIK_HA_PASSWORD\"" >> "$TFVARS_FILE"
+    fi
+    info "  nomad_traefik_ha_enabled = true"
+    info "  nomad_traefik_ha_vip = \"$TRAEFIK_HA_VIP\""
+  fi
+
   # Build and update proxmox_node_ips map
   local NODE_IPS_MAP="{\n"
   for i in "${!CLUSTER_NODES[@]}"; do

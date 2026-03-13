@@ -11,6 +11,12 @@ module "nomad" {
   source              = "./vm-nomad"
   ssh_public_key_file = var.ssh_public_key_file
   vm_storage          = var.vm_storage
+
+  # Traefik HA Configuration (keepalived VIP)
+  traefik_ha_enabled        = var.nomad_traefik_ha_enabled
+  traefik_ha_vip            = var.nomad_traefik_ha_vip
+  traefik_ha_vrrp_router_id = var.nomad_traefik_ha_vrrp_router_id
+  traefik_ha_vrrp_password  = var.nomad_traefik_ha_vrrp_password
 }
 
 # Main DNS cluster (one node per Proxmox cluster node, on external network)

@@ -65,6 +65,48 @@ write_files:
         client_auto_join = false
       }
 
+%{ if traefik_ha_enabled ~}
+  - path: /usr/local/bin/check-traefik-health.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Health check for Traefik - used by keepalived to determine VIP ownership
+      curl -sf http://127.0.0.1:8081/ping > /dev/null 2>&1
+      exit $?
+
+  - path: /etc/keepalived/keepalived.conf
+    permissions: '0644'
+    content: |
+      vrrp_script check_traefik {
+          script "/usr/local/bin/check-traefik-health.sh"
+          interval 2
+          weight -20
+          fall 3
+          rise 2
+      }
+
+      vrrp_instance TRAEFIK_VIP {
+          state ${ traefik_ha_node_index == 0 ? "MASTER" : "BACKUP" }
+          interface eth0
+          virtual_router_id ${traefik_ha_vrrp_router_id}
+          priority ${ 101 - traefik_ha_node_index }
+          advert_int 1
+
+          authentication {
+              auth_type PASS
+              auth_pass ${traefik_ha_vrrp_password}
+          }
+
+          virtual_ipaddress {
+              ${traefik_ha_vip}
+          }
+
+          track_script {
+              check_traefik
+          }
+      }
+%{ endif ~}
+
   - path: /root/nomad-cert-install.sh
     permissions: '0755'
     content: |

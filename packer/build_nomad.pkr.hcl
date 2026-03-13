@@ -80,6 +80,14 @@ build {
     ]
   }
 
+  provisioner "shell" {
+    inline = [
+      "echo '[+] Installing keepalived for Traefik HA'",
+      "sudo apt-get install -y keepalived",
+      "sudo systemctl disable keepalived"
+    ]
+  }
+
   #### Cloud-init configuration
   provisioner "shell" {
     inline = [

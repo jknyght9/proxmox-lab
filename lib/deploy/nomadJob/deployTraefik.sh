@@ -64,7 +64,7 @@ EOF
   fi
 
   if [ "$TRAEFIK_HA_ENABLED" = "true" ]; then
-    configureTraefikHA
+    startTraefikHA
   fi
 
   # Update DNS records for traefik
@@ -75,30 +75,22 @@ EOF
   success "Traefik deployment complete!"
 }
 
-# configureTraefikHA - Install and configure keepalived for Traefik HA
+# startTraefikHA - Start keepalived for Traefik HA
 #
-# Installs keepalived on all Nomad nodes and configures VRRP for VIP failover.
-# Configuration is read from cluster-info.json:
-#   - network.nomad.traefik_ha_vip: VIP address with CIDR
-#   - network.nomad.traefik_ha_vrrp_router_id: VRRP router ID (default: 53)
-#   - network.nomad.traefik_ha_vrrp_password: VRRP auth password (default: traefik)
-#
-# Priority is assigned based on node order: nomad01=101, nomad02=100, nomad03=99
-function configureTraefikHA() {
-  doing "Configuring Traefik HA with keepalived..."
+# Keepalived is pre-installed via Packer and configured via cloud-init.
+# This function starts keepalived on all Nomad nodes after Traefik is deployed.
+function startTraefikHA() {
+  doing "Starting keepalived for Traefik HA..."
 
-  # Read HA config from cluster-info.json
-  local VIP VRRP_ROUTER_ID VRRP_PASSWORD
+  local VIP
   VIP=$(jq -r '.network.nomad.traefik_ha_vip // ""' "$CLUSTER_INFO_FILE")
-  VRRP_ROUTER_ID=$(jq -r '.network.nomad.traefik_ha_vrrp_router_id // 53' "$CLUSTER_INFO_FILE")
-  VRRP_PASSWORD=$(jq -r '.network.nomad.traefik_ha_vrrp_password // "traefik"' "$CLUSTER_INFO_FILE")
 
   if [ -z "$VIP" ]; then
     error "Traefik HA VIP not configured in cluster-info.json"
     return 1
   fi
 
-  # Get all Nomad node IPs (sorted by hostname for consistent priority)
+  # Get all Nomad node IPs
   local node_ips=()
   while IFS= read -r ip; do
     [[ -n "$ip" ]] && node_ips+=("$ip")
@@ -109,73 +101,17 @@ function configureTraefikHA() {
     return 1
   fi
 
-  info "  VIP: $VIP"
-  info "  VRRP Router ID: $VRRP_ROUTER_ID"
-  info "  Nodes: ${node_ips[*]}"
-
-  # Install and configure keepalived on each node
-  local node_index=0
+  # Start keepalived on each node
   for ip in "${node_ips[@]}"; do
-    local priority=$((101 - node_index))
-    local state="BACKUP"
-    [ $node_index -eq 0 ] && state="MASTER"
-
-    doing "  Configuring keepalived on $ip (priority=$priority, state=$state)..."
-
-    # Install keepalived if not present
-    sshRun "$VM_USER" "$ip" "dpkg -l keepalived >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y keepalived"
-
-    # Create health check script
-    sshRun "$VM_USER" "$ip" "cat <<'HEALTHSCRIPT' | sudo tee /usr/local/bin/check-traefik-health.sh > /dev/null
-#!/bin/bash
-# Health check for Traefik - used by keepalived to determine VIP ownership
-curl -sf http://127.0.0.1:8081/ping > /dev/null 2>&1
-exit \$?
-HEALTHSCRIPT
-sudo chmod +x /usr/local/bin/check-traefik-health.sh"
-
-    # Create keepalived config
-    sshRun "$VM_USER" "$ip" "cat <<KEEPALIVED | sudo tee /etc/keepalived/keepalived.conf > /dev/null
-vrrp_script check_traefik {
-    script \"/usr/local/bin/check-traefik-health.sh\"
-    interval 2
-    weight -20
-    fall 3
-    rise 2
-}
-
-vrrp_instance TRAEFIK_VIP {
-    state $state
-    interface eth0
-    virtual_router_id $VRRP_ROUTER_ID
-    priority $priority
-    advert_int 1
-
-    authentication {
-        auth_type PASS
-        auth_pass $VRRP_PASSWORD
-    }
-
-    virtual_ipaddress {
-        $VIP
-    }
-
-    track_script {
-        check_traefik
-    }
-}
-KEEPALIVED"
-
-    # Enable and start keepalived
-    sshRun "$VM_USER" "$ip" "sudo systemctl enable keepalived && sudo systemctl restart keepalived"
-
-    ((node_index++))
+    sshRun "$VM_USER" "$ip" "sudo systemctl enable keepalived && sudo systemctl restart keepalived" && \
+      info "  Started keepalived on $ip" || \
+      warn "  Failed to start keepalived on $ip"
   done
 
   # Wait for VRRP election
   sleep 3
 
-  # Verify VIP is active on one of the nodes
+  # Verify VIP is active
   local vip_ip
   vip_ip=$(echo "$VIP" | cut -d'/' -f1)
   doing "Verifying VIP ($vip_ip) is active..."
@@ -192,8 +128,6 @@ KEEPALIVED"
   if ! $vip_found; then
     warn "VIP not found on any node - check keepalived logs: journalctl -u keepalived"
   fi
-
-  success "Traefik HA configured with keepalived"
 }
 
 # Check if Traefik is deployed as a Nomad job
