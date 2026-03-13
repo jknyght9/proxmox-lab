@@ -263,9 +263,13 @@ EOF
 
   echo -e "[+] SDN creation done\n"
 
-  # Configure policy-based routing if egress gateway is specified
+  # Configure policy-based routing if egress gateway is specified (multi-homed systems only)
   if [ -n "$SDN_EGRESS_GATEWAY" ] && [ -n "$SDN_EGRESS_IP" ] && [ -n "$SDN_EGRESS_BRIDGE" ]; then
     configurePBR
+  elif [ -n "$SDN_EGRESS_IP" ] && [ -n "$SDN_EGRESS_BRIDGE" ]; then
+    echo "[+] Single-gateway system - policy-based routing not required"
+    echo "    - SNAT will use the default gateway"
+    echo
   fi
 }
 

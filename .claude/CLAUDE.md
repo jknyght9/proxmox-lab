@@ -196,13 +196,20 @@ labnet_dhcp_lease_time = "86400"
 ```
 - `egress_bridge`: Physical bridge interface for labnet outbound traffic
 - `egress_ip`: Source IP for SNAT (must be an IP on the egress bridge)
-- `egress_gateway`: Gateway for the egress network (required for policy-based routing)
+- `egress_gateway`: Gateway for the egress network (only set for multi-homed systems)
 - If not configured, defaults to MASQUERADE via default route
 
 **Why egress matters**: Networks with multiple bridges (e.g., vmbr0 for management, vmbr1 for lab traffic) need explicit SNAT configuration. Without it, labnet traffic may route through the wrong interface.
 
-**Policy-Based Routing (PBR)**:
-When `egress_gateway` is configured, the setup script creates policy-based routing rules to ensure SNAT'd traffic uses the correct gateway:
+**Multi-Homed Detection**:
+The setup script automatically detects if the system is multi-homed by comparing:
+- The interface with the system's default route
+- The selected egress bridge for labnet
+
+If they differ, the system is multi-homed and PBR is required. If they're the same (single-gateway), PBR is skipped as unnecessary.
+
+**Policy-Based Routing (PBR)** *(multi-homed systems only)*:
+When a multi-homed system is detected, the setup script creates policy-based routing rules to ensure SNAT'd traffic uses the correct gateway:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      Proxmox Node                           │

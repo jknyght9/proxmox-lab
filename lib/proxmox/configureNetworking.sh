@@ -157,34 +157,52 @@ function configureNetworking() {
       done
     fi
 
-    # Ask for egress gateway (required for policy-based routing)
-    echo
-    info "Egress Gateway Configuration"
-    info "(Gateway for the egress bridge - required for policy-based routing)"
-    echo
+    # Check if system is multi-homed (egress bridge differs from default route interface)
+    # If not multi-homed, PBR is unnecessary
+    local IS_MULTI_HOMED=false
+    local DEFAULT_ROUTE_IFACE=""
+    INT_EGRESS_GW=""
 
-    # Detect gateway for egress bridge
-    local DETECTED_EGRESS_GW=""
     if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
-      # Try to detect gateway from route table
-      DETECTED_EGRESS_GW=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
-        "ip route show dev $INT_EGRESS_BRIDGE 2>/dev/null | grep -oP 'default via \K[0-9.]+' | head -1" 2>/dev/null || echo "")
-      # If no default route on that interface, try to infer from bridge IP (assume .1 gateway)
-      if [ -z "$DETECTED_EGRESS_GW" ] && [ -n "$INT_EGRESS_IP" ]; then
-        local EGRESS_BASE=$(echo "$INT_EGRESS_IP" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
-        DETECTED_EGRESS_GW="${EGRESS_BASE}1"
+      # Get the interface that has the system's default route
+      DEFAULT_ROUTE_IFACE=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+        "ip route show default 2>/dev/null | grep -oP 'dev \K\S+' | head -1" 2>/dev/null || echo "")
+
+      if [ -n "$DEFAULT_ROUTE_IFACE" ] && [ "$DEFAULT_ROUTE_IFACE" != "$INT_EGRESS_BRIDGE" ]; then
+        IS_MULTI_HOMED=true
       fi
     fi
 
-    if [ -n "$DETECTED_EGRESS_GW" ]; then
-      read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE [$DETECTED_EGRESS_GW]: ")" INT_EGRESS_GW
-      INT_EGRESS_GW=${INT_EGRESS_GW:-$DETECTED_EGRESS_GW}
+    if $IS_MULTI_HOMED; then
+      echo
+      info "Multi-homed system detected"
+      info "(Default route is on $DEFAULT_ROUTE_IFACE, egress is on $INT_EGRESS_BRIDGE)"
+      info "Policy-based routing will be configured to ensure correct gateway usage."
+      echo
+      info "Egress Gateway Configuration"
+      echo
+
+      # Detect gateway for egress bridge
+      local DETECTED_EGRESS_GW=""
+      # Try to infer from bridge IP (assume .1 gateway)
+      if [ -n "$INT_EGRESS_IP" ]; then
+        local EGRESS_BASE=$(echo "$INT_EGRESS_IP" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+        DETECTED_EGRESS_GW="${EGRESS_BASE}1"
+      fi
+
+      if [ -n "$DETECTED_EGRESS_GW" ]; then
+        read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE [$DETECTED_EGRESS_GW]: ")" INT_EGRESS_GW
+        INT_EGRESS_GW=${INT_EGRESS_GW:-$DETECTED_EGRESS_GW}
+      else
+        read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE: ")" INT_EGRESS_GW
+        while [ -z "$INT_EGRESS_GW" ]; do
+          warn "Egress gateway is required for policy-based routing"
+          read -rp "$(question "Egress gateway: ")" INT_EGRESS_GW
+        done
+      fi
     else
-      read -rp "$(question "Egress gateway for $INT_EGRESS_BRIDGE: ")" INT_EGRESS_GW
-      while [ -z "$INT_EGRESS_GW" ]; do
-        warn "Egress gateway is required for policy-based routing"
-        read -rp "$(question "Egress gateway: ")" INT_EGRESS_GW
-      done
+      echo
+      info "Single-gateway system detected - policy-based routing not required"
     fi
   else
     CREATE_SDN=false
@@ -241,8 +259,16 @@ Internal SDN Network:
   Gateway:           $INT_GATEWAY
   Egress Bridge:     $INT_EGRESS_BRIDGE
   Egress IP (SNAT):  $INT_EGRESS_IP
-  Egress Gateway:    $INT_EGRESS_GW
 EOF
+    if [ -n "$INT_EGRESS_GW" ]; then
+      cat <<EOF
+  Egress Gateway:    $INT_EGRESS_GW (PBR enabled)
+EOF
+    else
+      cat <<EOF
+  Policy Routing:    not required (single gateway)
+EOF
+    fi
   fi
 
   cat <<EOF
