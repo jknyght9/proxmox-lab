@@ -37,6 +37,7 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
 16) Purge (Emergency)            - Direct VM/LXC destruction via SSH
 17) Purge entire deployment      - Reset nodes to pre-install state
 18) Configure networking         - Update network/HA settings only
+19) Reset labnet egress          - Fix DHCP/routing issues
 ```
 
 ### Docker Compose Services

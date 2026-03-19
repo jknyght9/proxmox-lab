@@ -262,6 +262,7 @@ function showMenu() {
   echo " 16) Purge service deployment (Emergency)"
   echo " 17) Purge entire deployment"
   echo " 18) Configure networking"
+  echo " 19) Reset labnet egress (fix DHCP/routing issues)"
   echo "  0) Exit"
   echo
 }
@@ -270,7 +271,7 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-18]: ")" choice
+  read -rp "$(question "Select an option [0-19]: ")" choice
 
   case $choice in
     1) runEverything;;
@@ -291,6 +292,7 @@ while true; do
     16) purgeClusterResources;;
     17) purgeDeployment;;
     18) reconfigureNetworking;;
+    19) resetLabnetEgress;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;

@@ -1,5 +1,129 @@
 #!/usr/bin/env bash
 
+# resetLabnetEgress - Reset labnet SDN egress to use default route (MASQUERADE)
+#
+# This function cleans up any explicit egress configuration and resets to simple
+# MASQUERADE through the default route. Use this when custom egress config
+# (routing through a specific interface) is causing issues like DHCP failures.
+#
+# What it does:
+# 1. Removes explicit SNAT rules (--to-source IP)
+# 2. Removes policy-based routing (PBR) rules and routes
+# 3. Adds simple MASQUERADE rule
+# 4. Clears egress config from cluster-info.json
+#
+function resetLabnetEgress() {
+  cat <<EOF
+
+############################################################################
+Reset Labnet SDN Egress Configuration
+
+This will reset labnet egress to use the system's default route (MASQUERADE)
+instead of routing through a specific interface.
+
+This fixes issues like:
+- DHCP failures for VMs on labnet
+- Labnet VMs unable to reach internet
+- Routing problems from custom egress config
+
+What will be removed:
+- Explicit SNAT rules (--to-source specific IP)
+- Policy-based routing (PBR) rules and routes
+- Egress bridge/IP/gateway config from cluster-info.json
+
+What will be added:
+- Simple MASQUERADE rule (uses default gateway)
+#############################################################################
+
+EOF
+
+  # Ensure we have cluster context
+  if ! ensureClusterContext; then
+    error "Cannot proceed without cluster context"
+    return 1
+  fi
+
+  read -rp "$(question "Continue with egress reset? [y/N]: ")" CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    info "Reset cancelled"
+    return 0
+  fi
+
+  # Get labnet CIDR from cluster-info or use default
+  local LABNET_CIDR="172.16.0.0/24"
+  local EGRESS_IP=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    LABNET_CIDR=$(jq -r '.network.labnet.cidr // "172.16.0.0/24"' "$CLUSTER_INFO_FILE")
+    EGRESS_IP=$(jq -r '.network.labnet.egress_ip // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  doing "Resetting labnet egress on all cluster nodes..."
+
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+
+    info "  Cleaning up $node ($ip)..."
+
+    # Step 1: Remove any SNAT/MASQUERADE rules for labnet subnet
+    sshRun "$REMOTE_USER" "$ip" "
+      echo '    Removing existing NAT rules...'
+      iptables -t nat -S POSTROUTING 2>/dev/null | grep -E '(-s ${LABNET_CIDR}.*MASQUERADE|-s ${LABNET_CIDR}.*SNAT)' | while read -r rule; do
+        delete_rule=\$(echo \"\$rule\" | sed 's/^-A/-D/')
+        iptables -t nat \$delete_rule 2>/dev/null && echo '      Removed: '\"\$rule\" || true
+      done
+    " || true
+
+    # Step 2: Remove policy-based routing
+    sshRun "$REMOTE_USER" "$ip" "
+      echo '    Removing PBR rules...'
+      # Remove policy rules
+      ip rule del from ${LABNET_CIDR} table services priority 99 2>/dev/null && echo '      Removed rule: from ${LABNET_CIDR} lookup services' || true
+      ip rule del from ${EGRESS_IP:-0.0.0.0} table services priority 100 2>/dev/null && echo '      Removed rule: from egress IP lookup services' || true
+      # Flush services routing table
+      ip route flush table services 2>/dev/null && echo '      Flushed services routing table' || true
+
+      echo '    Removing PBR from interfaces config...'
+      if [ -f /etc/network/interfaces ]; then
+        # Remove all PBR-related lines
+        sed -i '/# Policy-based routing for labnet egress/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/post-up ip route add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/post-up ip rule add.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        sed -i '/pre-down ip rule del.*table services/d' /etc/network/interfaces 2>/dev/null || true
+        echo '      Cleaned /etc/network/interfaces'
+      fi
+    " || true
+
+    # Step 3: Add simple MASQUERADE rule
+    sshRun "$REMOTE_USER" "$ip" "
+      echo '    Adding MASQUERADE rule...'
+      iptables -t nat -A POSTROUTING -s ${LABNET_CIDR} ! -d ${LABNET_CIDR} -j MASQUERADE
+      echo '      Added: MASQUERADE for ${LABNET_CIDR}'
+
+      # Save iptables rules
+      mkdir -p /etc/iptables
+      iptables-save > /etc/iptables/rules.v4 2>/dev/null
+      echo '      Saved iptables rules'
+    " || true
+  done
+
+  # Step 4: Clear egress config from cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    doing "Clearing egress config from cluster-info.json..."
+    local tmp_file=$(mktemp)
+    jq '.network.labnet.egress_bridge = "" | .network.labnet.egress_ip = "" | .network.labnet.egress_gateway = ""' \
+      "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+    success "Egress config cleared"
+  fi
+
+  echo
+  success "Labnet egress reset complete!"
+  echo
+  info "Labnet VMs will now use the system's default gateway for internet access."
+  info "Test by creating a new VM on labnet and checking if it gets a DHCP address."
+  echo
+}
+
 function configureNetworking() {
   doing "Configuring network settings..."
   echo
