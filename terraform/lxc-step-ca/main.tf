@@ -46,13 +46,7 @@ resource "proxmox_lxc" "step-ca" {
 
   tags              = "terraform,ca,lxc"
 
-  # Upload secrets and certificates after creation
-  provisioner "file" {
-    source          = "${path.module}/step-ca"
-    destination     = "/root/step-ca"
-  }
-
-  # Install step-ca and configure it
+  # Install step-ca and initialize with correct DNS names
   provisioner "remote-exec" {
     inline = [<<-EOT
       bash -c "set -euxo pipefail
@@ -60,12 +54,37 @@ resource "proxmox_lxc" "step-ca" {
         cp /etc/resolv.conf /etc/resolv.conf.bak
         echo 'nameserver ${var.bootstrap_dns}' > /etc/resolv.conf
 
-        apt-get update && apt-get install -y --no-install-recommends curl gpg ca-certificates
+        apt-get update && apt-get install -y --no-install-recommends curl gpg ca-certificates jq
         curl -fsSL https://packages.smallstep.com/keys/apt/repo-signing-key.gpg -o /etc/apt/trusted.gpg.d/smallstep.asc
         echo \"deb [signed-by=/etc/apt/trusted.gpg.d/smallstep.asc] https://packages.smallstep.com/stable/debian debs main\" | tee /etc/apt/sources.list.d/smallstep.list
         apt-get update && apt-get -y install step-cli step-ca
-        mkdir -p /etc/step-ca && cp -r /root/step-ca/* /etc/step-ca/
-        rm -rf /root/step-ca
+
+        # Initialize step-ca with correct DNS names for this deployment
+        mkdir -p /etc/step-ca/secrets
+        openssl rand -base64 32 > /etc/step-ca/secrets/password_file
+        chmod 600 /etc/step-ca/secrets/password_file
+
+        step ca init \\
+          --deployment-type standalone \\
+          --name proxmox-lab \\
+          --address ':443' \\
+          --dns 'ca.${var.dns_postfix}' \\
+          --dns 'step-ca.${var.dns_postfix}' \\
+          --dns '${local.eth0_ipv4}' \\
+          --dns 'localhost' \\
+          --provisioner 'admin@${var.dns_postfix}' \\
+          --password-file /etc/step-ca/secrets/password_file \\
+          --acme
+
+        # Update ACME configuration to allow longer duration certs (90 days)
+        tmp=\$(mktemp)
+        jq '.authority.provisioners |= map(
+          if .type==\"ACME\" and .name==\"acme\" then
+            .claims = (.claims // {}) + {defaultTLSCertDuration:\"2160h\", maxTLSCertDuration:\"2160h\"}
+          else . end
+        )' /etc/step-ca/config/ca.json > \"\$tmp\" && mv \"\$tmp\" /etc/step-ca/config/ca.json
+
+        # Create systemd service
         cat <<EOF >/etc/systemd/system/step-ca.service
 [Unit]
 Description=Step Certificate Authority

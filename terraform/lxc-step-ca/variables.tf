@@ -83,3 +83,8 @@ variable "eth1_ipv4_cidr" {
   description = "IPv4 address with CIDR notation for eth1"
   default     = ""
 }
+
+variable "dns_postfix" {
+  type        = string
+  description = "DNS domain suffix (e.g., 'mylab.lan')"
+}

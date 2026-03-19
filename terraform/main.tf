@@ -89,6 +89,7 @@ module "step-ca" {
   eth0_ipv4_cidr      = var.step-ca_eth0_ipv4_cidr
   eth0_gateway        = var.network_gateway_address
   dns_primary_ipv4    = var.dns_primary_ipv4
+  dns_postfix         = var.dns_postfix
   proxmox_target_node = var.proxmox_target_node
   root_password       = var.step-ca_root_password
   bootstrap_dns       = var.bootstrap_dns
