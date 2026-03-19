@@ -81,9 +81,12 @@ function proxmoxPostInstall() {
 function runProxmoxSetupOnAll() {
   doing "Running Proxmox setup on all cluster nodes..."
 
-  # Build config JSON from cluster-info.json (includes storage and bridge)
+  # Load service passwords (includes template_password)
+  loadServicePasswords || true
+
+  # Build config JSON from cluster-info.json, injecting template_password
   local CONFIG
-  CONFIG=$(cat "$CLUSTER_INFO_FILE")
+  CONFIG=$(jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE")
 
   # Cluster-wide setup (run once on primary)
   local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"

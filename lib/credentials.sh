@@ -47,6 +47,7 @@ function generateServicePasswords() {
   local KASM_ADMIN=$(generatePassword 20)
   local PACKER_ROOT=$(generatePassword 16)
   local PACKER_SSH=$(generatePassword 16)
+  local TEMPLATE_PASS=$(generatePassword 16)
 
   jq -n \
     --arg pihole_admin "$PIHOLE_ADMIN" \
@@ -55,6 +56,7 @@ function generateServicePasswords() {
     --arg kasm_admin "$KASM_ADMIN" \
     --arg packer_root "$PACKER_ROOT" \
     --arg packer_ssh "$PACKER_SSH" \
+    --arg template_pass "$TEMPLATE_PASS" \
     '{
       pihole_admin_password: $pihole_admin,
       pihole_root_password: $pihole_root,
@@ -62,6 +64,7 @@ function generateServicePasswords() {
       kasm_admin_password: $kasm_admin,
       packer_root_password: $packer_root,
       packer_ssh_password: $packer_ssh,
+      template_password: $template_pass,
       generated_at: (now | todate)
     }' > "$PASSWORDS_FILE"
 
@@ -92,9 +95,10 @@ function loadServicePasswords() {
   KASM_ADMIN_PASSWORD=$(jq -r '.kasm_admin_password' "$PASSWORDS_FILE")
   PACKER_ROOT_PASSWORD=$(jq -r '.packer_root_password' "$PASSWORDS_FILE")
   PACKER_SSH_PASSWORD=$(jq -r '.packer_ssh_password' "$PASSWORDS_FILE")
+  TEMPLATE_PASSWORD=$(jq -r '.template_password // ""' "$PASSWORDS_FILE")
 
   export PIHOLE_ADMIN_PASSWORD PIHOLE_ROOT_PASSWORD STEPCA_ROOT_PASSWORD
-  export KASM_ADMIN_PASSWORD PACKER_ROOT_PASSWORD PACKER_SSH_PASSWORD
+  export KASM_ADMIN_PASSWORD PACKER_ROOT_PASSWORD PACKER_SSH_PASSWORD TEMPLATE_PASSWORD
 }
 
 # Check if service passwords have been generated
