@@ -152,43 +152,32 @@ function configureNetworking() {
   read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
   EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
 
-  # DNS High Availability option
-  echo
-  info "DNS High Availability (keepalived)"
-  info "(Optional: Provides a Virtual IP that fails over between Pi-hole nodes)"
-  echo
+  # Extract CIDR prefix (e.g., /24 from 10.1.50.0/24)
+  local CIDR_PREFIX
+  CIDR_PREFIX=$(echo "$EXT_CIDR" | grep -oE '/[0-9]+$')
 
-  read -rp "$(question "Enable DNS HA with keepalived VIP? [y/N]: ")" ENABLE_HA_INPUT
-  ENABLE_HA_INPUT=${ENABLE_HA_INPUT:-N}
+  # DNS High Availability - auto-enabled with keepalived VIP
+  local ENABLE_HA=true
+  local HA_VIP="${CIDR_BASE}3"
 
-  local ENABLE_HA=false
-  local HA_VIP=""
+  # IP allocation with HA: .3 = DNS VIP, .4+ = DNS nodes, .7+ = services
+  local DEFAULT_DNS_START="${CIDR_BASE}4"
+  local DEFAULT_SVC_START="${CIDR_BASE}7"
 
-  if [[ "$ENABLE_HA_INPUT" =~ ^[Yy]$ ]]; then
-    ENABLE_HA=true
-    # When HA enabled: VIP at .3, DNS nodes start at .4, services at .7
-    local DEFAULT_HA_VIP="${CIDR_BASE}3"
-    local DEFAULT_DNS_START="${CIDR_BASE}4"
-    local DEFAULT_SVC_START="${CIDR_BASE}7"
-
-    read -rp "$(question "DNS VIP address (failover endpoint) [$DEFAULT_HA_VIP]: ")" HA_VIP
-    HA_VIP=${HA_VIP:-$DEFAULT_HA_VIP}
-
-    info "Note: DNS containers will use privileged mode for keepalived"
-  else
-    # When HA disabled: DNS nodes start at .3, services at .6
-    local DEFAULT_DNS_START="${CIDR_BASE}3"
-    local DEFAULT_SVC_START="${CIDR_BASE}6"
-  fi
+  # Traefik High Availability - auto-enabled with keepalived VIP
+  local ENABLE_TRAEFIK_HA=true
+  local TRAEFIK_HA_VIP="${CIDR_BASE}100${CIDR_PREFIX}"
+  local TRAEFIK_HA_VRRP_ROUTER_ID=53
+  local TRAEFIK_HA_VRRP_PASSWORD=$(head -c 100 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8)
 
   echo
+  info "High Availability Configuration (auto-enabled)"
+  info "  DNS VIP:     $HA_VIP (failover between Pi-hole nodes)"
+  info "  Traefik VIP: ${CIDR_BASE}100 (failover between Nomad nodes)"
+  echo
+
   info "Service IP Allocation"
-  info "(IP addresses for Pi-hole containers and other services)"
-  if $ENABLE_HA; then
-    info "  .3 = VIP (keepalived failover), .4+ = DNS nodes, .7+ = services"
-  else
-    info "  .3+ = DNS nodes, .6+ = services"
-  fi
+  info "  .3 = DNS VIP, .4-.6 = DNS nodes, .7+ = services, .100 = Traefik VIP"
   echo
 
   read -rp "$(question "Pi-hole containers start IP [$DEFAULT_DNS_START]: ")" DNS_START_IP
@@ -196,47 +185,6 @@ function configureNetworking() {
 
   read -rp "$(question "Other services start IP (step-ca, kasm) [$DEFAULT_SVC_START]: ")" SVC_START_IP
   SVC_START_IP=${SVC_START_IP:-$DEFAULT_SVC_START}
-
-  # Nomad Traefik High Availability option
-  echo
-  info "Nomad Traefik High Availability (keepalived)"
-  info "(Optional: Provides a Virtual IP that fails over between Nomad nodes for Traefik)"
-  echo
-
-  read -rp "$(question "Enable Traefik HA with keepalived VIP? [y/N]: ")" ENABLE_TRAEFIK_HA_INPUT
-  ENABLE_TRAEFIK_HA_INPUT=${ENABLE_TRAEFIK_HA_INPUT:-N}
-
-  local ENABLE_TRAEFIK_HA=false
-  local TRAEFIK_HA_VIP=""
-
-  local TRAEFIK_HA_VRRP_ROUTER_ID=""
-  local TRAEFIK_HA_VRRP_PASSWORD=""
-
-  if [[ "$ENABLE_TRAEFIK_HA_INPUT" =~ ^[Yy]$ ]]; then
-    ENABLE_TRAEFIK_HA=true
-    # Suggest VIP in the services range (after step-ca)
-    local DEFAULT_TRAEFIK_VIP="${CIDR_BASE}100"
-    # Extract CIDR prefix from EXT_CIDR (e.g., /24 from 10.1.50.0/24)
-    local CIDR_PREFIX
-    CIDR_PREFIX=$(echo "$EXT_CIDR" | grep -oE '/[0-9]+$')
-
-    read -rp "$(question "Traefik VIP address [$DEFAULT_TRAEFIK_VIP]: ")" TRAEFIK_HA_VIP
-    TRAEFIK_HA_VIP=${TRAEFIK_HA_VIP:-$DEFAULT_TRAEFIK_VIP}
-    # Append CIDR if not present
-    [[ "$TRAEFIK_HA_VIP" != */* ]] && TRAEFIK_HA_VIP="${TRAEFIK_HA_VIP}${CIDR_PREFIX}"
-
-    # Auto-generate VRRP router ID (53 for Traefik, avoiding 51/52 used by DNS HA)
-    TRAEFIK_HA_VRRP_ROUTER_ID=53
-
-    # Auto-generate random 8-character password
-    TRAEFIK_HA_VRRP_PASSWORD=$(head -c 100 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 8)
-
-    echo
-    info "Auto-generated VRRP settings:"
-    info "  Router ID: $TRAEFIK_HA_VRRP_ROUTER_ID"
-    info "  Password:  $TRAEFIK_HA_VRRP_PASSWORD"
-    info "Traefik will run on all Nomad nodes, VIP will float to active node"
-  fi
 
   echo
   # Internal/SDN network
@@ -402,27 +350,10 @@ Network Configuration Summary:
 External Network:
   CIDR:              $EXT_CIDR
   Gateway:           $EXT_GATEWAY
-EOF
 
-  if $ENABLE_HA; then
-    cat <<EOF
-
-DNS High Availability:
-  VIP (failover IP): $HA_VIP
-  Containers:        privileged (required for keepalived)
-EOF
-  fi
-
-  if $ENABLE_TRAEFIK_HA; then
-    cat <<EOF
-
-Nomad Traefik High Availability:
-  VIP (failover IP): $TRAEFIK_HA_VIP
-  Traefik mode:      system job (runs on all Nomad nodes)
-EOF
-  fi
-
-  cat <<EOF
+High Availability:
+  DNS VIP:           $HA_VIP (keepalived failover)
+  Traefik VIP:       ${TRAEFIK_HA_VIP%/*} (keepalived failover)
 
 Service IP Allocation:
   Pi-hole start IP:  $DNS_START_IP
