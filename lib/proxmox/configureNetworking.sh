@@ -186,18 +186,21 @@ function configureNetworking() {
         "ip -4 addr show $INT_EGRESS_BRIDGE 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1" 2>/dev/null || echo "")
     fi
 
-    if [ -n "$DETECTED_EGRESS_IP" ]; then
+    # Validate detected IP is actually an IP address (not an error or index)
+    if [ -n "$DETECTED_EGRESS_IP" ] && [[ "$DETECTED_EGRESS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
       info "Using egress bridge: $INT_EGRESS_BRIDGE ($DETECTED_EGRESS_IP)"
       read -rp "$(question "Labnet egress source IP [$DETECTED_EGRESS_IP]: ")" INT_EGRESS_IP
       INT_EGRESS_IP=${INT_EGRESS_IP:-$DETECTED_EGRESS_IP}
     else
       warn "Could not detect IP for $INT_EGRESS_BRIDGE - please enter manually"
       read -rp "$(question "Labnet egress source IP: ")" INT_EGRESS_IP
-      while [ -z "$INT_EGRESS_IP" ]; do
-        warn "Egress IP is required for SNAT"
-        read -rp "$(question "Labnet egress source IP: ")" INT_EGRESS_IP
-      done
     fi
+
+    # Validate the entered IP is actually an IP address
+    while [[ ! "$INT_EGRESS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; do
+      warn "Invalid IP address: $INT_EGRESS_IP"
+      read -rp "$(question "Labnet egress source IP (e.g., 192.168.1.10): ")" INT_EGRESS_IP
+    done
 
     # Check if system is multi-homed (egress bridge differs from default route interface)
     # If not multi-homed, PBR is unnecessary
