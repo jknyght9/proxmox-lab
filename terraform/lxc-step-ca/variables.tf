@@ -62,7 +62,7 @@ variable "vmid" {
 variable "bootstrap_dns" {
   type        = string
   description = "DNS server to use during initial provisioning (before internal DNS is ready)"
-  default     = "1.1.1.1"
+  # Required - passed from parent module
 }
 
 # Optional second NIC for ACME validation across networks

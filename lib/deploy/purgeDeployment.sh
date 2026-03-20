@@ -84,11 +84,19 @@ EOF
 
   # Step 5: Reset node DNS configuration
   doing "Step 5/10: Resetting DNS configuration..."
+  # Get the external gateway from cluster-info.json for DNS reset
+  local RESET_DNS=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    RESET_DNS=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE")
+  fi
+  if [ -z "$RESET_DNS" ]; then
+    read -rp "$(question "Enter DNS server to reset nodes to: ")" RESET_DNS
+  fi
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
-    info "  Resetting DNS on $node..."
-    sshRun "$REMOTE_USER" "$ip" "sed -i 's/^nameserver .*/nameserver 1.1.1.1/' /etc/resolv.conf 2>/dev/null" || true
+    info "  Resetting DNS on $node to $RESET_DNS..."
+    sshRun "$REMOTE_USER" "$ip" "sed -i 's/^nameserver .*/nameserver $RESET_DNS/' /etc/resolv.conf 2>/dev/null" || true
   done
   success "DNS configuration reset"
 

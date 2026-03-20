@@ -496,7 +496,7 @@ The complete purge (setup.sh option 15) removes all project resources:
 2. Cloud-init snippets
 3. ACME certificates
 4. Step-CA root certificate from trust store
-5. DNS configuration (reset to 1.1.1.1)
+5. DNS configuration (reset to network gateway)
 6. Hashicorp API user AND HashicorpBuild role
 7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules, policy-based routing)
 8. Local config (terraform.tfvars auto-generated sections, cluster-info.json network config)

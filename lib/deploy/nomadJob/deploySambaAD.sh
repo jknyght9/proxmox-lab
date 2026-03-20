@@ -98,11 +98,17 @@ EOF
     warn "Could not find nomad02 IP - replica DC will not be deployed"
   fi
 
-  # Get DNS forwarder (use dns-01)
+  # Get DNS forwarder (use dns-01, fallback to external gateway)
   local DNS_FORWARDER
   DNS_FORWARDER=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
   if [ -z "$DNS_FORWARDER" ] || [ "$DNS_FORWARDER" = "null" ]; then
-    DNS_FORWARDER="1.1.1.1"  # Fallback to Cloudflare
+    # Fallback to external gateway from cluster-info.json
+    DNS_FORWARDER=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+    if [ -z "$DNS_FORWARDER" ] || [ "$DNS_FORWARDER" = "null" ]; then
+      error "Could not determine DNS forwarder. Deploy dns-01 first or check cluster-info.json"
+      return 1
+    fi
+    warn "dns-01 not found in hosts.json, using gateway as DNS forwarder: $DNS_FORWARDER"
   fi
 
   # Samba AD Docker image - use custom image from cluster-info.json or default

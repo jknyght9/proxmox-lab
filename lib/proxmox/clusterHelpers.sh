@@ -19,7 +19,8 @@ function checkClusterConnectivity() {
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
     # Test internet connectivity (try to reach a reliable endpoint)
-    if ! sshRun "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
+    # Use curl to test actual DNS resolution and connectivity
+    if ! sshRun "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || curl -s --connect-timeout 5 https://google.com >/dev/null 2>&1" 2>/dev/null; then
       failed_nodes+=("$node ($ip)")
 
       # Get DNS configuration for this node
@@ -60,7 +61,7 @@ Common causes:
   3. Network misconfiguration
 
 To fix DNS on each affected node, run:
-  pvesh set /nodes/<nodename>/dns -dns1 1.1.1.1 -dns2 8.8.8.8
+  pvesh set /nodes/<nodename>/dns -dns1 <your-gateway-ip>
 
 Then re-run this setup.
 #############################################################################
@@ -151,7 +152,7 @@ function detectAndSaveCluster() {
 
     # Test connectivity
     local connectivity="unknown"
-    if $ssh_func "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1" 2>/dev/null; then
+    if $ssh_func "$REMOTE_USER" "$ip" "curl -s --connect-timeout 5 https://install.pi-hole.net >/dev/null 2>&1 || curl -s --connect-timeout 5 https://google.com >/dev/null 2>&1" 2>/dev/null; then
       connectivity="ok"
       success "  $node ($ip): Connectivity OK, DNS1=$dns1, DNS2=$dns2"
     else
@@ -177,10 +178,17 @@ function detectAndSaveCluster() {
   if [ ${#failed_nodes[@]} -gt 0 ]; then
     echo
     warn "The following nodes have connectivity issues: ${failed_nodes[*]}"
-    read -rp "$(question "Would you like to set DNS to 1.1.1.1/8.8.8.8 on failed nodes? [Y/n]: ")" FIX_DNS
+    read -rp "$(question "Would you like to fix DNS on failed nodes? [Y/n]: ")" FIX_DNS
     FIX_DNS=${FIX_DNS:-Y}
 
     if [[ "$FIX_DNS" =~ ^[Yy]$ ]]; then
+      # Ask for the user's DNS server
+      read -rp "$(question "Enter your network's DNS server (e.g., your gateway IP): ")" USER_DNS
+      while [ -z "$USER_DNS" ]; do
+        warn "DNS server is required"
+        read -rp "$(question "Enter your network's DNS server: ")" USER_DNS
+      done
+
       for node in "${failed_nodes[@]}"; do
         local idx=-1
         for i in "${!CLUSTER_NODES[@]}"; do
@@ -193,8 +201,8 @@ function detectAndSaveCluster() {
         local ssh_func="sshRunWithPassword"
         [ "$ip" = "$PROXMOX_HOST" ] && ssh_func="sshRun"
 
-        doing "  Setting DNS on $node..."
-        $ssh_func "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 1.1.1.1 -dns2 8.8.8.8" 2>/dev/null && \
+        doing "  Setting DNS on $node to $USER_DNS..."
+        $ssh_func "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 $USER_DNS" 2>/dev/null && \
           success "  $node: DNS updated" || warn "  $node: Failed to update DNS"
       done
     fi

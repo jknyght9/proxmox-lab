@@ -98,7 +98,7 @@ variable "dns_zone" {
 variable "bootstrap_dns" {
   type        = string
   description = "DNS server to use during initial provisioning (before Pi-hole is running)"
-  default     = "1.1.1.1"
+  # Required - passed from parent module
 }
 
 # DHCP Configuration (primarily for labnet/SDN networks)

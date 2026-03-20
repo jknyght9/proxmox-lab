@@ -130,9 +130,9 @@ runcmd:
   - chown -R nomad:nomad /opt/nomad || true
 %{ if dns_primary_ip != "" ~}
   - |
-    # Configure systemd-resolved to use Pi-hole as primary DNS
+    # Configure systemd-resolved to use Pi-hole as DNS
     bash -lc '
-      resolvectl dns eth0 ${dns_primary_ip} 1.1.1.1
+      resolvectl dns eth0 ${dns_primary_ip}
       resolvectl domain eth0 ${dns_postfix}
       # Make DNS config persistent via netplan
       mkdir -p /etc/netplan
@@ -145,7 +145,7 @@ runcmd:
           dhcp4-overrides:
             use-dns: false
           nameservers:
-            addresses: [${dns_primary_ip}, 1.1.1.1]
+            addresses: [${dns_primary_ip}]
             search: [${dns_postfix}]
     EOF
       netplan apply 2>/dev/null || true
