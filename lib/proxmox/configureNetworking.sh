@@ -134,23 +134,68 @@ function configureNetworking() {
     PROXMOX_DNS_SEARCH=$(jq -r '.nodes[0].dns.search // ""' "$CLUSTER_INFO_FILE")
   fi
 
-  # External network (where Proxmox and services live)
+  # Select the service network bridge first
+  selectNetworkBridge
+
+  # Auto-detect network config from the selected bridge
   info "External Network Configuration"
-  info "(This is the network where your Proxmox hosts and services will reside)"
+  info "(Auto-detected from $NETWORK_BRIDGE)"
   echo
 
-  read -rp "$(question "External network CIDR (e.g., 10.1.50.0/24): ")" EXT_CIDR
-  while [ -z "$EXT_CIDR" ]; do
-    warn "Network CIDR is required"
-    read -rp "$(question "External network CIDR: ")" EXT_CIDR
-  done
+  # Get IP address and CIDR from the bridge
+  local BRIDGE_IP_CIDR=""
+  if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    BRIDGE_IP_CIDR=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+      "ip -4 addr show $NETWORK_BRIDGE 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1" 2>/dev/null || echo "")
+  fi
 
-  # Calculate default gateway from CIDR (assume .1)
-  local CIDR_BASE=$(echo "$EXT_CIDR" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
-  local DEFAULT_GW="${CIDR_BASE}1"
+  local DETECTED_IP=""
+  local DETECTED_PREFIX=""
+  local EXT_CIDR=""
+  local EXT_GATEWAY=""
+  local CIDR_BASE=""
 
-  read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
-  EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
+  if [ -n "$BRIDGE_IP_CIDR" ] && [[ "$BRIDGE_IP_CIDR" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.)([0-9]+)/([0-9]+)$ ]]; then
+    CIDR_BASE="${BASH_REMATCH[1]}"
+    DETECTED_IP="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+    DETECTED_PREFIX="${BASH_REMATCH[3]}"
+
+    # Calculate network address (for /24, just use .0)
+    # For simplicity, assume /24 or similar where network is .0
+    EXT_CIDR="${CIDR_BASE}0/${DETECTED_PREFIX}"
+    EXT_GATEWAY="${CIDR_BASE}1"
+
+    info "  Bridge IP:     $DETECTED_IP"
+    info "  Network CIDR:  $EXT_CIDR"
+    info "  Gateway:       $EXT_GATEWAY"
+    echo
+
+    read -rp "$(question "Use these settings? [Y/n]: ")" USE_DETECTED
+    USE_DETECTED=${USE_DETECTED:-Y}
+
+    if [[ ! "$USE_DETECTED" =~ ^[Yy]$ ]]; then
+      # Allow manual override
+      read -rp "$(question "External network CIDR [$EXT_CIDR]: ")" MANUAL_CIDR
+      EXT_CIDR=${MANUAL_CIDR:-$EXT_CIDR}
+      CIDR_BASE=$(echo "$EXT_CIDR" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+      local DEFAULT_GW="${CIDR_BASE}1"
+      read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
+      EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
+    fi
+  else
+    # Fallback to manual entry if detection fails
+    warn "Could not auto-detect network settings from $NETWORK_BRIDGE"
+    echo
+    read -rp "$(question "External network CIDR (e.g., 10.1.50.0/24): ")" EXT_CIDR
+    while [ -z "$EXT_CIDR" ]; do
+      warn "Network CIDR is required"
+      read -rp "$(question "External network CIDR: ")" EXT_CIDR
+    done
+    CIDR_BASE=$(echo "$EXT_CIDR" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.')
+    local DEFAULT_GW="${CIDR_BASE}1"
+    read -rp "$(question "External gateway [$DEFAULT_GW]: ")" EXT_GATEWAY
+    EXT_GATEWAY=${EXT_GATEWAY:-$DEFAULT_GW}
+  fi
 
   # Extract CIDR prefix (e.g., /24 from 10.1.50.0/24)
   local CIDR_PREFIX
@@ -348,6 +393,7 @@ function configureNetworking() {
 Network Configuration Summary:
 --------------------------------------
 External Network:
+  Bridge:            $NETWORK_BRIDGE
   CIDR:              $EXT_CIDR
   Gateway:           $EXT_GATEWAY
 
@@ -400,7 +446,8 @@ EOF
 
   # Update cluster-info.json with network configuration
   local tmp_file=$(mktemp)
-  jq --arg ext_cidr "$EXT_CIDR" \
+  jq --arg service_bridge "$NETWORK_BRIDGE" \
+     --arg ext_cidr "$EXT_CIDR" \
      --arg ext_gw "$EXT_GATEWAY" \
      --arg dns_start "$DNS_START_IP" \
      --arg svc_start "$SVC_START_IP" \
@@ -419,6 +466,7 @@ EOF
      --arg dns_postfix "$DNS_POSTFIX" \
      '. + {
        network: {
+         selected_bridge: $service_bridge,
          external: {
            cidr: $ext_cidr,
            gateway: $ext_gw,
