@@ -33,6 +33,8 @@ resource "proxmox_lxc" "dns" {
   ssh_public_keys = file(var.ssh_admin_public_key_file)  # Admin key for container access
   # HA with keepalived requires NET_ADMIN capability, which needs privileged mode
   unprivileged    = !var.enable_ha_vip
+  # Use bootstrap DNS for initial provisioning (avoids inheriting Tailscale/host DNS)
+  nameserver      = var.bootstrap_dns
 
   cores  = var.cores
   memory = var.memory

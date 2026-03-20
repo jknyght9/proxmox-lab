@@ -8,9 +8,11 @@ resource "proxmox_lxc" "step-ca" {
   vmid              = var.vmid
   hostname          = "step-ca"
   ostemplate        = var.ostemplate
-  password          = var.root_password 
+  password          = var.root_password
   ssh_public_keys   = file(var.ssh_admin_public_key_file)  # Admin key for container access
   unprivileged      = true
+  # Use bootstrap DNS for initial provisioning (avoids inheriting Tailscale/host DNS)
+  nameserver        = var.bootstrap_dns
 
   cores             = 2
   memory            = 2048
