@@ -82,21 +82,37 @@ EOF
   done
   success "Step-CA root certificate removed"
 
-  # Step 5: Reset node DNS configuration
+  # Step 5: Reset node DNS configuration to original values
   doing "Step 5/10: Resetting DNS configuration..."
-  # Get the external gateway from cluster-info.json for DNS reset
-  local RESET_DNS=""
-  if [ -f "$CLUSTER_INFO_FILE" ]; then
-    RESET_DNS=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE")
-  fi
-  if [ -z "$RESET_DNS" ]; then
-    read -rp "$(question "Enter DNS server to reset nodes to: ")" RESET_DNS
-  fi
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
-    info "  Resetting DNS on $node to $RESET_DNS..."
-    sshRun "$REMOTE_USER" "$ip" "sed -i 's/^nameserver .*/nameserver $RESET_DNS/' /etc/resolv.conf 2>/dev/null" || true
+
+    # Get original DNS from cluster-info.json (captured during initial detection)
+    local original_dns1="" original_dns2="" original_search=""
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      original_dns1=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.dns1 // ""' "$CLUSTER_INFO_FILE")
+      original_dns2=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.dns2 // ""' "$CLUSTER_INFO_FILE")
+      original_search=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.search // ""' "$CLUSTER_INFO_FILE")
+    fi
+
+    if [ -n "$original_dns1" ] && [ "$original_dns1" != "null" ]; then
+      info "  Restoring original DNS on $node: DNS1=$original_dns1 DNS2=$original_dns2"
+      local dns_cmd="pvesh set /nodes/$node/dns -dns1 '$original_dns1'"
+      [ -n "$original_dns2" ] && [ "$original_dns2" != "null" ] && dns_cmd+=" -dns2 '$original_dns2'"
+      [ -n "$original_search" ] && [ "$original_search" != "null" ] && dns_cmd+=" -search '$original_search'"
+      sshRun "$REMOTE_USER" "$ip" "$dns_cmd" 2>/dev/null || warn "  Failed to restore DNS via pvesh on $node"
+    else
+      # Fallback: use gateway if original DNS not captured
+      local fallback_dns
+      fallback_dns=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+      if [ -n "$fallback_dns" ]; then
+        info "  No original DNS found for $node, using gateway: $fallback_dns"
+        sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 '$fallback_dns'" 2>/dev/null || true
+      else
+        warn "  No DNS configuration found for $node - skipping"
+      fi
+    fi
   done
   success "DNS configuration reset"
 
