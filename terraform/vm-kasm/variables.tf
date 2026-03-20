@@ -18,8 +18,16 @@ variable "proxmox_bridge" {
   type = string
 }
 
-variable "ssh_public_key_file" {
-  type = string
+# SSH key for Proxmox node administration (used by provisioners to upload snippets)
+variable "ssh_enterprise_private_key_file" {
+  type        = string
+  description = "Path to enterprise private key for Proxmox node SSH"
+}
+
+# SSH key for VM administration (injected via cloud-init)
+variable "ssh_admin_public_key_file" {
+  type        = string
+  description = "Path to admin public key for VM SSH"
 }
 
 variable "vm_storage" {

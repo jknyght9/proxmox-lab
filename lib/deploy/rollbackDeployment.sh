@@ -40,7 +40,7 @@ function rollbackDeployment() {
 
       # Also clean up any LXC VMIDs that might be orphaned (dns + step-ca)
       for VMID in 902 909 910 911 912 920 921 922; do
-        ssh -i "$KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
+        ssh -i "$ENTERPRISE_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
           "pct stop $VMID 2>/dev/null; pct destroy $VMID 2>/dev/null" 2>/dev/null || true
       done
       warn "LXC containers destroyed."

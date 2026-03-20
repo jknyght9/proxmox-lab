@@ -125,9 +125,18 @@ variable "step-ca_eth1_ipv4_cidr" {
   default     = ""
 }
 
-variable "ssh_public_key_file" {
-  type = string
-  default = "/crypto/lab-deploy.pub"
+# SSH key for Proxmox node administration (used by Terraform provisioners)
+variable "ssh_enterprise_private_key_file" {
+  type        = string
+  description = "Path to enterprise private key for Proxmox node SSH"
+  default     = "/crypto/labenterpriseadmin"
+}
+
+# SSH key for VM/container administration (injected via cloud-init)
+variable "ssh_admin_public_key_file" {
+  type        = string
+  description = "Path to admin public key for VM/container SSH"
+  default     = "/crypto/labadmin.pub"
 }
 
 variable "vm_storage" {

@@ -18,8 +18,12 @@ function createLXCTemplate() {
   local OSTEMPLATE
   OSTEMPLATE=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pveam list local | awk '/vztmpl/ {print \$1; exit}'")
   echo "$OSTEMPLATE"
+  # Copy admin public key to Proxmox node first (for VM/container access)
+  scpTo "$ADMIN_PUBKEY_PATH" "$REMOTE_USER" "$PROXMOX_HOST" "/root/.ssh/$ADMIN_KEY_NAME.pub"
+
   # Note: Using raw ssh here because we need -t for interactive operations
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" "\
+  # Use enterprise key to SSH to Proxmox, but install admin key into the container
+  ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" "\
     pct stop ${TEMPLATE_VMID} || true > /dev/null 2>&1 && pct destroy ${TEMPLATE_VMID} || true > /dev/null 2>&1
     pct create ${TEMPLATE_VMID} ${OSTEMPLATE} \
       --storage ${STORAGE} \
@@ -34,8 +38,8 @@ function createLXCTemplate() {
       chmod 700 /root/.ssh &&
       touch /root/.ssh/authorized_keys &&
       chmod 600 /root/.ssh/authorized_keys'
-    pct push ${TEMPLATE_VMID} /root/.ssh/lab-deploy.pub /root/lab-deploy.pub
-    pct exec ${TEMPLATE_VMID} -- bash -c 'cat /root/lab-deploy.pub >> /root/.ssh/authorized_keys && rm /root/lab-deploy.pub'
+    pct push ${TEMPLATE_VMID} /root/.ssh/$ADMIN_KEY_NAME.pub /root/$ADMIN_KEY_NAME.pub
+    pct exec ${TEMPLATE_VMID} -- bash -c 'cat /root/$ADMIN_KEY_NAME.pub >> /root/.ssh/authorized_keys && rm /root/$ADMIN_KEY_NAME.pub'
     pct reboot ${TEMPLATE_VMID}"
 
   doing "Running installation script..."

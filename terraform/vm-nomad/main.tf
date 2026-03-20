@@ -14,7 +14,7 @@ resource "local_file" "nomad_user_data" {
     dns_primary_ip         = var.dns_primary_ip
     hostname               = each.value.name
     sans                   = "${each.value.name}.${var.dns_postfix}"
-    ssh_authorized_keys    = file(var.ssh_public_key_file)
+    ssh_authorized_keys    = file(var.ssh_admin_public_key_file)  # Admin key for VM access
     nomad_datacenter       = var.nomad_datacenter
     nomad_region           = var.nomad_region
     nomad_bootstrap_expect = length(var.vm_configs)
@@ -40,7 +40,7 @@ resource "null_resource" "upload_snippet" {
     # Upload to the target node for this VM, fallback to API host
     host        = lookup(var.node_ip_map, each.value.target_node, local.proxmox_api_host)
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
   }
   provisioner "remote-exec" {
     inline = [
@@ -95,7 +95,7 @@ resource "proxmox_vm_qemu" "nomad" {
 
   ciuser    = "labadmin"
   ipconfig0 = "ip=dhcp"
-  sshkeys   = file("/crypto/lab-deploy.pub")
+  sshkeys   = file(var.ssh_admin_public_key_file)  # Admin key for VM access
   cicustom  = "user=local:snippets/${each.value.name}-user-data.yml"
   tags      = "terraform,infra,vm,nomad"
 }

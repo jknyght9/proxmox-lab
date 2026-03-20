@@ -88,3 +88,20 @@ variable "dns_postfix" {
   type        = string
   description = "DNS domain suffix (e.g., 'mylab.lan')"
 }
+
+# ============================================================================
+# SSH Key Configuration
+# ============================================================================
+
+# SSH key for container administration (both public and private needed)
+variable "ssh_admin_private_key_file" {
+  type        = string
+  description = "Path to admin private key for container SSH access"
+  default     = "/crypto/labadmin"
+}
+
+variable "ssh_admin_public_key_file" {
+  type        = string
+  description = "Path to admin public key for container SSH access"
+  default     = "/crypto/labadmin.pub"
+}

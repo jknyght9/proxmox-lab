@@ -10,7 +10,7 @@ resource "local_file" "docker_user_data" {
     dns_postfix         = "${var.dns_postfix}"
     hostname            = each.value.name
     sans                = "${each.value.name}.${var.dns_postfix} kasm.${var.dns_postfix} kasm",
-    ssh_authorized_keys = file(var.ssh_public_key_file)
+    ssh_authorized_keys = file(var.ssh_admin_public_key_file)  # Admin key for VM access
   })
 }
 
@@ -24,7 +24,7 @@ resource "null_resource" "upload_snippet" {
     type        = "ssh"
     host        = local.proxmox_api_host
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
   }
   provisioner "remote-exec" {
     inline = [
@@ -78,7 +78,7 @@ resource "proxmox_vm_qemu" "docker" {
   }
 
   ciuser        = "labadmin"
-  sshkeys       = file("/crypto/lab-deploy.pub")
+  sshkeys       = file(var.ssh_admin_public_key_file)  # Admin key for VM access
   cicustom      = "user=local:snippets/${each.value.name}-user-data.yml"
   tags          = "terraform,infra,vm"
 }

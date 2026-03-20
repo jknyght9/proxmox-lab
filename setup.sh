@@ -47,9 +47,12 @@ PROXMOX_PASS="${2:-}"
 # Global variables
 CRYPTO_DIR="crypto"
 DNS_POSTFIX=""
-KEY_NAME="lab-deploy"
-KEY_PATH="$CRYPTO_DIR/$KEY_NAME"
-PUBKEY_PATH="$KEY_PATH.pub"
+ENTERPRISE_KEY_NAME="labenterpriseadmin"
+ENTERPRISE_KEY_PATH="$CRYPTO_DIR/$ENTERPRISE_KEY_NAME"
+ENTERPRISE_PUBKEY_PATH="$ENTERPRISE_KEY_PATH.pub"
+ADMIN_KEY_NAME="labadmin"
+ADMIN_KEY_PATH="$CRYPTO_DIR/$ADMIN_KEY_NAME"
+ADMIN_PUBKEY_PATH="$ADMIN_KEY_PATH.pub"
 REMOTE_USER="root"
 
 # Cluster-related globals (populated by detectAndSaveCluster or loadClusterInfo)
@@ -155,7 +158,7 @@ function runEverythingButSSH() {
   fi
 
   # Distribute SSH keys to all cluster nodes (assumes keys exist)
-  if [ -f "$KEY_PATH" ]; then
+  if [ -f "$ENTERPRISE_KEY_PATH" ]; then
     distributeSSHKeys
   fi
 

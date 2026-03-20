@@ -160,3 +160,21 @@ variable "ha_vrrp_password" {
   description = "VRRP authentication password (8 chars max)"
   default     = ""
 }
+
+# ============================================================================
+# SSH Key Configuration
+# ============================================================================
+
+# SSH key for Proxmox node administration (used by provisioners)
+variable "ssh_enterprise_private_key_file" {
+  type        = string
+  description = "Path to enterprise private key for Proxmox node SSH"
+  default     = "/crypto/labenterpriseadmin"
+}
+
+# SSH key for container administration (injected into containers)
+variable "ssh_admin_public_key_file" {
+  type        = string
+  description = "Path to admin public key for container SSH"
+  default     = "/crypto/labadmin.pub"
+}

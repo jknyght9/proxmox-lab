@@ -68,9 +68,17 @@ EOF
 }
 
 # SSH command wrapper with common options (simple command)
+# Uses enterprise key for Proxmox node administration (default use case)
 # Arguments: $1 - user, $2 - host, $3 - command
 function sshRun() {
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o LogLevel=ERROR -o ConnectTimeout=5 "$1@$2" "$3"
+}
+
+# SSH command wrapper using admin key (for VMs/containers)
+# Arguments: $1 - user, $2 - host, $3 - command
+function sshRunAdmin() {
+  ssh -i "$ADMIN_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o LogLevel=ERROR -o ConnectTimeout=5 "$1@$2" "$3"
 }
 
@@ -83,6 +91,7 @@ function sshRunWithPassword() {
 }
 
 # SSH with heredoc/multiline script support (reads from stdin)
+# Uses enterprise key for Proxmox node administration (default use case)
 # Arguments: $1 - user, $2 - host, remaining args passed to remote bash
 # Usage: sshScript user host <<'SCRIPT' ... SCRIPT
 #    or: sshScript user host < script.sh
@@ -90,14 +99,31 @@ function sshScript() {
   local user="$1"
   local host="$2"
   shift 2
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o LogLevel=ERROR -o ConnectTimeout=5 "$user@$host" bash -s "$@"
 }
 
-# SCP wrapper for copying files to remote hosts
+# SSH with heredoc/multiline script support using admin key (for VMs/containers)
+# Arguments: $1 - user, $2 - host, remaining args passed to remote bash
+function sshScriptAdmin() {
+  local user="$1"
+  local host="$2"
+  shift 2
+  ssh -i "$ADMIN_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o LogLevel=ERROR -o ConnectTimeout=5 "$user@$host" bash -s "$@"
+}
+
+# SCP wrapper for copying files to Proxmox hosts (enterprise key)
 # Arguments: $1 - local path, $2 - user, $3 - host, $4 - remote path
 function scpTo() {
-  scp -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  scp -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o LogLevel=ERROR "$1" "$2@$3:$4"
+}
+
+# SCP wrapper for copying files to VMs/containers (admin key)
+# Arguments: $1 - local path, $2 - user, $3 - host, $4 - remote path
+function scpToAdmin() {
+  scp -i "$ADMIN_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o LogLevel=ERROR "$1" "$2@$3:$4"
 }
 

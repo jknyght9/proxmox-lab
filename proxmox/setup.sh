@@ -492,7 +492,7 @@ function installCloudInitImage() {
     --ciuser labadmin \
     --cipassword "$CI_PASSWORD" \
     --ipconfig0 ip=dhcp \
-    --sshkey /root/.ssh/lab-deploy.pub \
+    --sshkey /root/.ssh/labadmin.pub \
     --cicustom "vendor=local:snippets/userdata-qemu-agent.yaml"
   qm set $VMID --tags "template,linux,vm"
   qm template $VMID

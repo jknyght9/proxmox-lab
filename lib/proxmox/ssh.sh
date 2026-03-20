@@ -4,8 +4,8 @@ function distributeSSHKeys() {
   doing "Distributing SSH keys to all cluster nodes..."
 
   local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
-  local pubkey_content
-  pubkey_content=$(cat "$PUBKEY_PATH")
+  local enterprise_pubkey_content
+  enterprise_pubkey_content=$(cat "$ENTERPRISE_PUBKEY_PATH")
 
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
@@ -25,16 +25,23 @@ function distributeSSHKeys() {
       continue
     fi
 
-    # Copy public key file
-    if ! sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$KEY_NAME.pub" 2>&1; then
-      warn "  $node ($ip): Failed to copy public key file"
+    # Copy enterprise public key file (for Proxmox node administration)
+    if ! sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$ENTERPRISE_PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$ENTERPRISE_KEY_NAME.pub" 2>&1; then
+      warn "  $node ($ip): Failed to copy enterprise public key file"
       continue
     fi
 
-    # Add to authorized_keys if not already present
+    # Copy admin public key file (for VM/container cloud-init templates)
+    if ! sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$ADMIN_PUBKEY_PATH" "$REMOTE_USER@$ip:/root/.ssh/$ADMIN_KEY_NAME.pub" 2>&1; then
+      warn "  $node ($ip): Failed to copy admin public key file"
+      # Continue anyway - this is not critical for Proxmox node access
+    fi
+
+    # Add enterprise key to authorized_keys if not already present
+    # Only enterprise key goes on Proxmox nodes - admin key is for VMs/containers only
     if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$ip" \
-      "grep -qF '${pubkey_content}' ~/.ssh/authorized_keys 2>/dev/null \
-        || (echo '${pubkey_content}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>&1; then
+      "grep -qF '${enterprise_pubkey_content}' ~/.ssh/authorized_keys 2>/dev/null \
+        || (echo '${enterprise_pubkey_content}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)" 2>&1; then
       warn "  $node ($ip): Failed to add key to authorized_keys"
       continue
     fi
@@ -49,34 +56,62 @@ function generateSSHKeys() {
     doing "Generating SSH keys for deployment..."
     mkdir -p "$CRYPTO_DIR"
 
-    # Check if key already exists
-    if [[ -f "$KEY_PATH" ]]; then
-      warn "SSH key already exists at $KEY_PATH"
-      read -rp "$(question "Do you want to overwrite it? [y/N]: ")" confirm
+    local keys_exist=false
+    if [[ -f "$ENTERPRISE_KEY_PATH" ]] || [[ -f "$ADMIN_KEY_PATH" ]]; then
+      keys_exist=true
+    fi
+
+    # Check if keys already exist
+    if [ "$keys_exist" = "true" ]; then
+      warn "SSH keys already exist in $CRYPTO_DIR"
+      [ -f "$ENTERPRISE_KEY_PATH" ] && info "  - Enterprise key: $ENTERPRISE_KEY_PATH"
+      [ -f "$ADMIN_KEY_PATH" ] && info "  - Admin key: $ADMIN_KEY_PATH"
+      read -rp "$(question "Do you want to overwrite them? [y/N]: ")" confirm
       [[ ! "$confirm" =~ ^[Yy]$ ]] && info "Continuing without changes..." && return 0
     fi
 
-    # Generate key (always runs if key doesn't exist or confirmed overwrite)
-    ssh-keygen -t ed25519 -f "$KEY_PATH" -C "lab-deploy" -N "" || {
-      error "SSH key generation failed."
+    # Generate enterprise key (for Proxmox node administration)
+    doing "Generating enterprise key (labenterpriseadmin) for Proxmox nodes..."
+    ssh-keygen -t ed25519 -f "$ENTERPRISE_KEY_PATH" -C "labenterpriseadmin" -N "" || {
+      error "Enterprise SSH key generation failed."
       exit 1
     }
-    chmod 600 "$KEY_PATH"
-    chmod 600 "$KEY_PATH".pub
+    chmod 600 "$ENTERPRISE_KEY_PATH"
+    chmod 644 "$ENTERPRISE_KEY_PATH.pub"
 
-    success "SSH key pair generated:"
-    echo "    Private key: $KEY_PATH"
-    echo "    Public key:  $KEY_PATH.pub"
+    # Generate admin key (for VM/container administration)
+    doing "Generating admin key (labadmin) for VMs and containers..."
+    ssh-keygen -t ed25519 -f "$ADMIN_KEY_PATH" -C "labadmin" -N "" || {
+      error "Admin SSH key generation failed."
+      exit 1
+    }
+    chmod 600 "$ADMIN_KEY_PATH"
+    chmod 644 "$ADMIN_KEY_PATH.pub"
+
+    success "SSH key pairs generated:"
+    echo "    Enterprise (Proxmox nodes):"
+    echo "      Private key: $ENTERPRISE_KEY_PATH"
+    echo "      Public key:  $ENTERPRISE_PUBKEY_PATH"
+    echo "    Admin (VMs/containers):"
+    echo "      Private key: $ADMIN_KEY_PATH"
+    echo "      Public key:  $ADMIN_PUBKEY_PATH"
 }
 
 function installSSHKeys() {
-  doing "Installing SSH public key..."
+  doing "Installing SSH public keys on primary Proxmox node..."
   local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
   sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$PROXMOX_HOST" "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
-  sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$PUBKEY_PATH" "$REMOTE_USER@$PROXMOX_HOST":/root/.ssh/$KEY_NAME.pub
+
+  # Copy enterprise public key file (for Proxmox node administration)
+  sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$ENTERPRISE_PUBKEY_PATH" "$REMOTE_USER@$PROXMOX_HOST:/root/.ssh/$ENTERPRISE_KEY_NAME.pub"
+
+  # Copy admin public key file (for VM/container cloud-init templates)
+  sshpass -p "$PROXMOX_PASS" scp $SSH_OPTS "$ADMIN_PUBKEY_PATH" "$REMOTE_USER@$PROXMOX_HOST:/root/.ssh/$ADMIN_KEY_NAME.pub"
+
+  # Add enterprise key to authorized_keys (only enterprise key on Proxmox nodes - admin key is for VMs/containers)
   sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS "$REMOTE_USER@$PROXMOX_HOST" \
-    "grep -qxF '$(cat "$PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
-      || (echo '$(cat "$PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)"
-  success "Public key installed successfully on $PROXMOX_HOST.\n"
+    "grep -qxF '$(cat "$ENTERPRISE_PUBKEY_PATH")' ~/.ssh/authorized_keys 2>/dev/null \
+      || (echo '$(cat "$ENTERPRISE_PUBKEY_PATH")' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)"
+  success "SSH public keys installed successfully on $PROXMOX_HOST.\n"
 }

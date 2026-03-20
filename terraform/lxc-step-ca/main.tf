@@ -9,7 +9,7 @@ resource "proxmox_lxc" "step-ca" {
   hostname          = "step-ca"
   ostemplate        = var.ostemplate
   password          = var.root_password 
-  ssh_public_keys   = file("/crypto/lab-deploy.pub")
+  ssh_public_keys   = file(var.ssh_admin_public_key_file)  # Admin key for container access
   unprivileged      = true
 
   cores             = 2
@@ -111,7 +111,7 @@ EOF
   connection {
     type            = "ssh"
     user            = "root"
-    private_key     = file("/crypto/lab-deploy")
+    private_key     = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host            = local.eth0_ipv4
   }
 }

@@ -30,7 +30,7 @@ resource "proxmox_lxc" "dns" {
   hostname        = each.value.hostname
   ostemplate      = var.ostemplate
   password        = var.root_password
-  ssh_public_keys = file("/crypto/lab-deploy.pub")
+  ssh_public_keys = file(var.ssh_admin_public_key_file)  # Admin key for container access
   # HA with keepalived requires NET_ADMIN capability, which needs privileged mode
   unprivileged    = !var.enable_ha_vip
 
@@ -78,7 +78,7 @@ resource "null_resource" "enable_nesting" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = each.value.ssh_host
   }
 
@@ -105,7 +105,7 @@ resource "null_resource" "direct_provision" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = each.value.ip_bare
   }
 
@@ -200,7 +200,7 @@ resource "null_resource" "nebula_sync_setup" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = local.primary_ip
   }
 
@@ -299,7 +299,7 @@ resource "null_resource" "finalize_primary_dns" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = local.primary_ip
   }
 
@@ -322,7 +322,7 @@ resource "null_resource" "configure_local_dns" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = local.primary_ip
   }
 
@@ -372,7 +372,7 @@ resource "null_resource" "sdn_provision" {
       # Wait for container to be fully started and running
       echo "[+] Waiting for container ${proxmox_lxc.dns[each.key].vmid} to be running..."
       for i in $(seq 1 30); do
-        STATUS=$(ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
+        STATUS=$(ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
           "pct status ${proxmox_lxc.dns[each.key].vmid} 2>/dev/null | grep -oE 'running|stopped'" || echo "unknown")
         if [ "$STATUS" = "running" ]; then
           echo "[+] Container ${proxmox_lxc.dns[each.key].vmid} is running"
@@ -381,7 +381,7 @@ resource "null_resource" "sdn_provision" {
         echo "  Waiting... (attempt $i/30, status: $STATUS)"
         if [ "$STATUS" = "stopped" ]; then
           echo "[+] Starting container ${proxmox_lxc.dns[each.key].vmid}..."
-          ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
+          ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
             "pct start ${proxmox_lxc.dns[each.key].vmid}" || true
         fi
         sleep 5
@@ -392,9 +392,9 @@ resource "null_resource" "sdn_provision" {
 ${local.unbound_conf}
 UNBOUNDCONF
 
-      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/unbound-${each.key}.conf root@${each.value.ssh_host}:/tmp/unbound-${each.key}.conf
+      scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/unbound-${each.key}.conf root@${each.value.ssh_host}:/tmp/unbound-${each.key}.conf
 
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${each.value.ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${each.value.ssh_host} \
         "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/unbound-${each.key}.conf /tmp/pi-hole-unbound.conf"
 
       # Create install script on Proxmox host
@@ -465,9 +465,9 @@ systemctl restart pihole-FTL
 echo "[OK] Pi-hole + Unbound installation complete"
 INSTALLSCRIPT
 
-      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/install-pihole-${each.key}.sh root@${each.value.ssh_host}:/tmp/install-pihole-${each.key}.sh
+      scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/install-pihole-${each.key}.sh root@${each.value.ssh_host}:/tmp/install-pihole-${each.key}.sh
 
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no -o ConnectTimeout=300 root@${each.value.ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=300 root@${each.value.ssh_host} \
         "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/install-pihole-${each.key}.sh /tmp/install-pihole.sh && pct exec ${proxmox_lxc.dns[each.key].vmid} -- bash /tmp/install-pihole.sh"
 
       echo "[OK] Pi-hole installed on ${each.key}"
@@ -565,9 +565,9 @@ echo "[OK] Nebula-Sync configured on primary node"
 echo "nameserver 127.0.0.1" > /etc/resolv.conf
 NSSCRIPT
 
-      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/nebula-sync-install.sh root@${local.primary_ssh_host}:/tmp/nebula-sync-install.sh
+      scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/nebula-sync-install.sh root@${local.primary_ssh_host}:/tmp/nebula-sync-install.sh
 
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
         "pct push ${var.vmid_start} /tmp/nebula-sync-install.sh /tmp/nebula-sync-install.sh && pct exec ${var.vmid_start} -- bash /tmp/nebula-sync-install.sh"
     EOT
   }
@@ -581,7 +581,7 @@ resource "null_resource" "sdn_finalize_primary" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
         "pct exec ${var.vmid_start} -- bash -c 'echo nameserver 127.0.0.1 > /etc/resolv.conf'"
     EOT
   }
@@ -634,9 +634,9 @@ echo "  - ${hostname}.${var.dns_zone} -> ${node.ip_bare}"
 echo "[OK] Local DNS configuration complete"
 DNSSCRIPT
 
-      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/dns-config-sdn.sh root@${local.primary_ssh_host}:/tmp/dns-config-sdn.sh
+      scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/dns-config-sdn.sh root@${local.primary_ssh_host}:/tmp/dns-config-sdn.sh
 
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${local.primary_ssh_host} \
         "pct push ${var.vmid_start} /tmp/dns-config-sdn.sh /tmp/dns-config.sh && pct exec ${var.vmid_start} -- bash /tmp/dns-config.sh"
     EOT
   }
@@ -659,7 +659,7 @@ resource "null_resource" "keepalived_setup" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file("/crypto/lab-deploy")
+    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
     host        = each.value.ip_bare
   }
 
@@ -870,9 +870,9 @@ else
 fi
 KEEPSCRIPT
 
-      scp -i /crypto/lab-deploy -o StrictHostKeyChecking=no /tmp/keepalived-${each.key}.sh root@${each.value.ssh_host}:/tmp/keepalived-${each.key}.sh
+      scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/keepalived-${each.key}.sh root@${each.value.ssh_host}:/tmp/keepalived-${each.key}.sh
 
-      ssh -i /crypto/lab-deploy -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
+      ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
         "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_lxc.dns[each.key].vmid} -- bash /tmp/keepalived-setup.sh"
     EOT
   }

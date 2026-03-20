@@ -41,11 +41,14 @@ variable ssh_password {
   type = string
   default = "changeme123"
 }
-variable "ssh_private_key_file" { 
-  type = string 
-  default = "/crypto/lab-deploy"
+# SSH key for VM administration (templates use admin key, not enterprise key)
+variable "ssh_private_key_file" {
+  type = string
+  description = "Path to admin private key for VM SSH"
+  default = "/crypto/labadmin"
 }
-variable "ssh_public_key_file" { 
-  type = string 
-  default = "/crypto/lab-deploy.pub"
+variable "ssh_public_key_file" {
+  type = string
+  description = "Path to admin public key for VM SSH"
+  default = "/crypto/labadmin.pub"
 }

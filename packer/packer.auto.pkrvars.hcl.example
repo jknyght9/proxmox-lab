@@ -8,7 +8,8 @@ proxmox_token_secret = "ACCESSTOKENSECRET"
 root_password = "changeme123"
 ssh_username = "labadmin"
 ssh_password = "changeme123"
-ssh_private_key_file = "/crypto/lab-deploy" #DO NOT CHANGE
+# SSH keys for VM/container administration (labadmin key)
+ssh_private_key_file = "/crypto/labadmin"  # DO NOT CHANGE
 
 # DNS config
 dns_postfix = "mylab.lan"

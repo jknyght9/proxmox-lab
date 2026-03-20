@@ -187,21 +187,19 @@ EOF
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
-    info "  Removing SSH key on $node..."
-    # Get the key comment (last field) to identify the key - more reliable than matching full key
-    if [ -f "${KEY_PATH}.pub" ]; then
-      local key_comment
-      key_comment=$(awk '{print $NF}' "${KEY_PATH}.pub")
-      if [ -n "$key_comment" ]; then
-        # Remove lines containing the key comment (e.g., "lab-deploy" or "user@host")
-        sshRun "$REMOTE_USER" "$ip" "grep -v '${key_comment}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
-      else
-        # Fallback: remove by key type and first 20 chars of key (avoids special char issues)
-        local key_prefix
-        key_prefix=$(awk '{print $1" "substr($2,1,20)}' "${KEY_PATH}.pub")
-        sshRun "$REMOTE_USER" "$ip" "grep -v '${key_prefix}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
+    info "  Removing SSH keys on $node..."
+
+    # Remove enterprise key (labenterpriseadmin) from Proxmox nodes
+    if [ -f "${ENTERPRISE_PUBKEY_PATH}" ]; then
+      local enterprise_comment
+      enterprise_comment=$(awk '{print $NF}' "${ENTERPRISE_PUBKEY_PATH}")
+      if [ -n "$enterprise_comment" ]; then
+        sshRun "$REMOTE_USER" "$ip" "grep -v '${enterprise_comment}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
       fi
     fi
+
+    # Also remove legacy lab-deploy key if present (for backward compatibility)
+    sshRun "$REMOTE_USER" "$ip" "grep -v 'lab-deploy' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
   done
   success "SSH keys removed from nodes"
 

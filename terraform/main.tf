@@ -3,14 +3,15 @@ module "nomad" {
   providers = {
     proxmox = proxmox
   }
-  dns_postfix         = var.dns_postfix
-  dns_primary_ip      = var.dns_primary_ipv4
-  proxmox_api_url     = var.proxmox_api_url
-  proxmox_bridge      = var.network_interface_bridge
-  node_ip_map         = local.node_ip_map
-  source              = "./vm-nomad"
-  ssh_public_key_file = var.ssh_public_key_file
-  vm_storage          = var.vm_storage
+  dns_postfix                     = var.dns_postfix
+  dns_primary_ip                  = var.dns_primary_ipv4
+  proxmox_api_url                 = var.proxmox_api_url
+  proxmox_bridge                  = var.network_interface_bridge
+  node_ip_map                     = local.node_ip_map
+  source                          = "./vm-nomad"
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  vm_storage                      = var.vm_storage
 
   # Traefik HA Configuration (keepalived VIP)
   traefik_ha_enabled        = var.nomad_traefik_ha_enabled
@@ -38,6 +39,10 @@ module "dns-main" {
   node_ip_map      = local.node_ip_map
   dns_zone         = var.dns_postfix
   bootstrap_dns    = var.bootstrap_dns
+
+  # SSH key configuration
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
 
   # HA Configuration (keepalived VIP)
   enable_ha_vip     = var.enable_dns_ha_vip
@@ -73,6 +78,10 @@ module "dns-labnet" {
   dhcp_router      = var.labnet_dhcp_router
   dhcp_lease_time  = var.labnet_dhcp_lease_time
 
+  # SSH key configuration
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+
   # HA Configuration (keepalived VIP)
   enable_ha_vip     = var.labnet_enable_dns_ha_vip
   ha_vip_address    = var.labnet_dns_ha_vip_address
@@ -99,16 +108,21 @@ module "step-ca" {
   eth1_vmbr           = var.step-ca_eth1_vmbr
   eth1_ipv4_cidr      = var.step-ca_eth1_ipv4_cidr
 
+  # SSH key configuration
+  ssh_admin_private_key_file = replace(var.ssh_admin_public_key_file, ".pub", "")
+  ssh_admin_public_key_file  = var.ssh_admin_public_key_file
+
   source              = "./lxc-step-ca"
 }
 
 module "kasm" {
-  dns_postfix         = var.dns_postfix
-  kasm_admin_password = var.kasm_admin_password
-  kasm_version        = var.kasm_version
-  proxmox_api_url     = var.proxmox_api_url
-  proxmox_bridge      = var.network_interface_bridge
-  source              = "./vm-kasm"
-  ssh_public_key_file = var.ssh_public_key_file
-  vm_storage          = var.vm_storage
+  dns_postfix                     = var.dns_postfix
+  kasm_admin_password             = var.kasm_admin_password
+  kasm_version                    = var.kasm_version
+  proxmox_api_url                 = var.proxmox_api_url
+  proxmox_bridge                  = var.network_interface_bridge
+  source                          = "./vm-kasm"
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  vm_storage                      = var.vm_storage
 }

@@ -30,7 +30,7 @@ function checkProxmox() {
 function proxmoxLabInstall() {
   doing "Running Proxmox VE Lab Install Script..."
   scpTo "./proxmox/setup.sh" "$REMOTE_USER" "$PROXMOX_HOST" "/root/"
-  ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
+  ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$PROXMOX_HOST" 'bash -c "chmod +x /root/setup.sh && /root/setup.sh"'
   success "Completed the lab installation script on $PROXMOX_HOST\n"
 }
 
@@ -55,8 +55,8 @@ function proxmoxPostInstall() {
   fi
 
   if [[ "$RUN_POST_SCRIPT" =~ ^[Yy]$ ]]; then
-    if [ ! -f "$KEY_PATH" ]; then
-      error "SSH private key not found at $KEY_PATH"
+    if [ ! -f "$ENTERPRISE_KEY_PATH" ]; then
+      error "SSH private key not found at $ENTERPRISE_KEY_PATH"
       return 1
     fi
 
@@ -66,7 +66,7 @@ function proxmoxPostInstall() {
 
       doing "Running Proxmox VE Post-Install Script on $node ($ip)..."
       # Note: Using raw ssh here because we need -t for interactive script
-      ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$ip" \
+      ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@$ip" \
         'bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh)"' \
         && success "Completed post-installation on $node" \
         || warn "Post-installation may have failed on $node"
@@ -96,7 +96,7 @@ function runProxmoxSetupOnAll() {
 
   # Run setup and capture output for token extraction
   local SETUP_OUTPUT
-  SETUP_OUTPUT=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
+  SETUP_OUTPUT=$(ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
     "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'" 2>&1) || true
 
   # Display the output
@@ -113,7 +113,7 @@ function runProxmoxSetupOnAll() {
     doing "Running node setup on $node ($ip)..."
     scpTo "proxmox/setup.sh" "$REMOTE_USER" "${ip}" "/tmp/proxmox-setup.sh"
     # Note: Using raw ssh here because we need -t for interactive script
-    ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@${ip}" \
+    ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@${ip}" \
       "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup '$CONFIG'"
   done
 
