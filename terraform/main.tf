@@ -69,7 +69,7 @@ module "dns-labnet" {
   proxmox_ssh_host = local.proxmox_api_host
   node_ip_map      = local.node_ip_map
   dns_zone         = var.dns_postfix
-  bootstrap_dns    = var.bootstrap_dns
+  bootstrap_dns    = var.labnet_bootstrap_dns != "" ? var.labnet_bootstrap_dns : var.bootstrap_dns
 
   # DHCP for labnet SDN (VMs need IP addresses)
   dhcp_enabled     = var.labnet_dhcp_enabled

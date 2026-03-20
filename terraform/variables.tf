@@ -95,8 +95,14 @@ variable "dns_primary_ipv4" {
 
 variable "bootstrap_dns" {
   type        = string
-  description = "DNS server to use during initial provisioning (before Pi-hole is running). Use your gateway DNS."
+  description = "DNS server for main cluster provisioning (before Pi-hole is running). Use your external gateway."
   default     = "1.1.1.1"
+}
+
+variable "labnet_bootstrap_dns" {
+  type        = string
+  description = "DNS server for labnet SDN provisioning. Use main dns-01 IP after it's deployed, or external gateway if routable."
+  default     = ""  # Empty = use bootstrap_dns value
 }
 
 variable step-ca_root_password {

@@ -51,6 +51,10 @@ dns_primary_ipv4 = "YOUR.DNS.IP.HERE"
 # Usually your gateway DNS server. Required if external DNS (1.1.1.1) is blocked.
 bootstrap_dns = "1.1.1.1"
 
+# Bootstrap DNS specifically for labnet SDN containers
+# Use main dns-01 IP after it's deployed, or leave empty to use bootstrap_dns
+# labnet_bootstrap_dns = "192.168.100.4"
+
 # Pi-hole admin credentials
 pihole_admin_password = "CHANGE-THIS-PASSWORD"
 pihole_root_password  = "CHANGE-THIS-PASSWORD"

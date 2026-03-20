@@ -291,6 +291,17 @@ function updateTerraformFromClusterInfo() {
   fi
   info "  bootstrap_dns = \"$EXT_GW\""
 
+  # Update labnet_bootstrap_dns (use main dns-01 for labnet SDN provisioning)
+  # Labnet containers use the main DNS cluster which is deployed first
+  if grep -q "^labnet_bootstrap_dns" "$TFVARS_FILE"; then
+    sed_inplace "s|^labnet_bootstrap_dns[[:space:]]*=.*|labnet_bootstrap_dns = \"$DNS_START\"|" "$TFVARS_FILE"
+  else
+    echo "" >> "$TFVARS_FILE"
+    echo "# Bootstrap DNS for labnet SDN (auto-generated from main dns-01 IP)" >> "$TFVARS_FILE"
+    echo "labnet_bootstrap_dns = \"$DNS_START\"" >> "$TFVARS_FILE"
+  fi
+  info "  labnet_bootstrap_dns = \"$DNS_START\""
+
   # Update step-ca_eth0_ipv4_cidr (service start IP with /24)
   local EXT_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
   local CIDR_MASK=$(echo "$EXT_CIDR_VAL" | grep -oE '/[0-9]+$')
