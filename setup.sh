@@ -92,16 +92,17 @@ function runEverything() {
       loadClusterInfo
     else
       detectAndSaveCluster
+      # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
+      distributeSSHKeys
       configureNetworking
     fi
   else
     # Fresh setup - detect cluster and configure
     detectAndSaveCluster
+    # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
+    distributeSSHKeys
     configureNetworking
   fi
-
-  # Distribute SSH keys to all cluster nodes
-  distributeSSHKeys
 
   # Select storage and network bridge (updates cluster-info.json)
   selectSharedStorage
@@ -148,18 +149,25 @@ function runEverythingButSSH() {
     USE_EXISTING=${USE_EXISTING:-Y}
     if [[ "$USE_EXISTING" =~ ^[Yy]$ ]]; then
       loadClusterInfo
+      # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
+      if [ -f "$ENTERPRISE_KEY_PATH" ]; then
+        distributeSSHKeys
+      fi
     else
       detectAndSaveCluster
+      # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
+      if [ -f "$ENTERPRISE_KEY_PATH" ]; then
+        distributeSSHKeys
+      fi
       configureNetworking
     fi
   else
     detectAndSaveCluster
+    # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
+    if [ -f "$ENTERPRISE_KEY_PATH" ]; then
+      distributeSSHKeys
+    fi
     configureNetworking
-  fi
-
-  # Distribute SSH keys to all cluster nodes (assumes keys exist)
-  if [ -f "$ENTERPRISE_KEY_PATH" ]; then
-    distributeSSHKeys
   fi
 
   # Select storage and network bridge
@@ -222,6 +230,11 @@ EOF
   fi
 
   loadClusterInfo
+
+  # Ensure SSH keys are distributed (configureNetworking needs to SSH to all nodes)
+  if [ -f "$ENTERPRISE_KEY_PATH" ]; then
+    distributeSSHKeys
+  fi
 
   # Run network configuration
   configureNetworking
