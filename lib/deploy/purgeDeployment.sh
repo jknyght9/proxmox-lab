@@ -147,12 +147,16 @@ EOF
   rm -f hosts.json 2>/dev/null || true
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
-    sed -i.bak '/# Proxmox cluster node IPs (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed -i.bak '/# DNS cluster nodes - Main cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed -i.bak '/# DNS cluster nodes - Labnet SDN cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed -i.bak '/# Labnet DHCP Configuration (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed -i.bak '/# Bootstrap DNS for initial provisioning (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    rm -f terraform/terraform.tfvars.bak 2>/dev/null || true
+    # Use portable sed in-place editing (macOS vs GNU sed)
+    local SED_INPLACE=(-i)
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      SED_INPLACE=(-i '')
+    fi
+    sed "${SED_INPLACE[@]}" '/# Proxmox cluster node IPs (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed "${SED_INPLACE[@]}" '/# DNS cluster nodes - Main cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed "${SED_INPLACE[@]}" '/# DNS cluster nodes - Labnet SDN cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed "${SED_INPLACE[@]}" '/# Labnet DHCP Configuration (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
+    sed "${SED_INPLACE[@]}" '/# Bootstrap DNS for initial provisioning (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
   fi
   # Remove storage and network config from cluster-info.json
   if [ -f "$CLUSTER_INFO_FILE" ]; then
