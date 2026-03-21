@@ -169,33 +169,61 @@ EOF
   # Step 8: Clean local files
   doing "Step 8/10: Cleaning local configuration files..."
   rm -f hosts.json 2>/dev/null || true
+
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
-    # Use portable sed in-place editing (macOS vs GNU sed)
-    local SED_INPLACE=(-i)
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-      SED_INPLACE=(-i '')
+    info "  Cleaning terraform.tfvars..."
+    # Use a temp file approach that works on both macOS and Linux
+    local tfvars_tmp
+    tfvars_tmp=$(mktemp)
+    # Remove auto-generated sections (pattern: comment line to next blank line)
+    grep -v -E '^# (Proxmox cluster node IPs|DNS cluster nodes|Labnet DHCP Configuration|Bootstrap DNS for).*\(auto-generated' terraform/terraform.tfvars 2>/dev/null > "$tfvars_tmp" || true
+    if [ -s "$tfvars_tmp" ]; then
+      mv "$tfvars_tmp" terraform/terraform.tfvars
+    else
+      rm -f "$tfvars_tmp"
     fi
-    sed "${SED_INPLACE[@]}" '/# Proxmox cluster node IPs (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed "${SED_INPLACE[@]}" '/# DNS cluster nodes - Main cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed "${SED_INPLACE[@]}" '/# DNS cluster nodes - Labnet SDN cluster (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed "${SED_INPLACE[@]}" '/# Labnet DHCP Configuration (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
-    sed "${SED_INPLACE[@]}" '/# Bootstrap DNS for initial provisioning (auto-generated/,/^$/d' terraform/terraform.tfvars 2>/dev/null || true
   fi
+
   # Remove storage and network config from cluster-info.json
   if [ -f "$CLUSTER_INFO_FILE" ]; then
-    local tmp=$(mktemp)
-    jq 'del(.storage) | del(.network) | del(.dns_postfix) | del(.ad_config)' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
+    info "  Cleaning cluster-info.json..."
+    local cluster_tmp
+    cluster_tmp=$(mktemp)
+    if jq 'del(.storage) | del(.network) | del(.dns_postfix) | del(.ad_config)' "$CLUSTER_INFO_FILE" > "$cluster_tmp" 2>/dev/null; then
+      mv "$cluster_tmp" "$CLUSTER_INFO_FILE"
+    else
+      rm -f "$cluster_tmp"
+      warn "  Failed to clean cluster-info.json"
+    fi
   fi
+
   # Clean packer storage settings
   if [ -f "packer/packer.auto.pkrvars.hcl" ]; then
-    grep -v "^template_storage" packer/packer.auto.pkrvars.hcl > packer/packer.auto.pkrvars.hcl.tmp 2>/dev/null || true
-    mv packer/packer.auto.pkrvars.hcl.tmp packer/packer.auto.pkrvars.hcl 2>/dev/null || true
+    info "  Cleaning packer.auto.pkrvars.hcl..."
+    local packer_tmp
+    packer_tmp=$(mktemp)
+    if grep -v "^template_storage" packer/packer.auto.pkrvars.hcl > "$packer_tmp" 2>/dev/null; then
+      mv "$packer_tmp" packer/packer.auto.pkrvars.hcl
+    else
+      rm -f "$packer_tmp"
+    fi
   fi
-  # Clean terraform state
-  docker compose run --rm -T terraform state list 2>/dev/null | while read -r resource; do
-    docker compose run --rm -T terraform state rm "$resource" 2>/dev/null || true
-  done
+
+  # Clean terraform state (only if docker is available)
+  if command -v docker &>/dev/null && docker info &>/dev/null; then
+    info "  Cleaning terraform state..."
+    local state_list
+    state_list=$(docker compose run --rm -T terraform state list 2>/dev/null) || true
+    if [ -n "$state_list" ]; then
+      echo "$state_list" | while read -r resource; do
+        docker compose run --rm -T terraform state rm "$resource" 2>/dev/null || true
+      done
+    fi
+  else
+    info "  Skipping terraform state cleanup (docker not available)"
+  fi
+
   success "Local files cleaned"
 
   # Step 9: Remove Tailscale DNS override (if configured)
