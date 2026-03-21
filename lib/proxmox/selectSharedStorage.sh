@@ -81,7 +81,7 @@ function selectSharedStorage() {
       STORAGE_TYPES+=("${type:-unknown}")
       STORAGE_SHARED+=("$shared")
     fi
-  done < <(echo "$STORAGE_JSON" | jq -r "$JQ_FILTER | \"\(.storage)|\(.type // \"unknown\")|\(.shared // 0)\"")
+  done < <(echo "$STORAGE_JSON" | jq -r "[$JQ_FILTER] | sort_by(.storage) | .[] | \"\(.storage)|\(.type // \"unknown\")|\(.shared // 0)\"")
 
   if [ ${#STORAGE_NAMES[@]} -gt 0 ]; then
     echo
