@@ -119,6 +119,9 @@ function runEverything() {
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
 
+  # Check/fix API credentials before setup (removes stale user if credentials missing locally)
+  ensureProxmoxCredentials
+
   # Run Proxmox setup on all nodes (creates API token and captures credentials)
   runProxmoxSetupOnAll
 
@@ -184,6 +187,9 @@ function runEverythingButSSH() {
        storage: { selected: $storage, type: $storage_type, is_shared: $shared },
        network: (.network + { selected_bridge: $bridge })
      }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
+
+  # Check/fix API credentials before setup (removes stale user if credentials missing locally)
+  ensureProxmoxCredentials
 
   # Run Proxmox setup on all nodes (creates API token and captures credentials)
   runProxmoxSetupOnAll

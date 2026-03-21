@@ -1,5 +1,67 @@
 #!/usr/bin/env bash
 
+# Check if we have valid Proxmox API credentials, and if not, clean up so we can recreate
+function ensureProxmoxCredentials() {
+  local CREDS_FILE="$CRYPTO_DIR/proxmox-credentials.json"
+  local USER="hashicorp@pam"
+  local TOKEN_ID="hashicorp-token"
+
+  doing "Checking Proxmox API credentials..."
+
+  # Check if we have valid local credentials
+  local have_valid_creds=false
+  if [ -f "$CREDS_FILE" ]; then
+    local stored_secret
+    stored_secret=$(jq -r '.proxmox_api_token_secret // ""' "$CREDS_FILE" 2>/dev/null)
+    # Check if secret is a real value (not a placeholder)
+    if [ -n "$stored_secret" ] && \
+       [ "$stored_secret" != "RETRIEVE_FROM_PROXMOX_OR_REGENERATE" ] && \
+       [ "$stored_secret" != "PASTE_TOKEN_SECRET_HERE" ] && \
+       [ "$stored_secret" != "null" ]; then
+      have_valid_creds=true
+      success "Found valid API credentials in $CREDS_FILE"
+    fi
+  fi
+
+  if $have_valid_creds; then
+    return 0
+  fi
+
+  # No valid local credentials - check if user/token exists on Proxmox
+  info "No valid local credentials found, checking Proxmox..."
+
+  local user_exists=false
+  local token_exists=false
+
+  if sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pveum user list --output-format json 2>/dev/null | jq -e '.[] | select(.userid == \"$USER\")'" >/dev/null 2>&1; then
+    user_exists=true
+  fi
+
+  if $user_exists; then
+    if sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pveum user token list $USER --output-format json 2>/dev/null | jq -e '.[] | select(.tokenid == \"$TOKEN_ID\")'" >/dev/null 2>&1; then
+      token_exists=true
+    fi
+  fi
+
+  if $user_exists || $token_exists; then
+    warn "API user/token exists on Proxmox but we don't have valid credentials locally"
+    info "Removing existing user/token so we can recreate with new credentials..."
+
+    # Delete token first, then user
+    sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pveum user token remove $USER $TOKEN_ID 2>/dev/null" || true
+    sshRun "$REMOTE_USER" "$PROXMOX_HOST" "pveum user delete $USER 2>/dev/null" || true
+
+    # Remove the invalid credentials file
+    rm -f "$CREDS_FILE" 2>/dev/null || true
+
+    success "Cleaned up existing API user - will be recreated during setup"
+  else
+    info "No existing API user found on Proxmox - will be created during setup"
+  fi
+
+  return 0
+}
+
 function checkProxmox() {
   header
   info "Requesting Proxmox information"
