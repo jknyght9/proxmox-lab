@@ -149,12 +149,12 @@ function updateDNSRecords() {
   info "Summary: $RECORD_COUNT A-records to add"
 
   doing "Updating Pi-hole @ $DNS_IP..."
-  sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' && pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'" \
+  sshRunAdmin "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' && pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'" \
     && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
 
   # Trigger Nebula-Sync to propagate changes
   doing "Triggering Nebula-Sync to propagate to replicas..."
-  if sshRun "$REMOTE_USER" "$DNS_IP" "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
+  if sshRunAdmin "$REMOTE_USER" "$DNS_IP" "systemctl start nebula-sync.service && systemctl status nebula-sync.service --no-pager | head -5"; then
     success "Sync triggered"
   else
     warn "Nebula-Sync sync failed or not configured - records may need manual sync"
