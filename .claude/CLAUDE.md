@@ -45,6 +45,7 @@ d2) Regenerate CA                - Recreate step-ca certificates
 d3) Update root certificates     - Push CA cert to Proxmox nodes
 d4) Configure networking         - Update network/HA settings only
 d5) Reset labnet egress          - Fix DHCP/routing issues
+d6) Reset Proxmox API credentials - Purge and recreate hashicorp@pam user/token
 ```
 
 ### Docker Compose Services

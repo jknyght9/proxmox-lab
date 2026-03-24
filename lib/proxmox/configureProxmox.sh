@@ -1,5 +1,98 @@
 #!/usr/bin/env bash
 
+# Reset Proxmox API credentials - purge existing user/token/role and recreate
+function resetProxmoxCredentials() {
+  local CREDS_FILE="$CRYPTO_DIR/proxmox-credentials.json"
+  local USER="hashicorp@pam"
+  local TOKEN_ID="hashicorp-token"
+  local ROLE="HashicorpBuild"
+
+  cat <<EOF
+
+############################################################################
+Reset Proxmox API Credentials
+
+This will:
+1. Delete the existing hashicorp@pam user, token, and HashicorpBuild role
+2. Remove the local credentials file (crypto/proxmox-credentials.json)
+3. Recreate the user, role, and token with fresh credentials
+4. Update terraform.tfvars with new credentials
+############################################################################
+
+EOF
+
+  # Load cluster info
+  if [ ! -f "$CLUSTER_INFO_FILE" ]; then
+    error "cluster-info.json not found. Run option 1 or 2 first to initialize the cluster."
+    return 1
+  fi
+  loadClusterInfo
+
+  # Confirm before proceeding
+  read -rp "$(question "Proceed with credential reset? (y/N): ")" CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    warn "Cancelled"
+    return 0
+  fi
+
+  local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
+
+  # Step 1: Delete existing user, token, and role on Proxmox
+  doing "Removing existing API user, token, and role from Proxmox..."
+  sshRun "$REMOTE_USER" "$PRIMARY_IP" \
+    "pveum user token remove $USER $TOKEN_ID 2>/dev/null || true; \
+     pveum user delete $USER 2>/dev/null || true; \
+     pveum role delete $ROLE 2>/dev/null || true"
+  success "Removed existing Proxmox API resources"
+
+  # Step 2: Remove local credentials file
+  doing "Removing local credentials file..."
+  rm -f "$CREDS_FILE" 2>/dev/null || true
+  success "Removed $CREDS_FILE"
+
+  # Step 3: Recreate user, role, and token
+  doing "Recreating API user, role, and token..."
+
+  # Load service passwords (includes template_password)
+  loadServicePasswords || true
+
+  # Build config JSON from cluster-info.json
+  local CONFIG
+  CONFIG=$(jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE")
+
+  scpTo "proxmox/setup.sh" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-setup.sh"
+
+  # Run setup and capture output for token extraction
+  local SETUP_OUTPUT
+  SETUP_OUTPUT=$(ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
+    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'" 2>&1) || true
+
+  # Display the output
+  echo "$SETUP_OUTPUT"
+
+  # Extract and save API token credentials
+  if saveProxmoxCredentials "$SETUP_OUTPUT" "$PRIMARY_IP"; then
+    success "New API credentials created and saved"
+  else
+    error "Failed to save new credentials"
+    return 1
+  fi
+
+  # Step 4: Update terraform.tfvars
+  doing "Updating terraform.tfvars with new credentials..."
+  updateTerraformFromClusterInfo
+  success "terraform.tfvars updated"
+
+  cat <<EOF
+
+Proxmox API credentials have been reset successfully.
+
+New credentials saved to: $CREDS_FILE
+Terraform configuration updated in: terraform/terraform.tfvars
+
+EOF
+}
+
 # Check if we have valid Proxmox API credentials, and if not, clean up so we can recreate
 function ensureProxmoxCredentials() {
   local CREDS_FILE="$CRYPTO_DIR/proxmox-credentials.json"

@@ -301,6 +301,7 @@ function showMenu() {
     echo " d3) Update Proxmox root certificates"
     echo " d4) Configure networking"
     echo " d5) Reset labnet egress (fix DHCP/routing issues)"
+    echo " d6) Reset Proxmox API credentials"
   fi
   echo
 }
@@ -310,7 +311,7 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-14, d1-d5]: ")" choice
+    read -rp "$(question "Select an option [0-14, d1-d6]: ")" choice
   else
     read -rp "$(question "Select an option [0-14]: ")" choice
   fi
@@ -337,6 +338,7 @@ while true; do
     d3|D3) if [ "$DEV_MODE" = true ]; then updateRootCertificates; else error "Invalid option: $choice"; fi;;
     d4|D4) if [ "$DEV_MODE" = true ]; then reconfigureNetworking; else error "Invalid option: $choice"; fi;;
     d5|D5) if [ "$DEV_MODE" = true ]; then resetLabnetEgress; else error "Invalid option: $choice"; fi;;
+    d6|D6) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials; else error "Invalid option: $choice"; fi;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
