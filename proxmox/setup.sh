@@ -49,15 +49,17 @@ if [ -n "$CONFIG_JSON" ]; then
   BRIDGE_NAME=$(echo "$CONFIG_JSON" | jq -r '.network.selected_bridge // ""')
 
   # Extract labnet/SDN config
-  INT_CIDR=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.cidr // "172.16.0.0/24"')
-  INT_GW=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.gateway // "172.16.0.1"')
+  # Note: Don't use // for .enabled since jq treats false same as null for //
+  LABNET_ENABLED=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.enabled // empty | tostring' 2>/dev/null || echo "true")
   DNS_POSTFIX=$(echo "$CONFIG_JSON" | jq -r '.dns_postfix // "lab.lan"')
-  LABNET_ENABLED=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.enabled // true')
 
   # Extract template password (for cloud-init VMs)
   TEMPLATE_PASSWORD=$(echo "$CONFIG_JSON" | jq -r '.template_password // ""')
 
+  # Only parse and configure labnet SDN settings if enabled
   if [ "$LABNET_ENABLED" = "true" ]; then
+    INT_CIDR=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.cidr // "172.16.0.0/24"')
+    INT_GW=$(echo "$CONFIG_JSON" | jq -r '.network.labnet.gateway // "172.16.0.1"')
     SDN_GATEWAY="$INT_GW"
     SDN_SUBNET="$INT_CIDR"
     SDN_SUBNET_CIDR=$(echo "$INT_CIDR" | grep -oE '[0-9]+$')
