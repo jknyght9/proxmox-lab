@@ -5,7 +5,8 @@ export TERM=xterm
 
 # Mode and configuration
 MODE="${1:-full}"
-CONFIG_JSON="${2:-}"
+CONFIG_ARG="${2:-}"
+CONFIG_JSON=""
 
 # SDN defaults (can be overridden by config JSON)
 SDN_ZONE_NAME="labzone"
@@ -27,6 +28,18 @@ SDN_EGRESS_GATEWAY=""
 if ! command -v jq &>/dev/null; then
   echo "[+] Installing jq (required for config parsing)..."
   apt-get update -qq && apt-get install -y -qq jq
+fi
+
+# Load config from file path or inline JSON
+if [ -n "$CONFIG_ARG" ]; then
+  if [ -f "$CONFIG_ARG" ]; then
+    # Config is a file path - read it
+    CONFIG_JSON=$(cat "$CONFIG_ARG")
+    echo "[+] Config loaded from file: $CONFIG_ARG"
+  else
+    # Config is inline JSON (legacy support)
+    CONFIG_JSON="$CONFIG_ARG"
+  fi
 fi
 
 # Parse config from JSON if provided

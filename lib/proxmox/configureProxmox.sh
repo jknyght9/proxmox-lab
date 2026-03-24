@@ -57,15 +57,20 @@ EOF
   loadServicePasswords || true
 
   # Build config JSON from cluster-info.json
-  local CONFIG
-  CONFIG=$(jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE")
+  local CONFIG_FILE
+  CONFIG_FILE=$(mktemp)
+  jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE" > "$CONFIG_FILE"
 
   scpTo "proxmox/setup.sh" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-setup.sh"
+  scpTo "$CONFIG_FILE" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-config.json"
 
   # Run setup and capture output for token extraction
   local SETUP_OUTPUT
   SETUP_OUTPUT=$(ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
-    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'" 2>&1) || true
+    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init /tmp/proxmox-config.json" 2>&1) || true
+
+  # Clean up temp file
+  rm -f "$CONFIG_FILE"
 
   # Display the output
   echo "$SETUP_OUTPUT"
@@ -240,19 +245,21 @@ function runProxmoxSetupOnAll() {
   loadServicePasswords || true
 
   # Build config JSON from cluster-info.json, injecting template_password
-  local CONFIG
-  CONFIG=$(jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE")
+  local CONFIG_FILE
+  CONFIG_FILE=$(mktemp)
+  jq --arg tp "${TEMPLATE_PASSWORD:-}" '. + {template_password: $tp}' "$CLUSTER_INFO_FILE" > "$CONFIG_FILE"
 
   # Cluster-wide setup (run once on primary)
   local PRIMARY_IP="${CLUSTER_NODE_IPS[0]}"
   doing "Running cluster-wide Proxmox setup on ${CLUSTER_NODES[0]} ($PRIMARY_IP)..."
 
   scpTo "proxmox/setup.sh" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-setup.sh"
+  scpTo "$CONFIG_FILE" "$REMOTE_USER" "${PRIMARY_IP}" "/tmp/proxmox-config.json"
 
   # Run setup and capture output for token extraction
   local SETUP_OUTPUT
   SETUP_OUTPUT=$(ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@${PRIMARY_IP}" \
-    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init '$CONFIG'" 2>&1) || true
+    "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh cluster-init /tmp/proxmox-config.json" 2>&1) || true
 
   # Display the output
   echo "$SETUP_OUTPUT"
@@ -267,10 +274,14 @@ function runProxmoxSetupOnAll() {
 
     doing "Running node setup on $node ($ip)..."
     scpTo "proxmox/setup.sh" "$REMOTE_USER" "${ip}" "/tmp/proxmox-setup.sh"
+    scpTo "$CONFIG_FILE" "$REMOTE_USER" "${ip}" "/tmp/proxmox-config.json"
     # Note: Using raw ssh here because we need -t for interactive script
     ssh -i "$ENTERPRISE_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t "$REMOTE_USER@${ip}" \
-      "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup '$CONFIG'"
+      "chmod +x /tmp/proxmox-setup.sh && /tmp/proxmox-setup.sh node-setup /tmp/proxmox-config.json"
   done
+
+  # Clean up temp file
+  rm -f "$CONFIG_FILE"
 
   success "Proxmox setup complete on all nodes"
 }
