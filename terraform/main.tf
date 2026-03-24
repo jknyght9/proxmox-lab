@@ -52,7 +52,10 @@ module "dns-main" {
 }
 
 # Labnet SDN DNS cluster (max 2 nodes on SDN network)
+# Only created if labnet nodes are configured (labnet enabled)
 module "dns-labnet" {
+  count = length(local.effective_dns_labnet_nodes) > 0 ? 1 : 0
+
   providers = {
     proxmox = proxmox
   }

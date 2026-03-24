@@ -3,7 +3,7 @@ output "hosts" {
     nomad      = try(module.nomad.nomad-hosts, {})
     kasm       = try(module.kasm.kasm-hosts, {})
     dns-main   = try(module.dns-main.dns-hosts, {})
-    dns-labnet = try(module.dns-labnet.dns-hosts, {})
+    dns-labnet = length(module.dns-labnet) > 0 ? try(module.dns-labnet[0].dns-hosts, {}) : {}
     step-ca    = try(module.step-ca.step-ca-hosts, {})
   }
 }
@@ -25,7 +25,7 @@ output "host-records" {
     ])
     internal = flatten([
       for group_hosts in [
-        try(module.dns-labnet.dns-hosts, {})
+        length(module.dns-labnet) > 0 ? try(module.dns-labnet[0].dns-hosts, {}) : {}
       ] : [
         for name, details in group_hosts : {
           hostname = details.hostname
