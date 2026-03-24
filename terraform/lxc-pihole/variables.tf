@@ -178,3 +178,10 @@ variable "ssh_admin_public_key_file" {
   description = "Path to admin public key for container SSH"
   default     = "/crypto/labadmin.pub"
 }
+
+# SSH key for container administration (used by direct provisioners)
+variable "ssh_admin_private_key_file" {
+  type        = string
+  description = "Path to admin private key for container SSH"
+  default     = "/crypto/labadmin"
+}

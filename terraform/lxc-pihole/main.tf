@@ -107,7 +107,7 @@ resource "null_resource" "direct_provision" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host        = each.value.ip_bare
   }
 
@@ -202,7 +202,7 @@ resource "null_resource" "nebula_sync_setup" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host        = local.primary_ip
   }
 
@@ -301,7 +301,7 @@ resource "null_resource" "finalize_primary_dns" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host        = local.primary_ip
   }
 
@@ -324,7 +324,7 @@ resource "null_resource" "configure_local_dns" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host        = local.primary_ip
   }
 
@@ -661,7 +661,7 @@ resource "null_resource" "keepalived_setup" {
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_admin_private_key_file)  # Admin key for container access
     host        = each.value.ip_bare
   }
 

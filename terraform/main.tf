@@ -43,6 +43,7 @@ module "dns-main" {
   # SSH key configuration
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
 
   # HA Configuration (keepalived VIP)
   enable_ha_vip     = var.enable_dns_ha_vip
@@ -84,6 +85,7 @@ module "dns-labnet" {
   # SSH key configuration
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
 
   # HA Configuration (keepalived VIP)
   enable_ha_vip     = var.labnet_enable_dns_ha_vip
