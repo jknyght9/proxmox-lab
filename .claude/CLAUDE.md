@@ -30,14 +30,21 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
  9) Deploy Authentik             - Nomad job for SSO/identity provider
 10) Deploy Samba AD              - Nomad job for Active Directory DCs
 11) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
-12) Build DNS records            - Update Pi-hole with host records
-13) Regenerate CA                - Recreate step-ca certificates
-14) Update root certificates     - Push CA cert to Proxmox nodes
-15) Rollback (Terraform)         - Terraform destroy for services
-16) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-17) Purge entire deployment      - Reset nodes to pre-install state
-18) Configure networking         - Update network/HA settings only
-19) Reset labnet egress          - Fix DHCP/routing issues
+12) Rollback (Terraform)         - Terraform destroy for services
+13) Purge (Emergency)            - Direct VM/LXC destruction via SSH
+14) Purge entire deployment      - Reset nodes to pre-install state
+```
+
+### Developer Menu (--dev flag)
+```bash
+./setup.sh --dev
+```
+```
+d1) Build DNS records            - Update Pi-hole with host records
+d2) Regenerate CA                - Recreate step-ca certificates
+d3) Update root certificates     - Push CA cert to Proxmox nodes
+d4) Configure networking         - Update network/HA settings only
+d5) Reset labnet egress          - Fix DHCP/routing issues
 ```
 
 ### Docker Compose Services

@@ -44,6 +44,14 @@ source "$SCRIPT_DIR/lib/constants.sh"
 PROXMOX_HOST="${1:-}"
 PROXMOX_PASS="${2:-}"
 
+# Developer mode flag
+DEV_MODE=false
+for arg in "$@"; do
+  if [[ "$arg" == "--dev" ]]; then
+    DEV_MODE=true
+  fi
+done
+
 # Global variables
 CRYPTO_DIR="crypto"
 DNS_POSTFIX=""
@@ -255,7 +263,7 @@ EOF
 Next steps:
 - If you changed Traefik HA settings: Redeploy Nomad (option 5) then Traefik (option 7)
 - If you changed DNS HA settings: Redeploy DNS (option 4)
-- If you only changed the DNS domain: Rebuild DNS records (option 12)
+- If you only changed the DNS domain: Rebuild DNS records (--dev option d1)
 
 EOF
 }
@@ -277,15 +285,23 @@ function showMenu() {
   echo "  9) Deploy Authentik SSO (on Nomad)"
   echo " 10) Deploy Samba AD Domain Controllers (on Nomad)"
   echo " 11) Configure Authentik AD Sync"
-  echo " 12) Build DNS records"
-  echo " 13) Regenerate CA"
-  echo " 14) Update Proxmox root certificates"
-  echo " 15) Rollback service deployment (Terraform)"
-  echo " 16) Purge service deployment (Emergency)"
-  echo " 17) Purge entire deployment"
-  echo " 18) Configure networking"
-  echo " 19) Reset labnet egress (fix DHCP/routing issues)"
+  echo " 12) Rollback service deployment (Terraform)"
+  echo " 13) Purge service deployment (Emergency)"
+  echo " 14) Purge entire deployment"
   echo "  0) Exit"
+
+  if [ "$DEV_MODE" = true ]; then
+    echo
+    echo "------------------------------------------"
+    echo "  Developer Tools"
+    echo "------------------------------------------"
+    echo
+    echo " d1) Build DNS records"
+    echo " d2) Regenerate CA"
+    echo " d3) Update Proxmox root certificates"
+    echo " d4) Configure networking"
+    echo " d5) Reset labnet egress (fix DHCP/routing issues)"
+  fi
   echo
 }
 
@@ -293,7 +309,11 @@ header
 
 while true; do
   showMenu
-  read -rp "$(question "Select an option [0-19]: ")" choice
+  if [ "$DEV_MODE" = true ]; then
+    read -rp "$(question "Select an option [0-14, d1-d5]: ")" choice
+  else
+    read -rp "$(question "Select an option [0-14]: ")" choice
+  fi
 
   case $choice in
     1) runEverything;;
@@ -307,14 +327,16 @@ while true; do
     9) deployAuthentikOnly;;
     10) deploySambaADOnly;;
     11) configureAuthentikADSyncOnly;;
-    12) updateDNSRecords;;
-    13) regenerateCA;;
-    14) updateRootCertificates;;
-    15) rollbackManual;;
-    16) purgeClusterResources;;
-    17) purgeDeployment;;
-    18) reconfigureNetworking;;
-    19) resetLabnetEgress;;
+    12) rollbackManual;;
+    13) purgeClusterResources;;
+    14) purgeDeployment;;
+
+    # Developer menu options (only available with --dev)
+    d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;
+    d2|D2) if [ "$DEV_MODE" = true ]; then regenerateCA; else error "Invalid option: $choice"; fi;;
+    d3|D3) if [ "$DEV_MODE" = true ]; then updateRootCertificates; else error "Invalid option: $choice"; fi;;
+    d4|D4) if [ "$DEV_MODE" = true ]; then reconfigureNetworking; else error "Invalid option: $choice"; fi;;
+    d5|D5) if [ "$DEV_MODE" = true ]; then resetLabnetEgress; else error "Invalid option: $choice"; fi;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
