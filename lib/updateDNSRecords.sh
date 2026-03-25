@@ -48,6 +48,14 @@ function updateDNSRecords() {
   doing "Generating service DNS records from hosts.json..."
   local EXT_RECORDS_JSON="[]"
   local DNS_IP=""
+  local DNS_HA_VIP=""
+  local DNS_HA_ENABLED=""
+
+  # Check for DNS HA VIP in cluster-info.json
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_HA_ENABLED=$(jq -r '.network.external.ha_enabled // false' "$CLUSTER_INFO_FILE")
+    DNS_HA_VIP=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE" | cut -d'/' -f1)
+  fi
 
   if [ -s hosts.json ]; then
     EXT_RECORDS_JSON="$(jq -c --arg suffix "$DNS_POSTFIX" \
@@ -66,9 +74,16 @@ function updateDNSRecords() {
     read -rp "$(question "Enter primary DNS server IP (dns-01): ")" DNS_IP
   fi
 
-  # Add "dns" alias pointing to dns-01
+  # Use DNS HA VIP if enabled, otherwise use dns-01 IP
+  local DNS_TARGET_IP="$DNS_IP"
+  if [ "$DNS_HA_ENABLED" = "true" ] && [ -n "$DNS_HA_VIP" ] && [ "$DNS_HA_VIP" != "null" ]; then
+    DNS_TARGET_IP="$DNS_HA_VIP"
+    echo "  DNS HA enabled, using VIP: $DNS_TARGET_IP"
+  fi
+
+  # Add "dns" alias pointing to VIP (if HA) or dns-01
   local DNS_ALIAS_JSON
-  DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
+  DNS_ALIAS_JSON="$(jq -c -n --arg ip "$DNS_TARGET_IP" --arg suffix "$DNS_POSTFIX" '["\($ip) dns dns.\($suffix)"]')"
 
   # Add Nomad service DNS records (services fronted by Traefik)
   # Use VIP if Traefik HA is enabled, otherwise use nomad01
@@ -171,8 +186,8 @@ function updateDNSRecords() {
     for i in "${!CLUSTER_NODES[@]}"; do
       local node="${CLUSTER_NODES[$i]}"
       local ip="${CLUSTER_NODE_IPS[$i]}"
-      sshRun "$REMOTE_USER" "$ip" "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_IP' >> /etc/resolv.conf"
-      echo "  - $node: DNS set to $DNS_IP"
+      sshRun "$REMOTE_USER" "$ip" "sed -i '/^nameserver/d' /etc/resolv.conf && echo 'nameserver $DNS_TARGET_IP' >> /etc/resolv.conf"
+      echo "  - $node: DNS set to $DNS_TARGET_IP"
     done
     success "Proxmox DNS settings updated"
   fi

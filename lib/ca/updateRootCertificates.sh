@@ -23,6 +23,18 @@ function updateRootCertificates() {
     read -rp "Enter primary DNS server IP (dns-01): " DNS_IP
   fi
 
+  # Check for DNS HA VIP - use VIP for node DNS config, but keep DNS_IP for Pi-hole SSH
+  local DNS_TARGET_IP="$DNS_IP"
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local DNS_HA_ENABLED DNS_HA_VIP
+    DNS_HA_ENABLED=$(jq -r '.network.external.ha_enabled // false' "$CLUSTER_INFO_FILE")
+    DNS_HA_VIP=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE" | cut -d'/' -f1)
+    if [ "$DNS_HA_ENABLED" = "true" ] && [ -n "$DNS_HA_VIP" ] && [ "$DNS_HA_VIP" != "null" ]; then
+      DNS_TARGET_IP="$DNS_HA_VIP"
+      info "DNS HA enabled, Proxmox nodes will use VIP: $DNS_TARGET_IP"
+    fi
+  fi
+
   local CA_URL="https://$CA_IP/roots.pem"
   local ACME_DIR="https://ca.${DNS_POSTFIX}/acme/acme/directory"
 
@@ -50,9 +62,9 @@ function updateRootCertificates() {
   done
 
   # Configure all nodes to use Pi-hole as DNS (required for ACME hostname resolution)
-  doing "Configuring DNS on all nodes to use Pi-hole ($DNS_IP)"
+  doing "Configuring DNS on all nodes to use Pi-hole ($DNS_TARGET_IP)"
   for node_ip in "${NODE_IPS[@]}"; do
-    sshRun "$REMOTE_USER" "$node_ip" "echo 'nameserver ${DNS_IP}' > /etc/resolv.conf && echo 'search ${DNS_POSTFIX}' >> /etc/resolv.conf" \
+    sshRun "$REMOTE_USER" "$node_ip" "echo 'nameserver ${DNS_TARGET_IP}' > /etc/resolv.conf && echo 'search ${DNS_POSTFIX}' >> /etc/resolv.conf" \
       || warn "Failed to configure DNS on $node_ip"
   done
 
