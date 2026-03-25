@@ -139,7 +139,7 @@ function updateRootCertificates() {
     TEMP_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --arg ip "$ip" --arg pm "$pmfqdn" \
       '$base + ["\($ip) proxmox \($pm)"]')
 
-    sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$TEMP_RECORDS'" || { warn "Failed to update DNS for $name"; continue; }
+    sshRunAdmin "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$TEMP_RECORDS'" || { warn "Failed to update DNS for $name"; continue; }
 
     # Brief pause for DNS propagation
     sleep 2
@@ -164,7 +164,7 @@ function updateRootCertificates() {
   local FINAL_RECORDS
   FINAL_RECORDS=$(jq -c -n --argjson base "$BASE_RECORDS" --argjson rr "$ROUNDROBIN_ENTRIES" '$base + $rr')
 
-  sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$FINAL_RECORDS'" || warn "Failed to restore round-robin DNS"
+  sshRunAdmin "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$FINAL_RECORDS'" || warn "Failed to restore round-robin DNS"
 
   success "Root CA installed on all nodes; ACME certs issued; round-robin DNS restored."
 }
