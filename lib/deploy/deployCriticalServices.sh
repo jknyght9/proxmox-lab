@@ -154,6 +154,18 @@ EOF
     generateHostsJsonFromModules
   fi
 
+  # Push certificates to step-ca container
+  # (Terraform only installs packages and creates directories; certs are generated locally)
+  if ! pushCertificatesToStepCA; then
+    error "Failed to push certificates to step-ca container"
+    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
+    DO_ROLLBACK=${DO_ROLLBACK:-Y}
+    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
+      rollbackDeployment 1
+    fi
+    return 1
+  fi
+
   updateDNSRecords
   updateRootCertificates
 

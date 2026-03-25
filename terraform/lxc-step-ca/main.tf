@@ -48,7 +48,9 @@ resource "proxmox_lxc" "step-ca" {
 
   tags              = "terraform,ca,lxc"
 
-  # Install step-ca and initialize with correct DNS names
+  # Install step-ca packages and prepare for certificate deployment
+  # Note: Certificates are generated locally via Docker and pushed separately
+  # because step ca init requires a TTY which Terraform provisioners don't provide
   provisioner "remote-exec" {
     inline = [<<-EOT
       bash -c "set -euxo pipefail
@@ -61,32 +63,10 @@ resource "proxmox_lxc" "step-ca" {
         echo \"deb [signed-by=/etc/apt/trusted.gpg.d/smallstep.asc] https://packages.smallstep.com/stable/debian debs main\" | tee /etc/apt/sources.list.d/smallstep.list
         apt-get update && apt-get -y install step-cli step-ca
 
-        # Initialize step-ca with correct DNS names for this deployment
-        mkdir -p /etc/step-ca/secrets
-        openssl rand -base64 32 > /etc/step-ca/secrets/password_file
-        chmod 600 /etc/step-ca/secrets/password_file
+        # Create directories for certificates (will be populated by setup.sh)
+        mkdir -p /etc/step-ca/{certs,config,db,secrets,templates}
 
-        step ca init \\
-          --deployment-type standalone \\
-          --name proxmox-lab \\
-          --address ':443' \\
-          --dns 'ca.${var.dns_postfix}' \\
-          --dns 'step-ca.${var.dns_postfix}' \\
-          --dns '${local.eth0_ipv4}' \\
-          --dns 'localhost' \\
-          --provisioner 'admin@${var.dns_postfix}' \\
-          --password-file /etc/step-ca/secrets/password_file \\
-          --acme
-
-        # Update ACME configuration to allow longer duration certs (90 days)
-        tmp=\$(mktemp)
-        jq '.authority.provisioners |= map(
-          if .type==\"ACME\" and .name==\"acme\" then
-            .claims = (.claims // {}) + {defaultTLSCertDuration:\"2160h\", maxTLSCertDuration:\"2160h\"}
-          else . end
-        )' /etc/step-ca/config/ca.json > \"\$tmp\" && mv \"\$tmp\" /etc/step-ca/config/ca.json
-
-        # Create systemd service
+        # Create systemd service (will start after certs are pushed)
         cat <<EOF >/etc/systemd/system/step-ca.service
 [Unit]
 Description=Step Certificate Authority
@@ -102,7 +82,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
         systemctl daemon-reload
-        systemctl enable --now step-ca
+        systemctl enable step-ca
 
         # Switch to internal DNS now that setup is complete
         echo 'nameserver ${local.dns_primary_ipv4}' > /etc/resolv.conf"
