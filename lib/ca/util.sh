@@ -92,6 +92,14 @@ function generateCertificates() {
     mkdir -p terraform/lxc-step-ca/step-ca
   fi
   docker compose run --rm -it step-ca
+
+  # Fix permissions - Docker creates files as root, making them unreadable
+  # by the user running the script (needed for pushCertificatesToStepCA)
+  if [ -d "$STEPCA_DIR" ]; then
+    doing "Fixing certificate directory permissions..."
+    sudo chown -R "$(id -u):$(id -g)" "$STEPCA_DIR"
+  fi
+
   success "Certificate generation complete.\n"
 }
 
@@ -105,16 +113,21 @@ function regenerateCA() {
     return 0
   fi
 
-  # Wipe local CA files
+  # Wipe local CA files (may need sudo if owned by root from previous Docker run)
   doing "Wiping local CA files..."
-  rm -rf terraform/lxc-step-ca/step-ca/config
-  rm -rf terraform/lxc-step-ca/step-ca/certs
-  rm -rf terraform/lxc-step-ca/step-ca/secrets
+  sudo rm -rf terraform/lxc-step-ca/step-ca/config
+  sudo rm -rf terraform/lxc-step-ca/step-ca/certs
+  sudo rm -rf terraform/lxc-step-ca/step-ca/secrets
   mkdir -p terraform/lxc-step-ca/step-ca
 
   # Regenerate certificates locally
   doing "Regenerating CA certificates..."
   docker compose run --rm -e FORCE_REGENERATE=1 step-ca
+
+  # Fix permissions - Docker creates files as root
+  doing "Fixing certificate directory permissions..."
+  sudo chown -R "$(id -u):$(id -g)" terraform/lxc-step-ca/step-ca
+
   success "CA certificates regenerated locally"
 
   # Check if step-ca LXC exists and offer to redeploy
