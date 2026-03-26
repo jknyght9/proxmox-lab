@@ -11,22 +11,6 @@ build {
     ]
   }
 
-  # Upload and install SSH public key (Packer cloning clears cloud-init sshkeys)
-  provisioner "file" {
-    source      = var.ssh_public_key_file
-    destination = "/tmp/labadmin.pub"
-  }
-
-  provisioner "shell" {
-    inline = [
-      "echo '[+] Installing SSH public key'",
-      "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
-      "cat /tmp/labadmin.pub >> ~/.ssh/authorized_keys",
-      "chmod 600 ~/.ssh/authorized_keys",
-      "rm /tmp/labadmin.pub"
-    ]
-  }
-
   # Upload local CA cert (generated during setup.sh step-ca phase)
   # Mounted at /step-ca-certs in the packer container (see compose.yml)
   provisioner "file" {
