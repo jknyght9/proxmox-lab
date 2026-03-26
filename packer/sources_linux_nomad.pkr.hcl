@@ -13,6 +13,8 @@ source "proxmox-clone" "ubuntu-nomad" {
   ssh_username             = var.ssh_username
   ssh_password             = var.ssh_password
   ssh_private_key_file     = var.ssh_private_key_file
+  ssh_timeout              = "10m"
+  ssh_handshake_attempts   = 20
 
   cores                    = 2
   memory                   = 4096
