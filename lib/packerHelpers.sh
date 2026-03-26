@@ -117,13 +117,14 @@ function updatePackerFromClusterInfo() {
   info "  network_bridge = \"$NETWORK_BRIDGE_VAL\""
 
   # Load and apply packer passwords from crypto/service-passwords.json
+  # Note: ssh_password must match template_password since that's what the base template uses
   local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
   if [ -f "$PASSWORDS_FILE" ]; then
     local PACKER_ROOT=$(jq -r '.packer_root_password' "$PASSWORDS_FILE")
-    local PACKER_SSH=$(jq -r '.packer_ssh_password' "$PASSWORDS_FILE")
+    local TEMPLATE_PASS=$(jq -r '.template_password' "$PASSWORDS_FILE")
 
     sed_inplace "s|^root_password[[:space:]]*=.*|root_password = \"$PACKER_ROOT\"|" "$PACKER_FILE"
-    sed_inplace "s|^ssh_password[[:space:]]*=.*|ssh_password = \"$PACKER_SSH\"|" "$PACKER_FILE"
+    sed_inplace "s|^ssh_password[[:space:]]*=.*|ssh_password = \"$TEMPLATE_PASS\"|" "$PACKER_FILE"
 
     info "  Packer passwords populated from $PASSWORDS_FILE"
   else
