@@ -63,12 +63,14 @@ EOF
   success "Cloud-init snippets removed"
 
   # Step 3: Remove ACME certificates
+  # Note: We only delete local config, not deactivate the account (which requires CA connectivity)
   doing "Step 3/10: Removing ACME certificates..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Removing ACME config on $node..."
-    sshRun "$REMOTE_USER" "$ip" "pvenode config set --delete acme 2>/dev/null; pvenode acme account deactivate 2>/dev/null" || true
+    # Delete ACME config and account files locally (don't try to contact CA)
+    sshRun "$REMOTE_USER" "$ip" "pvenode config set --delete acme 2>/dev/null; rm -f /etc/pve/priv/acme/* 2>/dev/null" || true
   done
   success "ACME certificates removed"
 
@@ -240,24 +242,35 @@ EOF
 
   # Step 10: Remove SSH keys (LAST - we need SSH for all previous steps!)
   doing "Step 10/10: Removing SSH keys from nodes..."
+  local ssh_removal_failed=false
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Removing SSH keys on $node..."
+
+    # Use BatchMode to prevent password prompts - fail cleanly if key auth doesn't work
+    local ssh_opts="-i $ENTERPRISE_KEY_PATH -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
     # Remove enterprise key (labenterpriseadmin) from Proxmox nodes
     if [ -f "${ENTERPRISE_PUBKEY_PATH}" ]; then
       local enterprise_comment
       enterprise_comment=$(awk '{print $NF}' "${ENTERPRISE_PUBKEY_PATH}")
       if [ -n "$enterprise_comment" ]; then
-        sshRun "$REMOTE_USER" "$ip" "grep -v '${enterprise_comment}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
+        if ! ssh $ssh_opts "$REMOTE_USER@$ip" "grep -v '${enterprise_comment}' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys" 2>/dev/null; then
+          warn "  Failed to remove enterprise key on $node (key auth may have failed)"
+          ssh_removal_failed=true
+        fi
       fi
     fi
 
     # Also remove legacy lab-deploy key if present (for backward compatibility)
-    sshRun "$REMOTE_USER" "$ip" "grep -v 'lab-deploy' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys || true" || true
+    ssh $ssh_opts "$REMOTE_USER@$ip" "grep -v 'lab-deploy' /root/.ssh/authorized_keys > /tmp/ak_tmp 2>/dev/null && mv /tmp/ak_tmp /root/.ssh/authorized_keys" 2>/dev/null || true
   done
-  success "SSH keys removed from nodes"
+  if [ "$ssh_removal_failed" = true ]; then
+    warn "Some SSH keys could not be removed automatically. You may need to remove them manually from /root/.ssh/authorized_keys on the Proxmox nodes."
+  else
+    success "SSH keys removed from nodes"
+  fi
 
   echo
   success "Complete deployment purge finished!"
