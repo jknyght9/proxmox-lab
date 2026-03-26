@@ -14,6 +14,10 @@ ssh_private_key_file = "/crypto/labadmin"  # DO NOT CHANGE
 # DNS config
 dns_postfix = "mylab.lan"
 
+# Network bridge for Packer VMs (must be reachable from Docker)
+# Use the bridge on the same network as your Docker host
+network_bridge = "vmbr0"
+
 # Storage for Packer templates
 # For multi-node clusters, use shared storage (nfs, ceph, etc.)
 # For single-node, "local" or "local-lvm" is fine

@@ -52,3 +52,8 @@ variable "ssh_public_key_file" {
   description = "Path to admin public key for VM SSH"
   default = "/crypto/labadmin.pub"
 }
+variable "network_bridge" {
+  type        = string
+  description = "Proxmox network bridge for Packer VMs (must be reachable from Docker)"
+  default     = "vmbr0"
+}

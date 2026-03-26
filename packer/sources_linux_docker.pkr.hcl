@@ -22,7 +22,7 @@ source "proxmox-clone" "ubuntu-docker" {
 
   network_adapters {
     model                  = "virtio"
-    bridge                 = "vmbr0"
+    bridge                 = var.network_bridge
   }
 
   tags                     = "linux;packer;template;vm"
