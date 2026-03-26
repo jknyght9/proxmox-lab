@@ -89,7 +89,7 @@ The `setup.sh` script orchestrates the entire deployment:
 ### Phase 1: Preparation
 
 1. **Check Requirements** - Verifies Docker, jq, and sshpass are installed
-2. **Generate SSH Keys** - Creates `crypto/lab-deploy` key pair for automation
+2. **Generate SSH Keys** - Creates `crypto/labadmin` (VMs/containers) and `crypto/labenterpriseadmin` (Proxmox nodes) key pairs
 3. **Verify Proxmox** - Tests connectivity and credentials
 
 ### Phase 2: Proxmox Configuration

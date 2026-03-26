@@ -68,7 +68,7 @@ graph TB
 dns_postfix         = "mylab.lan"
 dns_primary_ipv4    = "<dns-01-ip>"
 network_interface_bridge = "vmbr0"
-ssh_public_key_file = "../crypto/lab-deploy.pub"
+ssh_public_key_file = "../crypto/labadmin.pub"
 vm_storage          = "local-lvm"  # or shared storage
 
 # Node IP mapping (from cluster-info.json)

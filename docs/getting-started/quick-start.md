@@ -161,7 +161,7 @@ Address: <nomad01-ip>
 SSH to nomad01 and check cluster status:
 
 ```bash
-ssh -i crypto/lab-deploy ubuntu@nomad01.mylab.lan
+ssh -i crypto/labadmin labadmin@nomad01.mylab.lan
 
 # On nomad01:
 nomad server members
