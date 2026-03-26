@@ -59,6 +59,7 @@ function updatePackerFromClusterInfo() {
   local STORAGE_TYPE_VAL=$(jq -r '.storage.type // "lvm"' "$CLUSTER_INFO_FILE")
   local PRIMARY_NODE=$(jq -r '.nodes[0].name // "pve"' "$CLUSTER_INFO_FILE")
   local PRIMARY_IP=$(jq -r '.nodes[0].ip // ""' "$CLUSTER_INFO_FILE")
+  local NETWORK_BRIDGE_VAL=$(jq -r '.network.selected_bridge // "vmbr0"' "$CLUSTER_INFO_FILE")
 
   # Load API credentials if available
   local API_URL="" API_TOKEN_ID="" API_TOKEN_SECRET=""
@@ -106,6 +107,14 @@ function updatePackerFromClusterInfo() {
   # Update template_storage_type
   sed_inplace "s|^template_storage_type[[:space:]]*=.*|template_storage_type = \"$STORAGE_TYPE_VAL\"|" "$PACKER_FILE"
   info "  template_storage_type = \"$STORAGE_TYPE_VAL\""
+
+  # Update network_bridge (must be reachable from Docker)
+  if grep -q "^network_bridge" "$PACKER_FILE"; then
+    sed_inplace "s|^network_bridge[[:space:]]*=.*|network_bridge = \"$NETWORK_BRIDGE_VAL\"|" "$PACKER_FILE"
+  else
+    echo "network_bridge = \"$NETWORK_BRIDGE_VAL\"" >> "$PACKER_FILE"
+  fi
+  info "  network_bridge = \"$NETWORK_BRIDGE_VAL\""
 
   # Load and apply packer passwords from crypto/service-passwords.json
   local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
