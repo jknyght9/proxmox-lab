@@ -14,6 +14,12 @@ source "proxmox-clone" "ubuntu-nomad" {
   ssh_password             = var.ssh_password
   ssh_private_key_file     = var.ssh_private_key_file
 
+  # Cloud-init settings to inject SSH key into cloned VM
+  cloud_init              = true
+  cloud_init_storage_pool = var.template_storage
+  ipconfig0               = "ip=dhcp"
+  ssh_public_key_file     = var.ssh_public_key_file
+
   cores                    = 2
   memory                   = 4096
   sockets                  = 1
