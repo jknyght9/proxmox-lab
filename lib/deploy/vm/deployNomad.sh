@@ -154,7 +154,7 @@ function setupNomadCluster() {
   # Verify connectivity to all nodes first
   doing "Verifying SSH connectivity to Nomad nodes..."
   for ip in "${NODE_IPS[@]}"; do
-    if ! sshRun "$VM_USER" "$ip" "hostname" &>/dev/null; then
+    if ! sshRunAdmin "$VM_USER" "$ip" "hostname" &>/dev/null; then
       error "Cannot connect to $ip as $VM_USER"
       return 1
     fi
@@ -164,14 +164,14 @@ function setupNomadCluster() {
   # Create brick directories on all nodes first
   doing "Creating brick directories on all nodes..."
   for ip in "${NODE_IPS[@]}"; do
-    sshRun "$VM_USER" "$ip" "sudo mkdir -p $BRICK && sudo mkdir -p $MOUNTPOINT"
+    sshRunAdmin "$VM_USER" "$ip" "sudo mkdir -p $BRICK && sudo mkdir -p $MOUNTPOINT"
   done
 
   # Probe peers for GlusterFS
   for peer in "${NODE_IPS[@]}"; do
-    if ! sshRun "$VM_USER" "$MGR" "sudo gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then
+    if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then
       doing "Probing peer $peer"
-      sshRun "$VM_USER" "$MGR" "sudo gluster peer probe $peer"
+      sshRunAdmin "$VM_USER" "$MGR" "sudo gluster peer probe $peer"
     else
       info "$peer is already in pool"
     fi
@@ -181,16 +181,16 @@ function setupNomadCluster() {
 
   # Create and start GlusterFS volume
   BRICKS="$MGR:$BRICK $ND1:$BRICK $ND2:$BRICK"
-  if ! sshRun "$VM_USER" "$MGR" "sudo gluster volume info $VOL >/dev/null 2>&1"; then
+  if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume info $VOL >/dev/null 2>&1"; then
     doing "Creating volume $VOL"
-    sshRun "$VM_USER" "$MGR" "sudo gluster volume create $VOL replica 3 $BRICKS force"
+    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume create $VOL replica 3 $BRICKS force"
   else
     info "Volume $VOL exists"
   fi
 
-  if ! sshRun "$VM_USER" "$MGR" "sudo gluster volume status $VOL >/dev/null 2>&1"; then
+  if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume status $VOL >/dev/null 2>&1"; then
     doing "Starting volume $VOL"
-    sshRun "$VM_USER" "$MGR" "sudo gluster volume start $VOL"
+    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume start $VOL"
   fi
 
   sleep 2
@@ -205,7 +205,7 @@ function setupNomadCluster() {
     "performance.client-io-threads on" \
     "network.ping-timeout 10"
   do
-    sshRun "$VM_USER" "$MGR" "sudo gluster volume set $VOL $opt || true"
+    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume set $VOL $opt || true"
   done
 
   sleep 2
@@ -213,11 +213,11 @@ function setupNomadCluster() {
   # Mount with fstab on all nodes
   for ip in "${NODE_IPS[@]}"; do
     doing "Mounting GlusterFS on $ip"
-    sshRun "$VM_USER" "$ip" "sudo mkdir -p '$MOUNTPOINT'"
+    sshRunAdmin "$VM_USER" "$ip" "sudo mkdir -p '$MOUNTPOINT'"
     # Add fstab entry if not present
-    sshRun "$VM_USER" "$ip" "grep -q ':/${VOL}' /etc/fstab || echo 'localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null"
+    sshRunAdmin "$VM_USER" "$ip" "grep -q ':/${VOL}' /etc/fstab || echo 'localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null"
     # Mount if not already mounted
-    sshRun "$VM_USER" "$ip" "mountpoint -q '$MOUNTPOINT' || sudo mount -t glusterfs localhost:/${VOL} ${MOUNTPOINT}"
+    sshRunAdmin "$VM_USER" "$ip" "mountpoint -q '$MOUNTPOINT' || sudo mount -t glusterfs localhost:/${VOL} ${MOUNTPOINT}"
   done
 
   sleep 2
@@ -225,15 +225,15 @@ function setupNomadCluster() {
   # Restart Nomad now that GlusterFS is mounted
   doing "Starting Nomad on all nodes..."
   for ip in "${NODE_IPS[@]}"; do
-    sshRun "$VM_USER" "$ip" "sudo systemctl restart nomad"
+    sshRunAdmin "$VM_USER" "$ip" "sudo systemctl restart nomad"
   done
 
   sleep 2
 
   # Verify GlusterFS
-  sshRun "$VM_USER" "$MGR" "sudo gluster volume info $VOL"
-  sshRun "$VM_USER" "$MGR" "sudo gluster volume status $VOL"
-  sshRun "$VM_USER" "$MGR" "sudo gluster volume heal $VOL info || true"
+  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume info $VOL"
+  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume status $VOL"
+  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume heal $VOL info || true"
 
   success "GlusterFS '$VOL' up on: ${NODE_IPS[*]}"
   info "Mounted at ${MOUNTPOINT} on each node."
@@ -245,7 +245,7 @@ function setupNomadCluster() {
   local retries=30
   local count=0
   while [ $count -lt $retries ]; do
-    SERVER_COUNT=$(sshRun "$VM_USER" "$MGR" "nomad server members 2>/dev/null | grep -c alive || echo 0")
+    SERVER_COUNT=$(sshRunAdmin "$VM_USER" "$MGR" "nomad server members 2>/dev/null | grep -c alive || echo 0")
     if [ "$SERVER_COUNT" -eq 3 ]; then
       success "Nomad cluster formed with 3 server members"
       break
@@ -261,8 +261,8 @@ function setupNomadCluster() {
 
   # Verify Nomad cluster health
   doing "Verifying Nomad cluster health"
-  sshRun "$VM_USER" "$MGR" "nomad server members"
-  sshRun "$VM_USER" "$MGR" "nomad node status"
+  sshRunAdmin "$VM_USER" "$MGR" "nomad server members"
+  sshRunAdmin "$VM_USER" "$MGR" "nomad node status"
 
   success "Nomad cluster setup complete!"
   info "Access Nomad UI at: http://${MGR}:4646"
