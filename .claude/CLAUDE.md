@@ -26,13 +26,17 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
  5) Deploy Traefik               - Nomad job for load balancing
  6) Deploy Vault                 - Nomad job for secrets management
  7) Deploy Authentik             - Nomad job for SSO/identity provider
- 8) Deploy Samba AD              - Nomad job for Active Directory DCs
- 9) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
-10) Deploy Uptime Kuma           - Nomad job for service health monitoring
-11) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
-12) Rollback (Terraform)         - Terraform destroy for services
-13) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-14) Purge entire deployment      - Reset nodes to pre-install state
+ 8) Deploy Uptime Kuma           - Nomad job for service health monitoring
+ 9) Rollback (Terraform)         - Terraform destroy for services
+10) Purge (Emergency)            - Direct VM/LXC destruction via SSH
+11) Purge entire deployment      - Reset nodes to pre-install state
+```
+
+### Beta Features (--dev flag required)
+```
+b1) Deploy Samba AD              - Nomad job for Active Directory DCs
+b2) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
+b3) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
 ```
 
 ### Developer Menu (--dev flag)
@@ -558,7 +562,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
 
 ### Purge/Rollback
-The complete purge (setup.sh option 14) removes all project resources:
+The complete purge (setup.sh option 11) removes all project resources:
 1. VMs, LXC containers, Packer templates
 2. Cloud-init snippets
 3. ACME certificates

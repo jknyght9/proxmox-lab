@@ -286,16 +286,21 @@ function showMenu() {
   echo "  5) Deploy Traefik load balancer (on Nomad)"
   echo "  6) Deploy Vault secrets manager (on Nomad)"
   echo "  7) Deploy Authentik SSO (on Nomad)"
-  echo "  8) Deploy Samba AD Domain Controllers (on Nomad)"
-  echo "  9) Configure Authentik AD Sync"
-  echo " 10) Deploy Uptime Kuma monitoring (on Nomad)"
-  echo " 11) Configure automated backups (on Nomad)"
-  echo " 12) Rollback service deployment (Terraform)"
-  echo " 13) Purge service deployment (Emergency)"
-  echo " 14) Purge entire deployment"
+  echo "  8) Deploy Uptime Kuma monitoring (on Nomad)"
+  echo "  9) Rollback service deployment (Terraform)"
+  echo " 10) Purge service deployment (Emergency)"
+  echo " 11) Purge entire deployment"
   echo "  0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
+    echo
+    echo "------------------------------------------"
+    echo "  Beta Features (experimental)"
+    echo "------------------------------------------"
+    echo
+    echo " b1) Deploy Samba AD Domain Controllers (on Nomad)"
+    echo " b2) Configure Authentik AD Sync"
+    echo " b3) Configure automated backups (on Nomad)"
     echo
     echo "------------------------------------------"
     echo "  Developer Tools"
@@ -318,9 +323,9 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-14, d1-d8]: ")" choice
+    read -rp "$(question "Select an option [0-11, b1-b3, d1-d8]: ")" choice
   else
-    read -rp "$(question "Select an option [0-14]: ")" choice
+    read -rp "$(question "Select an option [0-11]: ")" choice
   fi
 
   case $choice in
@@ -331,13 +336,15 @@ while true; do
     5) deployTraefikOnly;;
     6) deployVaultOnly;;
     7) deployAuthentikOnly;;
-    8) deploySambaADOnly;;
-    9) configureAuthentikADSyncOnly;;
-    10) deployUptimeKumaOnly;;
-    11) deployBackupOnly;;
-    12) rollbackManual;;
-    13) purgeClusterResources;;
-    14) purgeDeployment;;
+    8) deployUptimeKumaOnly;;
+    9) rollbackManual;;
+    10) purgeClusterResources;;
+    11) purgeDeployment;;
+
+    # Beta features (only available with --dev)
+    b1|B1) if [ "$DEV_MODE" = true ]; then deploySambaADOnly; else error "Invalid option: $choice"; fi;;
+    b2|B2) if [ "$DEV_MODE" = true ]; then configureAuthentikADSyncOnly; else error "Invalid option: $choice"; fi;;
+    b3|B3) if [ "$DEV_MODE" = true ]; then deployBackupOnly; else error "Invalid option: $choice"; fi;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;
