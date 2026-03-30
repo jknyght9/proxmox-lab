@@ -322,7 +322,7 @@ REMOTE_SCRIPT
   scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
   # Deploy DC01 only
-  if ! sshRun "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
     error "Failed to deploy DC01"
     rm -f "/tmp/samba-dc-rendered.nomad.hcl"
     return 1
@@ -335,7 +335,7 @@ REMOTE_SCRIPT
   for attempt in {1..60}; do
     # Check Nomad deployment status for dc01 healthy count (4th column in dc01 row)
     local dc01_healthy
-    dc01_healthy=$(sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc01/{print \$4}' | head -1" 2>/dev/null || echo "0")
+    dc01_healthy=$(sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc01/{print \$4}' | head -1" 2>/dev/null || echo "0")
     if [ "$dc01_healthy" = "1" ]; then
       DC01_HEALTHY=true
       break
@@ -348,7 +348,7 @@ REMOTE_SCRIPT
   if [ "$DC01_HEALTHY" = "false" ]; then
     error "DC01 failed to become healthy within timeout"
     info "Check logs with: nomad alloc logs -job samba-dc"
-    sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | tail -20"
+    sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | tail -20"
     rm -f "/tmp/samba-dc-rendered.nomad.hcl"
     return 1
   fi
@@ -373,7 +373,7 @@ REMOTE_SCRIPT
     scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
     # Deploy updated job (adds DC02)
-    if ! sshRun "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
+    if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
       error "Failed to deploy DC02"
       rm -f "/tmp/samba-dc-rendered.nomad.hcl"
       return 1
@@ -386,7 +386,7 @@ REMOTE_SCRIPT
     for attempt in {1..60}; do
       # Check Nomad deployment status for dc02 healthy count (4th column in dc02 row)
       local dc02_healthy
-      dc02_healthy=$(sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc02/{print \$4}' | head -1" 2>/dev/null || echo "0")
+      dc02_healthy=$(sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc 2>/dev/null | awk '/^dc02/{print \$4}' | head -1" 2>/dev/null || echo "0")
       if [ "$dc02_healthy" = "1" ]; then
         DC02_HEALTHY=true
         break
@@ -406,12 +406,12 @@ REMOTE_SCRIPT
   fi
 
   # Clean up
-  sshRun "$VM_USER" "$NOMAD01_IP" "rm -f /tmp/samba-dc.nomad.hcl"
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" "rm -f /tmp/samba-dc.nomad.hcl"
   rm -f "/tmp/samba-dc-rendered.nomad.hcl"
 
   # Show final job status
   doing "Final job status:"
-  sshRun "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | head -30"
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job status samba-dc | head -30"
 
   # Update DNS records for AD
   updateADDNSRecords
@@ -451,7 +451,7 @@ function isSambaADDeployed() {
   [ -z "$nomad_ip" ] && return 1
 
   local status
-  status=$(sshRun "$VM_USER" "$nomad_ip" "nomad job status samba-dc 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
+  status=$(sshRunAdmin "$VM_USER" "$nomad_ip" "nomad job status samba-dc 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
 }

@@ -27,7 +27,7 @@ function deployNomadJob() {
 
   # Create storage directory if specified
   if [ -n "$storage_path" ]; then
-    sshRun "$VM_USER" "$NOMAD_IP" "sudo mkdir -p $storage_path" || true
+    sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p $storage_path" || true
   fi
 
   # Load DNS_POSTFIX from cluster-info.json if not already set
@@ -50,7 +50,7 @@ function deployNomadJob() {
   scpTo "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"
 
   # Run the job
-  if ! sshRun "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/${job_name}.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/${job_name}.nomad.hcl"; then
     error "Failed to deploy $job_name"
     return 1
   fi
@@ -58,7 +58,7 @@ function deployNomadJob() {
   # Wait for deployment and show status
   doing "Waiting for $job_name deployment..."
   sleep 5
-  sshRun "$VM_USER" "$NOMAD_IP" "nomad job status $job_name | head -25"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job status $job_name | head -25"
 
   success "$job_name deployed successfully!"
   return 0

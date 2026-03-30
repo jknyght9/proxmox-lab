@@ -109,7 +109,7 @@ EOF
   # Use samba-tool via docker exec to create the user
   local CREATE_USER_CMD="docker exec \$(docker ps -q -f name=samba-dc) samba-tool user create authentik-sync '$SYNC_PASSWORD' --description='Authentik LDAP Sync Account' 2>/dev/null || echo 'User may already exist'"
 
-  if sshRun "$VM_USER" "$NOMAD01_IP" "$CREATE_USER_CMD"; then
+  if sshRunAdmin "$VM_USER" "$NOMAD01_IP" "$CREATE_USER_CMD"; then
     success "Sync service account created (or already exists)"
   else
     warn "Could not create sync account - it may already exist"

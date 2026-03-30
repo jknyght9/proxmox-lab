@@ -95,7 +95,7 @@ REMOTE_SCRIPT
 
     # Restart Nomad to apply configuration
     doing "Restarting Nomad on $hostname..."
-    if ! sshRun "$VM_USER" "$ip" "sudo systemctl restart nomad"; then
+    if ! sshRunAdmin "$VM_USER" "$ip" "sudo systemctl restart nomad"; then
       error "Failed to restart Nomad on $hostname"
       return 1
     fi
@@ -113,7 +113,7 @@ REMOTE_SCRIPT
 
   local attempts=0
   while [ $attempts -lt 30 ]; do
-    if sshRun "$VM_USER" "$FIRST_IP" "nomad server members 2>/dev/null | grep -c alive" 2>/dev/null | grep -q "[3-9]"; then
+    if sshRunAdmin "$VM_USER" "$FIRST_IP" "nomad server members 2>/dev/null | grep -c alive" 2>/dev/null | grep -q "[3-9]"; then
       break
     fi
     sleep 2
@@ -146,5 +146,5 @@ function isNomadVaultConfigured() {
   [ -z "$NOMAD_IP" ] && return 1
 
   # Check if vault.hcl exists on first Nomad node
-  sshRun "$VM_USER" "$NOMAD_IP" "test -f /etc/nomad.d/vault.hcl" 2>/dev/null
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "test -f /etc/nomad.d/vault.hcl" 2>/dev/null
 }

@@ -216,7 +216,7 @@ function isVaultDeployed() {
   [ -z "$nomad_ip" ] && return 1
 
   local status
-  status=$(sshRun "$VM_USER" "$nomad_ip" "nomad job status vault 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
+  status=$(sshRunAdmin "$VM_USER" "$nomad_ip" "nomad job status vault 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
 }

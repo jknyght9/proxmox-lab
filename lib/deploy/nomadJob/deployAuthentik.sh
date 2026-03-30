@@ -177,18 +177,18 @@ REMOTE_SCRIPT
   rm -f "/tmp/authentik-rendered.nomad.hcl"
 
   # Run the job
-  if ! sshRun "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/authentik.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/authentik.nomad.hcl"; then
     error "Failed to deploy authentik"
     return 1
   fi
 
   # Clean up remote rendered file
-  sshRun "$VM_USER" "$NOMAD_IP" "rm -f /tmp/authentik.nomad.hcl"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "rm -f /tmp/authentik.nomad.hcl"
 
   # Wait for deployment and show status
   doing "Waiting for authentik deployment..."
   sleep 5
-  sshRun "$VM_USER" "$NOMAD_IP" "nomad job status authentik | head -25"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job status authentik | head -25"
 
   success "authentik deployed successfully!"
 
@@ -216,7 +216,7 @@ function isAuthentikDeployed() {
   [ -z "$nomad_ip" ] && return 1
 
   local status
-  status=$(sshRun "$VM_USER" "$nomad_ip" "nomad job status authentik 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
+  status=$(sshRunAdmin "$VM_USER" "$nomad_ip" "nomad job status authentik 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
 }
