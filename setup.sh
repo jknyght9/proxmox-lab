@@ -283,18 +283,16 @@ function showMenu() {
   echo "  2) New installation - skip SSH key gen"
   echo "  3) Deploy all services (DNS, CA, Nomad, Kasm)"
   echo "  4) Deploy critical services only (DNS, CA)"
-  echo "  5) Deploy Nomad only"
-  echo "  6) Deploy Kasm only"
-  echo "  7) Deploy Traefik load balancer (on Nomad)"
-  echo "  8) Deploy Vault secrets manager (on Nomad)"
-  echo "  9) Deploy Authentik SSO (on Nomad)"
-  echo " 10) Deploy Samba AD Domain Controllers (on Nomad)"
-  echo " 11) Configure Authentik AD Sync"
-  echo " 12) Deploy Uptime Kuma monitoring (on Nomad)"
-  echo " 13) Configure automated backups (on Nomad)"
-  echo " 14) Rollback service deployment (Terraform)"
-  echo " 15) Purge service deployment (Emergency)"
-  echo " 16) Purge entire deployment"
+  echo "  5) Deploy Traefik load balancer (on Nomad)"
+  echo "  6) Deploy Vault secrets manager (on Nomad)"
+  echo "  7) Deploy Authentik SSO (on Nomad)"
+  echo "  8) Deploy Samba AD Domain Controllers (on Nomad)"
+  echo "  9) Configure Authentik AD Sync"
+  echo " 10) Deploy Uptime Kuma monitoring (on Nomad)"
+  echo " 11) Configure automated backups (on Nomad)"
+  echo " 12) Rollback service deployment (Terraform)"
+  echo " 13) Purge service deployment (Emergency)"
+  echo " 14) Purge entire deployment"
   echo "  0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
@@ -309,6 +307,8 @@ function showMenu() {
     echo " d4) Configure networking"
     echo " d5) Reset labnet egress (fix DHCP/routing issues)"
     echo " d6) Reset Proxmox API credentials"
+    echo " d7) Deploy Nomad only"
+    echo " d8) Deploy Kasm only"
   fi
   echo
 }
@@ -318,9 +318,9 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-16, d1-d6]: ")" choice
+    read -rp "$(question "Select an option [0-14, d1-d8]: ")" choice
   else
-    read -rp "$(question "Select an option [0-16]: ")" choice
+    read -rp "$(question "Select an option [0-14]: ")" choice
   fi
 
   case $choice in
@@ -328,18 +328,16 @@ while true; do
     2) runEverythingButSSH;;
     3) deployAllServices;;
     4) deployCriticalServicesOnly;;
-    5) deployNomadOnly;;
-    6) deployKasmOnly;;
-    7) deployTraefikOnly;;
-    8) deployVaultOnly;;
-    9) deployAuthentikOnly;;
-    10) deploySambaADOnly;;
-    11) configureAuthentikADSyncOnly;;
-    12) deployUptimeKumaOnly;;
-    13) deployBackupOnly;;
-    14) rollbackManual;;
-    15) purgeClusterResources;;
-    16) purgeDeployment;;
+    5) deployTraefikOnly;;
+    6) deployVaultOnly;;
+    7) deployAuthentikOnly;;
+    8) deploySambaADOnly;;
+    9) configureAuthentikADSyncOnly;;
+    10) deployUptimeKumaOnly;;
+    11) deployBackupOnly;;
+    12) rollbackManual;;
+    13) purgeClusterResources;;
+    14) purgeDeployment;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;
@@ -348,6 +346,8 @@ while true; do
     d4|D4) if [ "$DEV_MODE" = true ]; then reconfigureNetworking; else error "Invalid option: $choice"; fi;;
     d5|D5) if [ "$DEV_MODE" = true ]; then resetLabnetEgress; else error "Invalid option: $choice"; fi;;
     d6|D6) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials; else error "Invalid option: $choice"; fi;;
+    d7|D7) if [ "$DEV_MODE" = true ]; then deployNomadOnly; else error "Invalid option: $choice"; fi;;
+    d8|D8) if [ "$DEV_MODE" = true ]; then deployKasmOnly; else error "Invalid option: $choice"; fi;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;

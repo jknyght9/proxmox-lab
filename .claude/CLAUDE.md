@@ -23,18 +23,16 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
  2) New installation (skip SSH)  - Full setup using existing keys
  3) Deploy all services          - DNS, CA, Nomad, Kasm
  4) Deploy critical services     - DNS and CA only
- 5) Deploy Nomad only            - Requires critical services
- 6) Deploy Kasm only             - Requires critical services + docker template
- 7) Deploy Traefik               - Nomad job for load balancing
- 8) Deploy Vault                 - Nomad job for secrets management
- 9) Deploy Authentik             - Nomad job for SSO/identity provider
-10) Deploy Samba AD              - Nomad job for Active Directory DCs
-11) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
-12) Deploy Uptime Kuma           - Nomad job for service health monitoring
-13) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
-14) Rollback (Terraform)         - Terraform destroy for services
-15) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-16) Purge entire deployment      - Reset nodes to pre-install state
+ 5) Deploy Traefik               - Nomad job for load balancing
+ 6) Deploy Vault                 - Nomad job for secrets management
+ 7) Deploy Authentik             - Nomad job for SSO/identity provider
+ 8) Deploy Samba AD              - Nomad job for Active Directory DCs
+ 9) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
+10) Deploy Uptime Kuma           - Nomad job for service health monitoring
+11) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
+12) Rollback (Terraform)         - Terraform destroy for services
+13) Purge (Emergency)            - Direct VM/LXC destruction via SSH
+14) Purge entire deployment      - Reset nodes to pre-install state
 ```
 
 ### Developer Menu (--dev flag)
@@ -48,6 +46,8 @@ d3) Update root certificates     - Push CA cert to Proxmox nodes
 d4) Configure networking         - Update network/HA settings only
 d5) Reset labnet egress          - Fix DHCP/routing issues
 d6) Reset Proxmox API credentials - Purge and recreate hashicorp@pam user/token
+d7) Deploy Nomad only            - Requires critical services
+d8) Deploy Kasm only             - Requires critical services + docker template
 ```
 
 ### Docker Compose Services
@@ -558,7 +558,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
 
 ### Purge/Rollback
-The complete purge (setup.sh option 16) removes all project resources:
+The complete purge (setup.sh option 14) removes all project resources:
 1. VMs, LXC containers, Packer templates
 2. Cloud-init snippets
 3. ACME certificates
