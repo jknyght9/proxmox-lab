@@ -6,6 +6,9 @@ export TERM=xterm
 # Library directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Ensure we're running from the project directory so relative paths work
+cd "$SCRIPT_DIR"
+
 source "$SCRIPT_DIR/lib/ca/updateRootCertificates.sh"
 source "$SCRIPT_DIR/lib/ca/util.sh"
 source "$SCRIPT_DIR/lib/credentials.sh"
