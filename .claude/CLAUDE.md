@@ -30,9 +30,11 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
  9) Deploy Authentik             - Nomad job for SSO/identity provider
 10) Deploy Samba AD              - Nomad job for Active Directory DCs
 11) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
-12) Rollback (Terraform)         - Terraform destroy for services
-13) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-14) Purge entire deployment      - Reset nodes to pre-install state
+12) Deploy Uptime Kuma           - Nomad job for service health monitoring
+13) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
+14) Rollback (Terraform)         - Terraform destroy for services
+15) Purge (Emergency)            - Direct VM/LXC destruction via SSH
+16) Purge entire deployment      - Reset nodes to pre-install state
 ```
 
 ### Developer Menu (--dev flag)
@@ -121,6 +123,8 @@ Modules called from `main.tf`:
 - **authentik.nomad.hcl** - Authentik identity provider (SSO, OAuth2/OIDC, SAML, LDAP)
 - **vault.nomad.hcl** - HashiCorp Vault secrets manager (KV secrets engine, auto-unseal)
 - **samba-dc.nomad.hcl** - Samba AD Domain Controllers (DC01 on nomad01, DC02 on nomad02)
+- **uptime-kuma.nomad.hcl** - Uptime Kuma service health monitoring (port 3001)
+- **backup.nomad.hcl** - Periodic backup job for NFS/SMB storage (credentials from Vault)
 
 ### Network Architecture
 Networks are user-configured during setup (stored in `cluster-info.json`):
@@ -423,6 +427,7 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 ### Vault Policies (`nomad/vault-policies/`)
 - **authentik.hcl**: Policy for Authentik to read secrets from `secret/data/authentik`
 - **samba-dc.hcl**: Policy for Samba AD DCs to read secrets from `secret/data/samba-ad`
+- **backup.hcl**: Policy for backup job to read credentials from `secret/data/backup`
 
 ### Samba AD Configuration
 - **Docker Image**: `nowsci/samba-domain:latest` (supports both JOIN=false for provisioning and JOIN=true for replica)
@@ -439,11 +444,65 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 - **Storage**: Uses GlusterFS subdirectories (`/data/authentik/postgres`, `/data/authentik/redis`, etc.)
 - **Vault Integration**: Job uses `vault { role = "authentik" }` stanza; secrets injected via templates
 
+### Uptime Kuma Configuration
+- **Docker Image**: `louislam/uptime-kuma:1`
+- **Port**: 3001 (HTTP)
+- **Storage**: `/srv/gluster/nomad-data/uptime-kuma`
+- **DNS**: `status.<dns_postfix>` via Traefik
+- **Setup**: First user becomes admin; configure monitors via web UI
+
+**Suggested Monitors:**
+- Vault: `http://nomad01:8200/v1/sys/health?uninitcode=200&sealedcode=200`
+- Authentik: `http://nomad01:9000/-/health/live/`
+- Traefik: `http://nomad01:8081/ping`
+- Nomad: `http://nomad01:4646/v1/status/leader`
+- Pi-hole: `http://dns-01:80/admin/`
+- step-ca: `https://step-ca.<dns_postfix>/health`
+
+### Automated Backup Configuration
+- **Job Type**: Periodic batch job (`cron = "0 2 * * *"` default)
+- **Storage Types**: NFS or SMB/CIFS
+- **Credentials**: Stored in Vault at `secret/data/backup`
+- **Vault Integration**: Uses WIF with `vault { role = "backup" }` stanza
+
+**What Gets Backed Up:**
+| Service | Source | Method |
+|---------|--------|--------|
+| Vault | `/srv/gluster/nomad-data/vault` | tar.gz |
+| Authentik DB | PostgreSQL container | pg_dump |
+| Authentik files | `/srv/gluster/nomad-data/authentik/{media,templates,certs}` | tar.gz |
+| Uptime Kuma | `/srv/gluster/nomad-data/uptime-kuma` | tar.gz |
+| Samba AD | `/srv/gluster/nomad-data/samba-dc01`, `samba-dc02` | tar.gz |
+| Traefik | `/srv/gluster/nomad-data/traefik` | tar.gz |
+
+**Backup Configuration** (stored in `cluster-info.json`):
+```json
+{
+  "backup_config": {
+    "enabled": true,
+    "type": "nfs",
+    "server": "nas.local:/backups",
+    "retention_days": 7,
+    "schedule": "0 2 * * *",
+    "timezone": "UTC"
+  }
+}
+```
+
+**Management Commands:**
+```bash
+nomad job status backup              # View job status
+nomad job periodic force backup      # Trigger manual backup
+nomad alloc logs -job backup         # View backup logs
+nomad job stop backup                # Stop scheduled backups
+```
+
 ### DNS for Nomad Services
 The `updateDNSRecords` function adds service DNS entries:
 - `vault.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `auth.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `traefik.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
+- `status.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `samba-dc01.<ad_realm>` → nomad01 IP
 - `samba-dc02.<ad_realm>` → nomad02 IP
 
@@ -499,7 +558,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
 
 ### Purge/Rollback
-The complete purge (setup.sh option 15) removes all project resources:
+The complete purge (setup.sh option 16) removes all project resources:
 1. VMs, LXC containers, Packer templates
 2. Cloud-init snippets
 3. ACME certificates
@@ -516,3 +575,18 @@ The complete purge (setup.sh option 15) removes all project resources:
 - **Replication failing**: Run `samba-tool drs showrepl` inside container to diagnose
 - **Domain join fails**: Verify DNS forwards `ad.<domain>` to Samba DCs, check Pi-hole `/etc/dnsmasq.d/10-ad-forward.conf`
 - **LDAP connection fails**: Test with `ldapsearch -H ldap://nomad01:389 -b "dc=ad,dc=mylab,dc=lan"`
+
+### Uptime Kuma Issues
+- **Not accessible via Traefik**: Check Traefik routers: `curl http://nomad01:8081/api/http/routers | jq . | grep uptime`
+- **Direct access works but HTTPS fails**: Verify ACME certificate issued: check `/srv/gluster/nomad-data/traefik/acme.json`
+- **Container not starting**: Check logs: `nomad alloc logs -job uptime-kuma`
+- **Lost admin access**: Reset by deleting data: `rm -rf /srv/gluster/nomad-data/uptime-kuma/*` and redeploy
+
+### Backup Issues
+- **NFS mount failing**: Verify NFS export accessible from Nomad nodes: `showmount -e <nfs-server>`
+- **SMB mount failing**: Check credentials, ensure `vers=3.0` supported, test with: `mount -t cifs //<server>/<share> /mnt -o username=<user>`
+- **Job not running on schedule**: Check periodic status: `nomad job status backup` shows next run time
+- **Vault credentials not found**: Verify backup secret exists: `vault kv get secret/backup` (with root token)
+- **Backup directory not writable**: Ensure NFS/SMB share has write permissions for root/nobody
+- **View backup logs**: `nomad alloc logs -job backup` (must wait for periodic run or force with `nomad job periodic force backup`)
+- **Retention not working**: Old backups pruned based on `mtime`; check NFS server time sync

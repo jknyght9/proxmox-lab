@@ -22,7 +22,9 @@ source "$SCRIPT_DIR/lib/deploy/rollbackManual.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployAuthentik.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deploySambaAD.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/configureAuthentikADSync.sh"
+source "$SCRIPT_DIR/lib/deploy/nomadJob/deployBackup.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployTraefik.sh"
+source "$SCRIPT_DIR/lib/deploy/nomadJob/deployUptimeKuma.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployVault.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/unsealVault.sh"
 source "$SCRIPT_DIR/lib/deploy/configureVaultWIF.sh"
@@ -288,9 +290,11 @@ function showMenu() {
   echo "  9) Deploy Authentik SSO (on Nomad)"
   echo " 10) Deploy Samba AD Domain Controllers (on Nomad)"
   echo " 11) Configure Authentik AD Sync"
-  echo " 12) Rollback service deployment (Terraform)"
-  echo " 13) Purge service deployment (Emergency)"
-  echo " 14) Purge entire deployment"
+  echo " 12) Deploy Uptime Kuma monitoring (on Nomad)"
+  echo " 13) Configure automated backups (on Nomad)"
+  echo " 14) Rollback service deployment (Terraform)"
+  echo " 15) Purge service deployment (Emergency)"
+  echo " 16) Purge entire deployment"
   echo "  0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
@@ -314,9 +318,9 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-14, d1-d6]: ")" choice
+    read -rp "$(question "Select an option [0-16, d1-d6]: ")" choice
   else
-    read -rp "$(question "Select an option [0-14]: ")" choice
+    read -rp "$(question "Select an option [0-16]: ")" choice
   fi
 
   case $choice in
@@ -331,9 +335,11 @@ while true; do
     9) deployAuthentikOnly;;
     10) deploySambaADOnly;;
     11) configureAuthentikADSyncOnly;;
-    12) rollbackManual;;
-    13) purgeClusterResources;;
-    14) purgeDeployment;;
+    12) deployUptimeKumaOnly;;
+    13) deployBackupOnly;;
+    14) rollbackManual;;
+    15) purgeClusterResources;;
+    16) purgeDeployment;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;
