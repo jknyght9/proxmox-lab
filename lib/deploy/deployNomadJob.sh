@@ -47,7 +47,7 @@ function deployNomadJob() {
   envsubst '${DNS_POSTFIX}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
 
   # Copy to Nomad node
-  scpTo "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"
+  scpToAdmin "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"
 
   # Run the job
   if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/${job_name}.nomad.hcl"; then

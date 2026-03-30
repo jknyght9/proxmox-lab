@@ -171,7 +171,7 @@ REMOTE_SCRIPT
   envsubst '${DNS_POSTFIX}' < "nomad/jobs/authentik.nomad.hcl" > "/tmp/authentik-rendered.nomad.hcl"
 
   # Copy to Nomad node
-  scpTo "/tmp/authentik-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.nomad.hcl"
+  scpToAdmin "/tmp/authentik-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.nomad.hcl"
 
   # Clean up local rendered file
   rm -f "/tmp/authentik-rendered.nomad.hcl"

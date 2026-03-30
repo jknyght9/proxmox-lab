@@ -319,7 +319,7 @@ REMOTE_SCRIPT
   mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
 
   # Copy to Nomad node
-  scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
+  scpToAdmin "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
   # Deploy DC01 only
   if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
@@ -370,7 +370,7 @@ REMOTE_SCRIPT
     mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
 
     # Copy updated job to Nomad node
-    scpTo "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
+    scpToAdmin "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
     # Deploy updated job (adds DC02)
     if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then

@@ -42,7 +42,7 @@ EOF
   if [ -n "$CA_IP" ] && [ "$CA_IP" != "null" ]; then
     # Fetch root CA and copy to GlusterFS
     if curl -sk "https://$CA_IP/roots.pem" -o /tmp/root_ca.crt 2>/dev/null; then
-      scpTo "/tmp/root_ca.crt" "$VM_USER" "$NOMAD_IP" "/tmp/root_ca.crt"
+      scpToAdmin "/tmp/root_ca.crt" "$VM_USER" "$NOMAD_IP" "/tmp/root_ca.crt"
       sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/root_ca.crt /srv/gluster/nomad-data/certs/root_ca.crt && sudo chmod 644 /srv/gluster/nomad-data/certs/root_ca.crt"
       success "CA certificate installed for Traefik"
     else
