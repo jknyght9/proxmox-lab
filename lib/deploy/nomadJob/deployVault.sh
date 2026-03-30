@@ -40,7 +40,7 @@ EOF
   # Create storage directories
   doing "Preparing Vault storage directories..."
 
-  if ! sshScript "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
+  if ! sshScriptAdmin "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     VAULT_DIR="/srv/gluster/nomad-data/vault"
 
     # Clean up any stale data from previous deployments

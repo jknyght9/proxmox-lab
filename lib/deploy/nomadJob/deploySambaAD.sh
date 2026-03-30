@@ -226,7 +226,7 @@ ROLE_JSON
   # Samba AD requires POSIX ACL support which GlusterFS FUSE doesn't provide
   doing "Preparing DC01 local storage directories on nomad01..."
 
-  if ! sshScript "$VM_USER" "$NOMAD01_IP" <<'REMOTE_SCRIPT'
+  if ! sshScriptAdmin "$VM_USER" "$NOMAD01_IP" <<'REMOTE_SCRIPT'
     DC01_DIR="/opt/samba-dc01"
 
     # Clean up any stale data from previous deployments
@@ -250,7 +250,7 @@ REMOTE_SCRIPT
   if [ -n "$NOMAD02_IP" ] && [ "$NOMAD02_IP" != "null" ]; then
     doing "Preparing DC02 local storage directories on nomad02..."
 
-    if ! sshScript "$VM_USER" "$NOMAD02_IP" <<'REMOTE_SCRIPT'
+    if ! sshScriptAdmin "$VM_USER" "$NOMAD02_IP" <<'REMOTE_SCRIPT'
       DC02_DIR="/opt/samba-dc02"
 
       # Clean up any stale data from previous deployments

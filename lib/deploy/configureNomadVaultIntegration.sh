@@ -59,7 +59,7 @@ EOF
     doing "Configuring $hostname ($ip)..."
 
     # Create the Vault configuration file for WIF
-    if ! sshScript "$VM_USER" "$ip" <<REMOTE_SCRIPT
+    if ! sshScriptAdmin "$VM_USER" "$ip" <<REMOTE_SCRIPT
       # Write Vault WIF configuration for Nomad
       sudo tee /etc/nomad.d/vault.hcl > /dev/null <<'VAULTCONFIG'
 # Vault Workload Identity Federation for Nomad

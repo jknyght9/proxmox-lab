@@ -91,7 +91,7 @@ EOF
   # Create storage directories (no secrets stored here anymore)
   doing "Preparing Authentik storage directories..."
 
-  if ! sshScript "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
+  if ! sshScriptAdmin "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     AUTHENTIK_DIR="/srv/gluster/nomad-data/authentik"
 
     # Create required directories (maps to /data/authentik/* in containers)
