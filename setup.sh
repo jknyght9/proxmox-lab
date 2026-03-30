@@ -53,7 +53,7 @@ for arg in "$@"; do
 done
 
 # Global variables
-CRYPTO_DIR="crypto"
+CRYPTO_DIR="$SCRIPT_DIR/crypto"
 DNS_POSTFIX=""
 ENTERPRISE_KEY_NAME="labenterpriseadmin"
 ENTERPRISE_KEY_PATH="$CRYPTO_DIR/$ENTERPRISE_KEY_NAME"
@@ -64,7 +64,7 @@ ADMIN_PUBKEY_PATH="$ADMIN_KEY_PATH.pub"
 REMOTE_USER="root"
 
 # Cluster-related globals (populated by detectAndSaveCluster or loadClusterInfo)
-CLUSTER_INFO_FILE="cluster-info.json"
+CLUSTER_INFO_FILE="$SCRIPT_DIR/cluster-info.json"
 CLUSTER_NODES=()
 CLUSTER_NODE_IPS=()
 IS_CLUSTER=false
