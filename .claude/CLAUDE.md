@@ -444,7 +444,7 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 - **Single-node Support**: Automatically deploys only DC01 if nomad02 doesn't exist
 
 ### Authentik Configuration
-- **Version**: 2025.12.4+ (Redis removed in 2025.10 - PostgreSQL handles all caching/sessions)
+- **Version**: 2026.2+ (Redis removed in 2025.10 - PostgreSQL handles all caching/sessions)
 - **Secrets**: Stored in Vault at `secret/data/authentik`, fetched at runtime via WIF
 - **Storage**: GlusterFS at `/srv/gluster/nomad-data/authentik/` with subdirectories:
   - `postgres/` - PostgreSQL data (handles all caching, sessions, tasks)

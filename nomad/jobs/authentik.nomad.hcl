@@ -70,7 +70,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2025.12.4"
+        image        = "ghcr.io/goauthentik/server:2026.2"
         network_mode = "host"
         args         = ["server"]
         volumes = [
@@ -134,7 +134,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2025.12.4"
+        image        = "ghcr.io/goauthentik/server:2026.2"
         network_mode = "host"
         args         = ["worker"]
         volumes = [
