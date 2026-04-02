@@ -32,7 +32,7 @@ job "authentik" {
       user = "root"
 
       config {
-        image        = "postgres:16-alpine"
+        image        = "postgres:16"
         network_mode = "host"
         volumes = [
           "/srv/gluster/nomad-data/authentik/postgres:/var/lib/postgresql/data",
