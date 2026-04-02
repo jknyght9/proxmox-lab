@@ -89,18 +89,20 @@ EOF
   NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
 
   # Create storage directories (no secrets stored here anymore)
+  # Note: As of Authentik 2025.10, Redis is no longer needed
   doing "Preparing Authentik storage directories..."
 
   if ! sshScriptAdmin "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     AUTHENTIK_DIR="/srv/gluster/nomad-data/authentik"
 
-    # Create required directories (maps to /data/authentik/* in containers)
-    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,redis,media,templates,certs}
+    # Create required directories
+    # - postgres: PostgreSQL data (now handles all caching/sessions)
+    # - data: Authentik data directory (media, templates, certs)
+    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,data/media}
 
-    # Set ownership - postgres runs as root in our config, redis as redis (999)
+    # Set ownership - postgres runs as root, authentik runs as 1000
     sudo chown -R root:root "$AUTHENTIK_DIR/postgres"
-    sudo chown -R 999:999 "$AUTHENTIK_DIR/redis"
-    sudo chown -R 1000:1000 "$AUTHENTIK_DIR/media" "$AUTHENTIK_DIR/templates" "$AUTHENTIK_DIR/certs"
+    sudo chown -R 1000:1000 "$AUTHENTIK_DIR/data"
 
     echo "Authentik storage directories prepared"
 REMOTE_SCRIPT

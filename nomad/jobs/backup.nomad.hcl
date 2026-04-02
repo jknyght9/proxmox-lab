@@ -110,10 +110,8 @@ backup_dir "vault" "/data/vault"
 # Backup Uptime Kuma data
 backup_dir "uptime-kuma" "/data/uptime-kuma"
 
-# Backup Authentik files
-backup_dir "authentik-media" "/data/authentik/media"
-backup_dir "authentik-templates" "/data/authentik/templates"
-backup_dir "authentik-certs" "/data/authentik/certs"
+# Backup Authentik data directory (media, templates, certs - unified in 2025.10+)
+backup_dir "authentik-data" "/data/authentik/data"
 
 # Backup Authentik PostgreSQL database
 if docker ps --format '{{.Names}}' | grep -q postgres; then

@@ -22,10 +22,10 @@ job "authentik" {
       port "http"     { static = 9000 }
       port "https"    { static = 9443 }
       port "postgres" { static = 5432 }
-      port "redis"    { static = 6379 }
     }
 
     # PostgreSQL - Database for Authentik
+    # Note: As of 2025.10, Authentik no longer uses Redis - everything runs through PostgreSQL
     task "postgres" {
       driver = "docker"
 
@@ -47,6 +47,8 @@ POSTGRES_DB=authentik
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
+# Increase max connections for Authentik 2025.10+ (no Redis means more DB connections)
+POSTGRES_INITDB_ARGS=--encoding=UTF8
 EOH
         destination = "secrets/postgres.env"
         env         = true
@@ -63,45 +65,16 @@ EOH
       }
     }
 
-    # Redis - Cache and message broker
-    task "redis" {
-      driver = "docker"
-
-      config {
-        image        = "redis:7-alpine"
-        network_mode = "host"
-        args = [
-          "--save", "60", "1",
-          "--loglevel", "warning",
-          "--dir", "/data/redis",
-        ]
-        volumes = [
-          "/srv/gluster/nomad-data/authentik/redis:/data/redis",
-        ]
-      }
-
-      resources {
-        cpu    = 100
-        memory = 128
-      }
-
-      lifecycle {
-        hook    = "prestart"
-        sidecar = true
-      }
-    }
-
     # Authentik Server - Web UI, API, and authentication endpoints
     task "server" {
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2025.12"
+        image        = "ghcr.io/goauthentik/server:2025.12.4"
         network_mode = "host"
         args         = ["server"]
         volumes = [
-          "/srv/gluster/nomad-data/authentik/media:/media",
-          "/srv/gluster/nomad-data/authentik/templates:/templates",
+          "/srv/gluster/nomad-data/authentik/data:/data",
         ]
       }
 
@@ -115,8 +88,6 @@ AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_REDIS__HOST=127.0.0.1
-AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
 AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
@@ -163,12 +134,11 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2025.12"
+        image        = "ghcr.io/goauthentik/server:2025.12.4"
         network_mode = "host"
         args         = ["worker"]
         volumes = [
-          "/srv/gluster/nomad-data/authentik/media:/media",
-          "/srv/gluster/nomad-data/authentik/certs:/certs",
+          "/srv/gluster/nomad-data/authentik/data:/data",
         ]
       }
 
@@ -182,8 +152,6 @@ AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
-AUTHENTIK_REDIS__HOST=127.0.0.1
-AUTHENTIK_REDIS__PORT=6379
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 EOH
         destination = "secrets/authentik.env"

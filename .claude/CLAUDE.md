@@ -444,8 +444,11 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 - **Single-node Support**: Automatically deploys only DC01 if nomad02 doesn't exist
 
 ### Authentik Configuration
+- **Version**: 2025.12.4+ (Redis removed in 2025.10 - PostgreSQL handles all caching/sessions)
 - **Secrets**: Stored in Vault at `secret/data/authentik`, fetched at runtime via WIF
-- **Storage**: Uses GlusterFS subdirectories (`/data/authentik/postgres`, `/data/authentik/redis`, etc.)
+- **Storage**: GlusterFS at `/srv/gluster/nomad-data/authentik/` with subdirectories:
+  - `postgres/` - PostgreSQL data (handles all caching, sessions, tasks)
+  - `data/` - Authentik data (media, templates, certs)
 - **Vault Integration**: Job uses `vault { role = "authentik" }` stanza; secrets injected via templates
 
 ### Uptime Kuma Configuration
@@ -474,7 +477,7 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 |---------|--------|--------|
 | Vault | `/srv/gluster/nomad-data/vault` | tar.gz |
 | Authentik DB | PostgreSQL container | pg_dump |
-| Authentik files | `/srv/gluster/nomad-data/authentik/{media,templates,certs}` | tar.gz |
+| Authentik data | `/srv/gluster/nomad-data/authentik/data` | tar.gz |
 | Uptime Kuma | `/srv/gluster/nomad-data/uptime-kuma` | tar.gz |
 | Samba AD | `/srv/gluster/nomad-data/samba-dc01`, `samba-dc02` | tar.gz |
 | Traefik | `/srv/gluster/nomad-data/traefik` | tar.gz |
