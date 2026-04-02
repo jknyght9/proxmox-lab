@@ -111,52 +111,81 @@ REMOTE_SCRIPT
     return 1
   fi
 
-  # Check if secrets already exist in Vault
-  doing "Checking for existing secrets in Vault..."
+  # Check existing secrets in Vault and add any missing ones
+  doing "Checking secrets in Vault..."
 
-  local SECRETS_EXIST=false
   local EXISTING_SECRETS
-  # Use -s (silent) but not -f (fail) so we can check the response
   EXISTING_SECRETS=$(curl -s --connect-timeout 5 --max-time 10 \
     "${VAULT_ADDR}/v1/secret/data/authentik" \
     -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
 
-  if echo "$EXISTING_SECRETS" | jq -e '.data.data.postgres_password' >/dev/null 2>&1; then
-    SECRETS_EXIST=true
-    success "Found existing secrets in Vault"
+  # Extract existing values (empty string if not present)
+  local POSTGRES_PASSWORD SECRET_KEY ADMIN_PASSWORD ADMIN_EMAIL
+  POSTGRES_PASSWORD=$(echo "$EXISTING_SECRETS" | jq -r '.data.data.postgres_password // empty' 2>/dev/null)
+  SECRET_KEY=$(echo "$EXISTING_SECRETS" | jq -r '.data.data.secret_key // empty' 2>/dev/null)
+  ADMIN_PASSWORD=$(echo "$EXISTING_SECRETS" | jq -r '.data.data.admin_password // empty' 2>/dev/null)
+  ADMIN_EMAIL=$(echo "$EXISTING_SECRETS" | jq -r '.data.data.admin_email // empty' 2>/dev/null)
+
+  local SECRETS_UPDATED=false
+
+  # Generate missing postgres_password
+  if [ -z "$POSTGRES_PASSWORD" ]; then
+    POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
+    info "Generated new postgres_password"
+    SECRETS_UPDATED=true
+  else
+    success "Found existing postgres_password"
   fi
 
-  if [ "$SECRETS_EXIST" = "false" ]; then
-    doing "Generating and storing secrets in Vault..."
-
-    # Generate new secrets
-    local POSTGRES_PASSWORD SECRET_KEY ADMIN_PASSWORD
-    POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
+  # Generate missing secret_key
+  if [ -z "$SECRET_KEY" ]; then
     SECRET_KEY=$(openssl rand -base64 36 | tr -d '\n')
+    info "Generated new secret_key"
+    SECRETS_UPDATED=true
+  else
+    success "Found existing secret_key"
+  fi
 
-    # Load admin password from service-passwords.json if it exists, otherwise generate
+  # Generate missing admin_password
+  if [ -z "$ADMIN_PASSWORD" ]; then
     local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
     if [ -f "$PASSWORDS_FILE" ] && jq -e '.authentik_admin_password' "$PASSWORDS_FILE" >/dev/null 2>&1; then
       ADMIN_PASSWORD=$(jq -r '.authentik_admin_password' "$PASSWORDS_FILE")
       info "Using admin password from service-passwords.json"
     else
       ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c 24)
-      # Save to service-passwords.json
+      # Save to service-passwords.json if it exists
       if [ -f "$PASSWORDS_FILE" ]; then
         local tmp_file=$(mktemp)
         jq --arg pass "$ADMIN_PASSWORD" '. + {authentik_admin_password: $pass}' "$PASSWORDS_FILE" > "$tmp_file" && mv "$tmp_file" "$PASSWORDS_FILE"
         chmod 600 "$PASSWORDS_FILE"
       fi
-      info "Generated new admin password"
+      info "Generated new admin_password"
     fi
+    SECRETS_UPDATED=true
+  else
+    success "Found existing admin_password"
+  fi
 
-    # Store secrets in Vault KV v2
+  # Set admin_email if missing
+  if [ -z "$ADMIN_EMAIL" ]; then
+    ADMIN_EMAIL="admin@${DNS_POSTFIX}"
+    info "Set admin_email to $ADMIN_EMAIL"
+    SECRETS_UPDATED=true
+  else
+    success "Found existing admin_email"
+  fi
+
+  # Store secrets in Vault if any were generated/updated
+  if [ "$SECRETS_UPDATED" = "true" ]; then
+    doing "Storing secrets in Vault..."
+
     local SECRET_PAYLOAD
     SECRET_PAYLOAD=$(jq -n \
       --arg pg_pass "$POSTGRES_PASSWORD" \
       --arg secret_key "$SECRET_KEY" \
       --arg admin_pass "$ADMIN_PASSWORD" \
-      --arg admin_email "admin@${DNS_POSTFIX}" \
+      --arg admin_email "$ADMIN_EMAIL" \
       '{data: {postgres_password: $pg_pass, secret_key: $secret_key, admin_password: $admin_pass, admin_email: $admin_email}}')
 
     if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
@@ -169,6 +198,8 @@ REMOTE_SCRIPT
     fi
 
     success "Secrets stored in Vault at secret/data/authentik"
+  else
+    success "All secrets already present in Vault"
   fi
 
   # Deploy Authentik - render only DNS_POSTFIX (secrets come from Vault)
