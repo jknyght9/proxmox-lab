@@ -130,16 +130,34 @@ REMOTE_SCRIPT
     doing "Generating and storing secrets in Vault..."
 
     # Generate new secrets
-    local POSTGRES_PASSWORD SECRET_KEY
+    local POSTGRES_PASSWORD SECRET_KEY ADMIN_PASSWORD
     POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '\n')
     SECRET_KEY=$(openssl rand -base64 36 | tr -d '\n')
+
+    # Load admin password from service-passwords.json if it exists, otherwise generate
+    local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
+    if [ -f "$PASSWORDS_FILE" ] && jq -e '.authentik_admin_password' "$PASSWORDS_FILE" >/dev/null 2>&1; then
+      ADMIN_PASSWORD=$(jq -r '.authentik_admin_password' "$PASSWORDS_FILE")
+      info "Using admin password from service-passwords.json"
+    else
+      ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9!@#$%^&*' | head -c 24)
+      # Save to service-passwords.json
+      if [ -f "$PASSWORDS_FILE" ]; then
+        local tmp_file=$(mktemp)
+        jq --arg pass "$ADMIN_PASSWORD" '. + {authentik_admin_password: $pass}' "$PASSWORDS_FILE" > "$tmp_file" && mv "$tmp_file" "$PASSWORDS_FILE"
+        chmod 600 "$PASSWORDS_FILE"
+      fi
+      info "Generated new admin password"
+    fi
 
     # Store secrets in Vault KV v2
     local SECRET_PAYLOAD
     SECRET_PAYLOAD=$(jq -n \
       --arg pg_pass "$POSTGRES_PASSWORD" \
       --arg secret_key "$SECRET_KEY" \
-      '{data: {postgres_password: $pg_pass, secret_key: $secret_key}}')
+      --arg admin_pass "$ADMIN_PASSWORD" \
+      --arg admin_email "admin@${DNS_POSTFIX}" \
+      '{data: {postgres_password: $pg_pass, secret_key: $secret_key, admin_password: $admin_pass, admin_email: $admin_email}}')
 
     if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
       "${VAULT_ADDR}/v1/secret/data/authentik" \
@@ -199,13 +217,25 @@ REMOTE_SCRIPT
 
   displayDeploymentSummary
 
+  # Get admin password for display
+  local DISPLAY_ADMIN_PASS=""
+  local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
+  if [ -f "$PASSWORDS_FILE" ]; then
+    DISPLAY_ADMIN_PASS=$(jq -r '.authentik_admin_password // empty' "$PASSWORDS_FILE")
+  fi
+
   echo
   info "Authentik is starting up. This may take a minute..."
   info "Access Authentik at: https://auth.${DNS_POSTFIX}/ (via Traefik)"
   info "Or directly at: http://${NOMAD_IP}:9000/"
-  info "First-time setup: Create admin account at /if/flow/initial-setup/"
   echo
-  info "Secrets are stored in Vault at: secret/data/authentik"
+  info "Admin credentials:"
+  info "  Username: akadmin"
+  info "  Password: ${DISPLAY_ADMIN_PASS:-<check Vault at secret/data/authentik>}"
+  info "  Email: admin@${DNS_POSTFIX}"
+  echo
+  info "Secrets stored in Vault at: secret/data/authentik"
+  info "Password also saved in: $PASSWORDS_FILE"
 
   success "Authentik deployment complete!"
 }
