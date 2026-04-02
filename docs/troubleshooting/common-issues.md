@@ -1,652 +1,414 @@
 # Common Issues
 
-This page covers frequently encountered issues and their solutions.
+This page covers the most frequently encountered issues in Proxmox Lab, organized by service. For specific error messages, see [Error Reference](error-reference.md). For diagnostic commands, see [Diagnostic Commands](diagnostic-commands.md).
 
-## DNS Issues
+---
 
-### DNS Records Not Resolving
+## Vault Issues
 
-**Symptoms:**
-- Services like `vault.mylab.lan` don't resolve
-- `nslookup` or `dig` queries fail
-- Browser shows "DNS_PROBE_FINISHED_NXDOMAIN"
+### Permission Denied on Storage
 
-**Causes & Solutions:**
+**Symptom:** Vault fails to start with permission errors writing to the storage backend.
 
-1. **DNS server not configured on client**
-
-   ```bash
-   # Check your DNS server
-   # macOS/Linux:
-   cat /etc/resolv.conf
-   # Windows:
-   ipconfig /all
-   ```
-
-   **Fix:** Configure your client to use dns-01 IP address as DNS server.
-
-2. **DNS container not running**
-
-   ```bash
-   # Check container status
-   pct status 910  # dns-01
-
-   # If stopped, start it
-   pct start 910
-   ```
-
-3. **Records not added to Pi-hole**
-
-   ```bash
-   # Run DNS update
-   ./setup.sh
-   # Select option 10: Build DNS records
-   ```
-
-   Or check manually:
-   ```bash
-   ssh root@<dns-01-ip>
-   pihole-FTL --config dns.hosts get
-   ```
-
-### Local Domains Resolve but External Don't
-
-**Symptoms:**
-- `vault.mylab.lan` resolves correctly
-- `google.com` fails or times out
-
-**Causes:**
-
-1. **Unbound or dnscrypt-proxy not running**
-
-   ```bash
-   ssh root@dns-01
-   systemctl status unbound
-   systemctl status dnscrypt-proxy
-   ```
-
-   **Fix:**
-   ```bash
-   systemctl restart unbound
-   systemctl restart dnscrypt-proxy
-   systemctl restart pihole-FTL
-   ```
-
-2. **Upstream DNS blocked by firewall**
-
-   Pi-hole uses DNS-over-HTTPS (port 443). Verify outbound HTTPS is allowed.
-
-### Tailscale Overwriting DNS Configuration
-
-**Symptoms:**
-- `/etc/resolv.conf` on Proxmox nodes shows `nameserver 100.100.100.100`
-- Local `.mylab.lan` domains don't resolve on Proxmox nodes
-- DNS configuration resets after reboot
-- Manually editing `/etc/resolv.conf` doesn't persist
-
-**Cause:**
-
-Tailscale MagicDNS automatically manages DNS configuration by:
-- Overwriting `/etc/resolv.conf` with Tailscale's DNS server (100.100.100.100)
-- Restoring this configuration on boot or network changes
-- Preventing manual DNS settings from persisting
+**Cause:** The Docker container does not have sufficient permissions to write to the GlusterFS volume.
 
 **Solution:**
 
-Run the DNS update process which automatically disables Tailscale DNS management:
+1. Verify that `privileged = true` is set in the Vault Nomad job Docker config
+2. Clean up stale data from a previous deployment:
 
 ```bash
-./setup.sh
-# Select option 10: Build DNS records
-# Answer Y when prompted to update Proxmox DNS
+ssh user@<nomad01-ip> "sudo rm -rf /srv/gluster/nomad-data/vault/*"
 ```
 
-This runs `tailscale set --accept-dns=false` on each node, preventing Tailscale from managing DNS.
-
-**Manual Fix (per node):**
+3. Restart the Vault job:
 
 ```bash
-# SSH to the affected Proxmox node
-ssh root@proxmox-node
-
-# Disable Tailscale DNS management
-tailscale set --accept-dns=false
-
-# Verify the change
-tailscale status
-# Look for: Accept DNS: false
-
-# Update resolv.conf
-cat > /etc/resolv.conf << EOF
-nameserver 10.1.50.3    # dns-01
-nameserver 1.1.1.1       # Cloudflare fallback
-EOF
-
-# Verify resolution works
-dig vault.mylab.lan
-```
-
-**Verify the Fix:**
-
-```bash
-# Check resolv.conf shows your DNS, not 100.100.100.100
-cat /etc/resolv.conf
-
-# Check Tailscale status
-tailscale status
-# Should show: "Accept DNS: false"
-
-# Test local domain resolution
-ping vault.mylab.lan
-```
-
-**Note on MagicDNS Names:**
-
-After disabling Tailscale DNS, MagicDNS names (e.g., `node.tailnet.ts.net`) won't resolve on Proxmox nodes. Use these alternatives:
-
-- **Use Tailscale IPs:** `ssh 100.x.x.x` instead of `ssh node.tailnet.ts.net`
-- **Add to Pi-hole:** Add Tailscale hosts to Pi-hole DNS records
-- **Use /etc/hosts:** Add static entries to individual nodes if needed
-
-See [Tailscale Integration](../architecture/network-topology.md#tailscale-integration) for more details.
-
-### DNS Changes Not Syncing to Replicas
-
-**Symptoms:**
-- Records work on dns-01 but not dns-02 or dns-03
-- Nebula-Sync service shows errors
-
-**Solution:**
-
-1. **Trigger manual sync:**
-
-   ```bash
-   ssh root@dns-01
-   systemctl start nebula-sync.service
-   systemctl status nebula-sync.service
-   ```
-
-2. **Check replica connectivity:**
-
-   ```bash
-   ssh root@dns-01
-   ping <dns-02-ip>
-   ssh root@<dns-02-ip> 'systemctl status pihole-FTL'
-   ```
-
-3. **View sync logs:**
-
-   ```bash
-   journalctl -u nebula-sync.service -n 50
-   ```
-
-4. **Restart Nebula-Sync:**
-
-   ```bash
-   systemctl restart nebula-sync.service
-   ```
-
-## Nomad Issues
-
-### Nomad Jobs Not Starting
-
-**Symptoms:**
-- `nomad job status` shows job as pending
-- Allocations fail immediately
-
-**Common Causes:**
-
-1. **No eligible nodes:**
-
-   ```bash
-   nomad job status <job-name>
-   # Look for "Placement Failures" section
-   ```
-
-   **Fix:** Check node constraints in the job file match available nodes.
-
-2. **Insufficient resources:**
-
-   ```bash
-   nomad node status
-   # Check available CPU/memory
-   ```
-
-   **Fix:** Reduce job resource requirements or scale up cluster.
-
-3. **GlusterFS volume not mounted:**
-
-   ```bash
-   ssh ubuntu@nomad01
-   df -h | grep gluster
-   mount | grep gluster
-   ```
-
-   **Fix:**
-   ```bash
-   sudo systemctl restart glusterd
-   sudo mount -a
-   ```
-
-### Vault Job Fails with Permission Errors
-
-**Symptoms:**
-- Vault allocation fails with "permission denied" on `/data/vault`
-- Logs show storage access errors
-
-**Cause:**
-
-GlusterFS volumes require privileged mode for some operations.
-
-**Solution:**
-
-Ensure the Vault job has `privileged = true` in the Docker config:
-
-```hcl
-config {
-  image = "hashicorp/vault:latest"
-  privileged = true  # Required for GlusterFS
-  ...
-}
-```
-
-Clean up old data and restart:
-
-```bash
-# On nomad01
-sudo rm -rf /srv/gluster/nomad-data/vault/*
-
-# Restart job
 docker compose run --rm nomad job stop -purge vault
 docker compose run --rm nomad job run /nomad/jobs/vault.nomad.hcl
 ```
 
-### Services Not Accessible via Traefik
+### Port Already in Use
 
-**Symptoms:**
-- Service DNS resolves correctly
-- Traefik dashboard shows service as healthy
-- HTTP requests timeout or return 404
+**Symptom:** Vault job fails with a "port already in use" or "address already in use" error.
 
-**Troubleshooting:**
+**Cause:** A previous Vault allocation is still running or did not clean up properly.
 
-1. **Check Traefik routers:**
+**Solution:**
 
+```bash
+# Stop and purge all allocations
+docker compose run --rm nomad job stop -purge vault
+
+# Wait a few seconds, then redeploy
+docker compose run --rm nomad job run /nomad/jobs/vault.nomad.hcl
+```
+
+If the port is still in use after purging, SSH into nomad01 and check for stale Docker containers:
+
+```bash
+ssh user@<nomad01-ip> "docker ps -a | grep vault"
+# If found, remove manually:
+ssh user@<nomad01-ip> "docker rm -f <container-id>"
+```
+
+### Vault Not Responding
+
+**Symptom:** Vault UI is unreachable or API requests time out.
+
+**Cause:** Vault may be running on a different node than expected, or the job may have failed.
+
+**Solution:**
+
+1. Check which node Vault is running on:
    ```bash
-   curl http://nomad01:8081/api/http/routers | jq .
+   docker compose run --rm nomad job status vault
+   ```
+2. Verify the allocation is in `running` state
+3. Check all Nomad node IPs -- Vault should be on nomad01 due to the hostname constraint
+4. Check Vault logs for errors:
+   ```bash
+   docker compose run --rm nomad alloc logs -job vault
    ```
 
-   Verify your service has a router with the correct Host rule.
+### Vault is Sealed
 
-2. **Check service is running:**
+**Symptom:** Vault returns HTTP 503 and the UI shows an unseal prompt.
 
+**Cause:** Vault seals itself on restart. This happens after any job restart, node reboot, or container recreation.
+
+**Solution:** See [Backup & Recovery - Vault Unseal](../operations/backup-recovery.md#vault-unseal-after-restart).
+
+---
+
+## Traefik Issues
+
+### 404 Errors for Services
+
+**Symptom:** Accessing a service through Traefik returns a 404 page.
+
+**Cause:** Traefik has not discovered the service, or the router configuration is incorrect.
+
+**Solution:**
+
+1. Check the Traefik API for registered routers:
    ```bash
-   docker compose run --rm nomad job status <job-name>
-   docker compose run --rm nomad alloc logs -job <job-name>
+   curl http://<nomad01-ip>:8081/api/http/routers | jq .
    ```
 
-3. **Verify service registration:**
-
+2. Verify the service is registered in Nomad:
    ```bash
    docker compose run --rm nomad service list
    ```
 
-   Your service should appear with the correct tags.
+3. Check that the Nomad job has the correct `tags` for Traefik service discovery (e.g., `traefik.http.routers.<name>.rule`)
 
-4. **Check Nomad provider connection:**
-
+4. Verify DNS resolves the service hostname to nomad01:
    ```bash
-   # In Traefik logs
-   docker compose run --rm nomad alloc logs -job traefik
-   # Look for connection to Nomad API at 127.0.0.1:4646
+   dig @<dns-ip> vault.<domain>
    ```
 
-## Certificate Issues
+### ACME Challenge Failures
 
-### ACME Challenges Failing
+**Symptom:** Traefik logs show ACME challenge errors, and services do not get TLS certificates.
 
-**Symptoms:**
-- Certificate requests fail
-- step-ca logs show challenge validation errors
-- Traefik shows "unable to obtain certificate"
-
-**Causes & Solutions:**
-
-1. **DNS not resolving to correct host:**
-
-   ```bash
-   dig vault.mylab.lan
-   # Should return nomad01 IP
-   ```
-
-   **Fix:** Run DNS update (setup.sh option 10).
-
-2. **Port 80 not accessible:**
-
-   HTTP-01 challenges require port 80 to be accessible.
-
-   ```bash
-   curl http://nomad01/
-   # Should reach Traefik
-   ```
-
-3. **Root CA not trusted:**
-
-   ```bash
-   # On the host requesting certs
-   curl https://ca.mylab.lan/health
-   # Should return {"status":"ok"} without SSL errors
-   ```
-
-   **Fix:** Install root CA certificate (see [Certificate Operations](../operations/certificate-operations.md)).
-
-### Proxmox Web UI Shows Certificate Errors
-
-**Symptoms:**
-- Browser warns about invalid certificate
-- Certificate is self-signed
+**Cause:** DNS does not resolve the service hostname to the Traefik node, or the step-ca ACME endpoint is unreachable.
 
 **Solution:**
 
-Re-run certificate installation:
+1. Verify DNS resolves to the Traefik node (nomad01):
+   ```bash
+   dig @<dns-ip> vault.<domain>
+   ```
+
+2. Check that step-ca is running:
+   ```bash
+   curl -k https://ca.<domain>/health
+   ```
+
+3. Clear the stale ACME store and restart Traefik:
+   ```bash
+   ssh user@<nomad01-ip> "sudo rm /srv/gluster/nomad-data/traefik/acme.json"
+   docker compose run --rm nomad job stop -purge traefik
+   docker compose run --rm nomad job run /nomad/jobs/traefik.nomad.hcl
+   ```
+
+### Service Not Discovered by Traefik
+
+**Symptom:** A Nomad job is running but Traefik does not proxy traffic to it.
+
+**Cause:** The service is not registered in Nomad's service catalog, or Traefik's Nomad provider is not configured correctly.
+
+**Solution:**
+
+1. Verify the service is listed in Nomad:
+   ```bash
+   docker compose run --rm nomad service list
+   ```
+
+2. Check the Nomad job definition for a `service` stanza with Traefik tags
+
+3. Verify Traefik can reach Nomad's API:
+   ```bash
+   # From inside the Traefik container, it uses http://127.0.0.1:4646
+   docker compose run --rm nomad alloc logs -job traefik | grep -i nomad
+   ```
+
+---
+
+## DNS Issues
+
+### FQDN Not Resolving
+
+**Symptom:** A fully qualified domain name (e.g., `vault.mylab.lan`) does not resolve, but the service is accessible by IP.
+
+**Cause:** The DNS record is missing from Pi-hole, or the client is not using Pi-hole as its DNS server.
+
+**Solution:**
+
+1. Verify the record exists in Pi-hole:
+   ```bash
+   ssh root@<dns-ip> "pihole-FTL --config dns.hosts"
+   ```
+
+2. If missing, rebuild DNS records:
+   ```bash
+   ./setup.sh
+   # Select option 10: Build DNS records
+   ```
+
+3. Verify your client is using Pi-hole for DNS:
+   ```bash
+   # Check current DNS servers
+   cat /etc/resolv.conf        # Linux
+   scutil --dns                 # macOS
+   ```
+
+### Short Name Resolves but FQDN Does Not
+
+**Symptom:** `vault` resolves but `vault.mylab.lan` does not.
+
+**Cause:** The search domain is set but the FQDN record is missing, or the record format is incorrect in Pi-hole.
+
+**Solution:**
+
+1. Check the Pi-hole local DNS entries for both short name and FQDN
+2. Ensure the `dns.hosts` entry uses the full FQDN:
+   ```
+   "192.168.1.50 vault.mylab.lan"
+   ```
+
+### Service DNS Missing After Deployment
+
+**Symptom:** You deployed a new service but its DNS record does not exist.
+
+**Cause:** DNS records are not automatically created when services deploy. They must be added via setup.sh.
+
+**Solution:**
 
 ```bash
 ./setup.sh
-# Select option 12: Update root certificates
+# Select option 10: Build DNS records
 ```
 
-This pushes the step-ca root certificate to Proxmox and installs valid TLS certs.
+---
+
+## Samba AD Issues
+
+### Domain Controller Will Not Start
+
+**Symptom:** The Samba DC job fails to start or crashes on startup.
+
+**Cause:** GlusterFS mount issues, port conflicts, or missing Vault secrets.
+
+**Solution:**
+
+1. Check the container logs:
+   ```bash
+   docker compose run --rm nomad alloc logs -job samba-dc
+   ```
+
+2. Verify GlusterFS is mounted:
+   ```bash
+   ssh user@<nomad01-ip> "df -h /srv/gluster/nomad-data"
+   ```
+
+3. Check that required ports are available (88, 389, 445, 5353, 5354):
+   ```bash
+   ssh user@<nomad01-ip> "ss -tlnp | grep -E '88|389|445|5353|5354'"
+   ```
+
+4. Verify Vault secrets exist:
+   ```bash
+   docker compose run --rm nomad alloc exec -job vault vault kv get secret/data/samba-ad
+   ```
+
+### Replication Failing Between DCs
+
+**Symptom:** Changes on DC01 do not appear on DC02, or replication errors are logged.
+
+**Cause:** Network connectivity between DCs, DNS resolution issues, or Samba replication conflicts.
+
+**Solution:**
+
+1. Check replication status inside the DC container:
+   ```bash
+   # SSH into nomad01 and exec into the Samba container
+   ssh user@<nomad01-ip>
+   docker exec -it <samba-dc01-container> samba-tool drs showrepl
+   ```
+
+2. Verify DNS resolution between DCs:
+   ```bash
+   dig @<nomad01-ip> -p 5353 samba-dc02.<ad_realm>
+   ```
+
+### Domain Join Fails
+
+**Symptom:** A client machine cannot join the Active Directory domain.
+
+**Cause:** DNS is not forwarding AD realm queries to the Samba DCs.
+
+**Solution:**
+
+1. Verify Pi-hole forwards AD queries:
+   ```bash
+   ssh root@<dns-ip> "cat /etc/dnsmasq.d/10-ad-forward.conf"
+   ```
+
+2. Test AD DNS resolution:
+   ```bash
+   dig @<dns-ip> _ldap._tcp.ad.mylab.lan SRV
+   ```
+
+3. If forwarding is not configured, see [DNS Management - Samba AD DNS Forwarding](../operations/dns-management.md#samba-ad-dns-forwarding).
+
+### LDAP Connection Fails
+
+**Symptom:** LDAP queries to the Samba DC return connection errors.
+
+**Cause:** The Samba DC is not running, the port is blocked, or the bind DN is incorrect.
+
+**Solution:**
+
+Test LDAP connectivity directly:
+
+```bash
+ldapsearch -H ldap://<nomad01-ip>:389 -b "dc=ad,dc=mylab,dc=lan" -x
+```
+
+If this fails, check that the Samba DC container is running and the LDAP port (389) is exposed.
+
+---
 
 ## Terraform Issues
 
-### Resources Already Exist
+### Provider Authentication Failure
 
-**Symptoms:**
-- `terraform apply` fails with "resource already exists"
-- Trying to create VM/LXC that's already deployed
+**Symptom:** Terraform fails with "401 Unauthorized" or "authentication failed" errors.
 
-**Solution:**
-
-**Option 1: Import existing resources**
-```bash
-cd terraform
-docker compose run terraform import module.vm-nomad.proxmox_vm_qemu.nomad_node[0] 905
-```
-
-**Option 2: Destroy and recreate**
-```bash
-./setup.sh
-# Select option 13: Rollback (Terraform destroy)
-# Then re-run deployment
-```
-
-**Option 3: Emergency purge**
-```bash
-./setup.sh
-# Select option 14: Purge (Emergency)
-# Directly destroys VMs via SSH, use only if Terraform is broken
-```
-
-### API Token Authentication Failed
-
-**Symptoms:**
-- Terraform/Packer fails with "401 Unauthorized"
-- "authentication failure" errors
+**Cause:** Invalid Proxmox API credentials or the API token has expired.
 
 **Solution:**
 
-1. **Verify token exists in Proxmox:**
-   - Login to Proxmox web UI
-   - Go to Datacenter > Permissions > API Tokens
-   - Check that `terraform@pam!terraform-token` exists
-
-2. **Regenerate token:**
+1. Verify the API URL and credentials in `terraform/terraform.tfvars`
+2. Test the Proxmox API directly:
    ```bash
-   ./setup.sh
-   # Select option 1 or 2: New installation
-   # This recreates the API token
+   curl -k https://<proxmox-ip>:8006/api2/json/version
    ```
+3. Regenerate the API token in Proxmox if needed
 
-3. **Verify credentials in config files:**
-   - `packer/packer.auto.pkrvars.hcl`
-   - `terraform/terraform.tfvars`
+### Resource Already Exists
 
-   Both should have matching token ID and secret.
+**Symptom:** Terraform fails because a VM or LXC with the target ID already exists.
+
+**Cause:** A previous deployment was not fully cleaned up, or the resource was created manually.
+
+**Solution:**
+
+1. Remove the conflicting resource in Proxmox, or
+2. Import it into Terraform state:
+   ```bash
+   docker compose run terraform import <resource_address> <resource_id>
+   ```
+3. Or use emergency purge (setup.sh menu option 14) to clean up
+
+### Timeout During Provisioning
+
+**Symptom:** Terraform times out waiting for a VM or LXC to become ready.
+
+**Cause:** Cloud-init is slow, the VM does not have network access, or the Proxmox host is under heavy load.
+
+**Solution:**
+
+1. Check the VM console in Proxmox for cloud-init progress
+2. Verify network connectivity from the VM
+3. Increase the timeout in the Terraform module if needed
+
+---
 
 ## Packer Issues
 
-### Base Template (VMID 9999) Not Found
+### Build Fails to Connect
 
-**Symptoms:**
-- Packer fails with "VM 9999 does not exist"
-- Can't build Docker or Nomad templates
+**Symptom:** Packer cannot SSH into the VM during the build process.
 
-**Solution:**
-
-Download and configure the Ubuntu 24.04 base template:
-
-1. **Download from Ubuntu:**
-   ```bash
-   wget https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
-   ```
-
-2. **Create VM in Proxmox:**
-   ```bash
-   qm create 9999 --name ubuntu-base --memory 2048 --net0 virtio,bridge=vmbr0
-   qm importdisk 9999 noble-server-cloudimg-amd64.img local-lvm
-   qm set 9999 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9999-disk-0
-   qm set 9999 --ide2 local-lvm:cloudinit
-   qm set 9999 --boot c --bootdisk scsi0
-   qm set 9999 --serial0 socket --vga serial0
-   qm template 9999
-   ```
-
-3. **Verify template:**
-   ```bash
-   qm list | grep 9999
-   ```
-
-### Packer Build Times Out
-
-**Symptoms:**
-- Packer hangs at "Waiting for SSH to become available"
-- Build never completes
-
-**Causes:**
-
-1. **SSH not enabled on template**
-2. **Network configuration incorrect**
-3. **Cloud-init not running**
+**Cause:** SSH credentials are wrong, the base template is not available, or the VM did not start properly.
 
 **Solution:**
 
-Check the VM console in Proxmox to see boot messages:
-- Click on the building VM in Proxmox UI
-- Go to Console
-- Look for cloud-init completion
-- Verify network configuration
+1. Verify the base template (VM ID 9999) exists in Proxmox
+2. Check that SSH credentials in `packer/packer.auto.pkrvars.hcl` are correct
+3. Look at the VM console in Proxmox during the build to see if it is booting
 
-## Vault Issues
+### Template Already Exists
 
-### Vault is Sealed
+**Symptom:** Packer fails because template VM ID 9001 or 9002 already exists.
 
-**Symptoms:**
-- Vault returns "503 Service Unavailable"
-- Web UI shows "Vault is sealed"
-- API calls fail
-
-**Cause:**
-
-Vault seals itself on restart for security. This is normal behavior.
+**Cause:** A previous Packer build created the template and it was not removed.
 
 **Solution:**
 
-Unseal using the key from `crypto/vault-credentials.json`:
+Delete the existing template in Proxmox before rebuilding:
 
 ```bash
-# Get unseal key
-UNSEAL_KEY=$(jq -r '.unseal_key' crypto/vault-credentials.json)
-
-# Unseal Vault
-curl -X PUT http://nomad01:8200/v1/sys/unseal \
-  -d "{\"key\": \"$UNSEAL_KEY\"}"
-
-# Verify status
-curl http://nomad01:8200/v1/sys/health
+ssh root@<proxmox-ip> "qm destroy 9001 --purge"
+# or
+ssh root@<proxmox-ip> "qm destroy 9002 --purge"
 ```
 
-**Automated unseal:**
-```bash
-./setup.sh
-# Select option for Vault operations
-# Includes unseal option
-```
+---
 
-### Vault Nomad Integration Not Working
+## SSH Connectivity Issues
 
-**Symptoms:**
-- Jobs fail with "failed to derive Vault token"
-- Workload Identity authentication errors
+### Cannot SSH into VMs/LXCs
+
+**Symptom:** SSH connection refused or times out when connecting to lab VMs.
+
+**Cause:** The SSH key is not deployed, the VM is not running, or a firewall is blocking access.
 
 **Solution:**
 
-1. **Verify JWT auth is configured:**
+1. Verify the VM is running in Proxmox
+2. Check that you are using the correct SSH key:
    ```bash
-   # List auth methods
-   curl -H "X-Vault-Token: $ROOT_TOKEN" \
-     http://nomad01:8200/v1/sys/auth
+   ssh -i crypto/lab-deploy user@<vm-ip>
    ```
-
-2. **Re-configure integration:**
+3. Verify network connectivity:
    ```bash
-   ./setup.sh
-   # Deploy Vault job - includes WIF configuration
-   ```
-
-3. **Check Nomad identity block:**
-   Ensure job has:
-   ```hcl
-   identity {
-     env  = true
-     file = true
-   }
-
-   vault {
-     role = "service-role-name"
-   }
-   ```
-
-## Connectivity Issues
-
-### Can't SSH to VMs
-
-**Symptoms:**
-- SSH connection refused or times out
-- "Connection timed out" errors
-
-**Troubleshooting:**
-
-1. **Verify VM is running:**
-   ```bash
-   qm status <vmid>
-   ```
-
-2. **Check IP address:**
-   - View in Proxmox UI under VM > Summary
-   - Or use `qm guest cmd <vmid> network-get-interfaces`
-
-3. **Verify network configuration:**
-   ```bash
-   # Console into VM from Proxmox UI
-   # Check network:
-   ip addr show
-   ip route show
-   ```
-
-4. **Test from Proxmox host:**
-   ```bash
-   # From Proxmox
    ping <vm-ip>
-   ssh ubuntu@<vm-ip>
    ```
+4. If using `sshRun` or `sshScript` helpers, verify `lib/util.sh` is sourced correctly
 
-### Can't Access Labnet (SDN) Resources
+### Host Key Verification Failed
 
-**Symptoms:**
-- Can't reach 172.16.0.x addresses from external network
-- Labnet VMs can't reach external services
+**Symptom:** SSH refuses to connect with "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"
 
-**Cause:**
+**Cause:** The VM was rebuilt and has a new host key, but the old key is cached in `~/.ssh/known_hosts`.
 
-Labnet is an isolated SDN network. Cross-network access requires special configuration.
+**Solution:**
 
-**Solutions:**
-
-1. **Use Kasm as jump host** (Kasm is dual-homed on both networks)
-2. **Configure routing on Proxmox**
-3. **Set up VPN on a labnet VM**
-4. **Access via pct exec for LXC containers:**
-   ```bash
-   pct exec 920 -- <command>
-   ```
-
-## Performance Issues
-
-### High CPU Usage on Nomad Nodes
-
-**Check what's running:**
 ```bash
-docker compose run --rm nomad node status -verbose
-docker compose run --rm nomad alloc status
+# Remove the old host key
+ssh-keygen -R <vm-ip>
 ```
-
-**Common causes:**
-- Too many jobs on one node
-- Resource limits too low causing thrashing
-- GlusterFS replication activity
-
-### GlusterFS Performance Issues
-
-**Check volume status:**
-```bash
-ssh ubuntu@nomad01
-sudo gluster volume info
-sudo gluster volume status nomad-data
-```
-
-**Check replication:**
-```bash
-sudo gluster volume heal nomad-data info
-```
-
-**Optimize performance:**
-```bash
-sudo gluster volume set nomad-data performance.cache-size 256MB
-sudo gluster volume set nomad-data performance.write-behind on
-```
-
-## Getting Help
-
-If you've tried these solutions and still have issues:
-
-1. **Check logs:**
-   - Nomad: `docker compose run --rm nomad alloc logs -job <job>`
-   - Proxmox: `journalctl -u pve* -f`
-   - DNS: `ssh root@dns-01 journalctl -u pihole-FTL -f`
-
-2. **Review documentation:**
-   - [Architecture Overview](../architecture/overview.md)
-   - [Network Topology](../architecture/network-topology.md)
-   - [DNS Management](../operations/dns-management.md)
-
-3. **Check GitHub Issues:**
-   [github.com/jknyght9/proxmox-lab/issues](https://github.com/jknyght9/proxmox-lab/issues)
-
-4. **Enable debug logging:**
-   ```bash
-   # For Terraform
-   export TF_LOG=DEBUG
-
-   # For Nomad
-   docker compose run --rm nomad monitor
-   ```

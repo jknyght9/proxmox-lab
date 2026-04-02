@@ -20,13 +20,13 @@ Copy the example configuration and edit it:
 cp packer/packer.auto.pkrvars.hcl.example packer/packer.auto.pkrvars.hcl
 ```
 
-Edit `packer/packer.auto.pkrvars.hcl`:
+Edit `packer/packer.auto.pkrvars.hcl`, replacing `192.168.1.100` with **your Proxmox server's IP address**:
 
 ```hcl
-# Proxmox connection
-proxmox_url          = "https://10.1.50.2:8006/api2/json"
+# Proxmox connection (replace with YOUR Proxmox IP)
+proxmox_url          = "https://192.168.1.100:8006/api2/json"
 proxmox_node         = "pve"
-proxmox_token_id     = "terraform@pam!terraform-token"
+proxmox_token_id     = "hashicorp@pam!hashicorp-token"
 proxmox_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 # Template credentials (change these!)
@@ -41,6 +41,12 @@ dns_postfix = "mylab.lan"
 !!! warning "Security"
     Use strong, unique passwords. These will be the default credentials for your VMs.
 
+!!! tip "Replace Example IPs"
+    Throughout this guide, `192.168.1.100` is used as a placeholder for your Proxmox server's IP address. Replace it with the actual IP of your Proxmox host. Find it by checking your router's admin page or running `hostname -I` on the Proxmox node.
+
+!!! note "API Token"
+    The `hashicorp@pam` user and API token are created automatically by `setup.sh` during Proxmox node setup. If you are running Packer manually outside of setup.sh, you will need to create this user and token yourself or use your own credentials.
+
 ## Step 3: Configure Terraform Variables
 
 Copy the example configuration and edit it:
@@ -49,31 +55,38 @@ Copy the example configuration and edit it:
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 ```
 
-Edit `terraform/terraform.tfvars`:
+Edit `terraform/terraform.tfvars`, replacing `192.168.1.100` with **your Proxmox server's IP address**:
 
 ```hcl
-# Proxmox API
-proxmox_api_url      = "https://10.1.50.2:8006/api2/json"
-proxmox_api_token_id = "terraform@pam!terraform-token"
+# Proxmox API (replace with YOUR Proxmox IP)
+proxmox_api_url      = "https://192.168.1.100:8006/api2/json"
+proxmox_api_token_id = "hashicorp@pam!hashicorp-token"
 proxmox_api_token    = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 proxmox_target_node  = "pve"
 
+# Cluster nodes (replace with YOUR Proxmox IP)
+proxmox_node_ips = {
+  "pve" = "192.168.1.100"
+}
+
 # Network
 network_interface_bridge = "vmbr0"
-network_gateway_address  = "10.1.50.1"
+network_gateway_address  = "192.168.1.1"
 
-# Pihole (use static IPs outside your DHCP range)
-pihole_root_password  = "YourPiholePassword!"
-pihole_eth0_ipv4_cidr = "10.1.50.3/24"
+# Pi-hole admin password
+pihole_admin_password = "YourPiholePassword!"
 
 # Step-CA
 step-ca_root_password  = "YourStepCAPassword!"
-step-ca_eth0_ipv4_cidr = "10.1.50.4/24"
+step-ca_eth0_ipv4_cidr = "192.168.1.6/24"
 
 # DNS domain
 dns_postfix = "mylab.lan"
 
-# Kasm (optional - change default password)
+# Template storage (must be shared for clusters)
+template_storage = "local"
+
+# Kasm (optional)
 kasm_admin_password = "YourKasmPassword!"
 ```
 
@@ -88,7 +101,14 @@ Execute the automated setup:
 **Example:**
 
 ```bash
-./setup.sh 10.1.50.2 MyProxmoxRootPassword
+# Replace with YOUR Proxmox IP and root password
+./setup.sh 192.168.1.100 MyProxmoxRootPassword
+```
+
+Alternatively, run the interactive menu:
+
+```bash
+./setup.sh
 ```
 
 !!! note "What happens during setup"
@@ -96,18 +116,15 @@ Execute the automated setup:
 
     1. Check that Docker, jq, and sshpass are installed
     2. Generate SSH keys in `crypto/`
-    3. Connect to your Proxmox server
-    4. Install SSH keys for passwordless access
-    5. Detect cluster topology and configure networking
-    6. Select shared storage and network bridge
-    7. Create the labnet SDN (optional)
-    8. Build Packer templates (Docker, Nomad)
-    9. Deploy critical services (DNS cluster, step-ca)
-    10. Deploy Nomad cluster with GlusterFS
-    11. Deploy Nomad jobs (Traefik, Vault, Authentik)
-    12. Configure Vault WIF integration
-    13. Update DNS records for all services
-    14. Install TLS certificates on Proxmox
+    3. Connect to Proxmox and install SSH keys
+    4. Detect cluster nodes and configure networking
+    5. Select storage and network bridge
+    6. Run Proxmox node setup (SDN, templates, user accounts)
+    7. **Phase 1**: Deploy LXC containers (DNS cluster, Step-CA) via Terraform
+    8. **Phase 2**: Build Packer templates (Docker 9001, Nomad 9002)
+    9. **Phase 3**: Deploy VMs (Nomad cluster, Kasm) via Terraform
+    10. Setup GlusterFS and initialize the Nomad cluster
+    11. Update DNS records and distribute CA certificates
 
 ## Step 5: Verify Deployment
 
@@ -117,79 +134,99 @@ After the script completes, verify your services are running:
 
 1. Open `https://<PROXMOX_IP>:8006` in your browser
 2. You should see new VMs and containers:
-   - `nomad01`, `nomad02`, `nomad03` (VMs)
-   - `kasm01` (VM)
-   - `dns-01`, `dns-02`, `dns-03` (LXC - main DNS)
-   - `labnet-dns-01`, `labnet-dns-02` (LXC - SDN DNS)
-   - `step-ca` (LXC)
+   - `nomad01` (905), `nomad02` (906), `nomad03` (907) -- VMs
+   - `kasm` (930) -- VM
+   - `dns-01` (910), `dns-02` (911), `dns-03` (912) -- LXC
+   - `labnet-dns-01` (920), `labnet-dns-02` (921) -- LXC
+   - `step-ca` (902) -- LXC
 
 ### Test DNS Resolution
 
-Configure your workstation to use the primary DNS server:
+Configure your workstation to use dns-01 as its DNS server:
 
 ```bash
-# Test DNS resolution (replace with your dns-01 IP)
+# Test DNS resolution
 nslookup nomad01.mylab.lan <dns-01-ip>
 ```
 
 Expected output:
 ```
-Server:		<dns-01-ip>
-Address:	<dns-01-ip>#53
+Server:		192.168.1.3
+Address:	192.168.1.3#53
 
 Name:	nomad01.mylab.lan
-Address: <nomad01-ip>
+Address: 192.168.1.x
 ```
 
-### Access Services
+### Access Core Services
+
+These services are available immediately after setup:
 
 | Service | URL | Notes |
 |---------|-----|-------|
 | Proxmox | `https://<PROXMOX_IP>:8006` | Now has valid TLS cert |
-| DNS Cluster | `http://<dns-ip>/admin` | Pi-hole management |
-| Nomad UI | `http://nomad01.mylab.lan:4646` | Cluster management |
-| Vault | `https://vault.mylab.lan` | Secrets manager (via Traefik) |
-| Authentik | `https://auth.mylab.lan` | SSO/Identity provider |
-| Traefik | `http://nomad01.mylab.lan:8081` | Dashboard (API) |
-| Kasm | `https://kasm.mylab.lan` | Remote desktops |
-| Step-CA | `https://ca.mylab.lan/health` | Should return `{"status":"ok"}` |
+| Pi-hole | `http://<dns-01-ip>/admin` | DNS management |
+| Step-CA | `https://ca.<domain>/health` | Should return `{"status":"ok"}` |
+| Nomad | `http://<nomad01-ip>:4646` | Cluster management UI |
+| Kasm | `https://kasm.<domain>` | Remote desktops |
 
-## Step 6: Post-Deployment Tasks
+## Step 6: Deploy Nomad Services
 
-### Verify Nomad Cluster
+After the base infrastructure is running, deploy additional services using the setup menu. Run `./setup.sh` to access the interactive menu:
 
-SSH to nomad01 and check cluster status:
-
-```bash
-ssh -i crypto/labadmin labadmin@nomad01.mylab.lan
-
-# On nomad01:
-nomad server members
-nomad node status
-nomad job status
+```
+ 7) Deploy Traefik               - Reverse proxy / load balancer
+ 8) Deploy Vault                 - Secrets management
+ 9) Deploy Authentik             - SSO / Identity Provider
+16) Deploy Samba AD              - Active Directory Domain Controllers
+17) Configure Authentik AD Sync  - AD -> Authentik user sync
 ```
 
-Expected output shows 3 servers in the cluster and running jobs (traefik, vault, authentik).
+### Deploy Traefik (Recommended First)
 
-### Unseal Vault (if needed)
-
-If Vault is sealed after restart:
+Traefik acts as the reverse proxy and handles TLS certificates for all Nomad services:
 
 ```bash
-# From your workstation
 ./setup.sh
-# Select option 10: Unseal Vault
+# Select option 7: Deploy Traefik
 ```
 
-Or manually unseal:
+After deployment, the Traefik dashboard is available at `http://<nomad01-ip>:8081/dashboard/`.
+
+### Deploy Vault
+
+Vault provides secrets management. It is initialized and unsealed automatically during deployment:
 
 ```bash
-# Unseal key is stored in crypto/vault-credentials.json
-curl -X PUT http://nomad01:8200/v1/sys/unseal \
-  -d '{"key": "<unseal-key-from-file>"}'
+./setup.sh
+# Select option 8: Deploy Vault
 ```
 
-### Install Root CA on Your Workstation
+Vault credentials (unseal key, root token) are saved to `crypto/vault-credentials.json`. After deployment, access Vault at `https://vault.<domain>`.
+
+### Deploy Authentik
+
+Authentik provides SSO with OAuth2/OIDC, SAML, and LDAP support:
+
+```bash
+./setup.sh
+# Select option 9: Deploy Authentik
+```
+
+After deployment, access Authentik at `https://auth.<domain>`.
+
+!!! info "Service Pinning"
+    All Nomad services (Traefik, Vault, Authentik, Samba AD) are pinned to **nomad01** for consistent DNS resolution and simplified routing.
+
+### Post-Deployment Service Summary
+
+| Service | URL | Notes |
+|---------|-----|-------|
+| Traefik | `http://<nomad01-ip>:8081/dashboard/` | Reverse proxy dashboard |
+| Vault | `https://vault.<domain>` | Secrets management |
+| Authentik | `https://auth.<domain>` | SSO / Identity Provider |
+
+## Step 7: Install Root CA on Your Workstation
 
 To trust certificates issued by your CA:
 
@@ -216,27 +253,39 @@ To trust certificates issued by your CA:
     Import-Certificate -FilePath .\proxmox-lab-ca.crt -CertStoreLocation Cert:\LocalMachine\Root
     ```
 
-### Configure Authentik (First Time)
+## Step 8: Configure Your Router/Clients
 
-Access Authentik and create your admin account:
+For the best experience, configure your network to use the DNS cluster:
 
-```bash
-# Open in browser
-https://auth.mylab.lan/if/flow/initial-setup/
-```
+1. **Router method**: Set your dns-01 IP as the primary DNS server in your router's DHCP settings
+2. **Per-device method**: Configure each device to use your dns-01 IP as its DNS server
 
-Follow the wizard to:
-1. Create admin account
-2. Set admin password
-3. Configure authentication flows
+!!! tip "DNS Redundancy"
+    You can configure dns-02 and dns-03 as secondary DNS servers on your router for failover. All nodes are synced via Gravity Sync.
 
-### Configure Your Router/Clients
+## Setup Menu Reference
 
-For the best experience, configure your network to use the primary DNS as the DNS server:
+The full setup menu provides these options:
 
-1. **Router method**: Set `<dns-01-ip>` as primary DNS in your router's DHCP settings
-2. **Per-device method**: Configure each device to use `<dns-01-ip>` as its DNS server
-3. **Secondary DNS**: Optionally add `<dns-02-ip>` as secondary DNS
+| Option | Action |
+|--------|--------|
+| 1 | New installation (full setup with SSH key generation) |
+| 2 | New installation (skip SSH -- use existing keys) |
+| 3 | Deploy all services (DNS, CA, Nomad, Kasm) |
+| 4 | Deploy critical services (DNS and CA only) |
+| 5 | Deploy Nomad only (requires critical services) |
+| 6 | Deploy Kasm only (requires critical services + docker template) |
+| 7 | Deploy Traefik |
+| 8 | Deploy Vault |
+| 9 | Deploy Authentik |
+| 10 | Build DNS records |
+| 11 | Regenerate CA |
+| 12 | Update root certificates |
+| 13 | Rollback (Terraform destroy) |
+| 14 | Purge (Emergency -- direct VM/LXC destruction via SSH) |
+| 15 | Purge entire deployment |
+| 16 | Deploy Samba AD |
+| 17 | Configure Authentik AD Sync |
 
 ## Troubleshooting
 
@@ -255,38 +304,31 @@ For the best experience, configure your network to use the primary DNS as the DN
     If you're re-running after a partial deployment:
 
     ```bash
-    cd terraform
     docker compose run terraform destroy
     ```
 
-    Then run `setup.sh` again.
+    Or use setup.sh menu option 13 (Rollback) to destroy Terraform-managed resources.
 
 ??? question "DNS not resolving"
-    - Verify dns-01 is running: `pct status 910`
+    - Verify dns-01 is running: check in Proxmox UI or `pct status 910`
     - Check your workstation's DNS is set to the dns-01 IP
     - Try: `nslookup google.com <dns-01-ip>`
+    - Rebuild DNS records using setup.sh menu option 10
 
-??? question "Vault is sealed"
-    Vault seals itself on restart for security. Unseal it:
+??? question "Nomad cluster not forming"
+    - Verify all three Nomad nodes are running in Proxmox
+    - Check that DNS resolves `nomad01.<domain>`, `nomad02.<domain>`, `nomad03.<domain>`
+    - Access the Nomad UI at `http://<nomad01-ip>:4646` to check node status
+    - Check Nomad logs: `docker compose run --rm nomad node status`
 
-    ```bash
-    # Use setup.sh menu option 10, or manually:
-    curl -X PUT http://nomad01:8200/v1/sys/unseal \
-      -d '{"key": "<key-from-crypto/vault-credentials.json>"}'
-    ```
-
-??? question "Nomad jobs not running"
-    Check job status and logs:
-
-    ```bash
-    nomad job status
-    nomad alloc logs -job <job-name>
-    ```
+??? question "Vault not responding after deployment"
+    - Vault may need to be unsealed -- check `crypto/vault-credentials.json` for the unseal key
+    - Verify Vault is scheduled on nomad01: `docker compose run --rm nomad job status vault`
+    - Check Vault logs: `docker compose run --rm nomad alloc logs -job vault`
 
 ## Next Steps
 
 - [:octicons-arrow-right-24: Understand the architecture](../architecture/overview.md)
 - [:octicons-arrow-right-24: Learn about DNS management](../operations/dns-management.md)
-- [:octicons-arrow-right-24: Manage Nomad jobs](../operations/nomad-operations.md)
-- [:octicons-arrow-right-24: Manage Vault secrets](../operations/vault-operations.md)
 - [:octicons-arrow-right-24: Issue certificates for new services](../operations/certificate-operations.md)
+- [:octicons-arrow-right-24: Manage Nomad jobs](../operations/nomad-operations.md)

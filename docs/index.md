@@ -1,6 +1,6 @@
 # Proxmox Lab
 
-Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Proxmox VE. Automates golden images, VM/LXC provisioning, internal certificate authority, and secure DNS services.
+Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Proxmox VE. Automates golden images, VM/LXC provisioning, container orchestration, secrets management, internal certificate authority, and secure DNS services.
 
 ---
 
@@ -32,6 +32,22 @@ Infrastructure-as-Code (IaC) to build a reproducible home/lab environment on Pro
 
     [:octicons-arrow-right-24: Configuration Reference](configuration/terraform-variables.md)
 
+-   :material-cube-outline: **Modules**
+
+    ---
+
+    Terraform modules for Nomad, Kasm, Pi-hole, and Step-CA.
+
+    [:octicons-arrow-right-24: Nomad Cluster](modules/nomad-cluster.md)
+
+-   :material-server-network: **Services**
+
+    ---
+
+    Nomad-managed services: Traefik, Vault, Authentik, and Samba AD.
+
+    [:octicons-arrow-right-24: Services](services/traefik.md)
+
 -   :material-wrench: **Operations**
 
     ---
@@ -50,14 +66,22 @@ This project deploys a complete lab infrastructure on Proxmox VE:
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| **Nomad Cluster** | 3 VMs | HashiCorp Nomad orchestration with GlusterFS |
-| **Vault** | Nomad Job | Secrets management with Workload Identity |
-| **Authentik** | Nomad Job | SSO and identity provider (OAuth2/OIDC/SAML) |
-| **Traefik** | Nomad Job | Reverse proxy and load balancer |
-| **Kasm Workspaces** | 1 VM | Browser-based remote desktops |
-| **Pihole (Main)** | LXC | DNS + ad-blocking for your network |
-| **Pihole (Labnet)** | LXC | DNS for isolated SDN network |
-| **Step-CA** | LXC | Internal Certificate Authority with ACME |
+| **Nomad Cluster** | 3 VMs (905-907) | Container orchestration with HashiCorp Nomad |
+| **Kasm Workspaces** | 1 VM (930) | Browser-based remote desktops |
+| **Pi-hole DNS** | 1-3 LXCs (910-912) | DNS + ad-blocking with Unbound DNS-over-TLS |
+| **Pi-hole Labnet** | 0-2 LXCs (920-921) | DNS for isolated SDN network |
+| **Step-CA** | 1 LXC (902) | Internal Certificate Authority with ACME |
+
+### Nomad Services
+
+Deployed as Nomad jobs on the cluster:
+
+| Service | Purpose |
+|---------|---------|
+| **Traefik** | Reverse proxy / load balancer with automatic TLS |
+| **Vault** | Secrets management with Workload Identity Federation |
+| **Authentik** | SSO / Identity provider (OAuth2, OIDC, SAML, LDAP) |
+| **Samba AD** | Active Directory Domain Controllers |
 
 ---
 
@@ -66,14 +90,13 @@ This project deploys a complete lab infrastructure on Proxmox VE:
 - **Proxmox-first** automation using API tokens
 - **Packer** templates for golden VM images
 - **Terraform** for declarative infrastructure provisioning
-- **HashiCorp Nomad** for container orchestration (3-node cluster)
-- **HashiCorp Vault** with Workload Identity Federation for secrets
-- **Authentik SSO** for unified authentication across services
-- **Traefik** reverse proxy with automatic TLS via step-ca
 - **Internal CA** with ACME protocol for automated TLS certificates
-- **Secure DNS** with Pi-hole v6, Unbound, and Gravity Sync
-- **GlusterFS** replicated storage for high availability
+- **Secure DNS** with Pi-hole v6 and Unbound (DNS-over-TLS)
+- **HashiCorp Nomad** cluster for container orchestration
+- **HashiCorp Vault** for secrets management with Workload Identity Federation
+- **Authentik SSO** for centralized identity management
 - **Dual network** architecture (external + isolated lab SDN)
+- **GlusterFS** distributed storage across Nomad nodes
 
 ---
 
@@ -81,7 +104,8 @@ This project deploys a complete lab infrastructure on Proxmox VE:
 
 !!! info "Prerequisites"
     - **Docker & Docker Compose** on your workstation
-    - **Proxmox VE 8.x** or later with API access enabled
+    - **Proxmox VE 7.x** or later with API access enabled
+    - **sshpass** and **jq** installed locally
     - Network connectivity to your Proxmox server
 
 [:octicons-arrow-right-24: Full prerequisites](getting-started/prerequisites.md)

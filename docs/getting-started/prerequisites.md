@@ -5,25 +5,25 @@ Before running Proxmox Lab, ensure you have the required software and have gathe
 ## Hardware Requirements
 
 !!! warning "Minimum Specifications"
-    Your Proxmox server should have:
+    Your Proxmox server (or cluster) should have:
 
-    - **CPU**: 4+ cores (more is better for running multiple VMs)
-    - **RAM**: 16 GB minimum, 32 GB recommended
-    - **Storage**: 100 GB+ available space
+    - **CPU**: 8+ cores (more is better for running multiple VMs)
+    - **RAM**: 32 GB minimum, 64 GB recommended
+    - **Storage**: 500 GB+ available space
 
 The deployed infrastructure requires approximately:
 
 | Component | CPU | RAM | Disk |
 |-----------|-----|-----|------|
-| Docker Node (x3) | 4 cores each | 8 GB each | 100 GB each |
+| Nomad Node (x3) | 4 cores each | 8 GB each | 100 GB each |
 | Kasm | 4 cores | 8 GB | 100 GB |
-| Pihole External | 2 cores | 1 GB | 4 GB |
-| Pihole Internal | 2 cores | 1 GB | 4 GB |
+| DNS (x3) | 2 cores each | 1 GB each | 4 GB each |
+| DNS Labnet (x2) | 2 cores each | 1 GB each | 4 GB each |
 | Step-CA | 2 cores | 2 GB | 8 GB |
-| **Total** | **18 cores** | **36 GB** | **416 GB** |
+| **Total (max)** | **28 cores** | **42 GB** | **428 GB** |
 
 !!! tip "Resource Optimization"
-    These are default values. You can reduce resources by modifying the Terraform variables if you have limited hardware.
+    These are default values. You can reduce resources by modifying the Terraform variables if you have limited hardware. For a minimal deployment, use menu option 4 (critical services only) to deploy just DNS and Step-CA, then add Nomad later.
 
 ## Software Requirements
 
@@ -83,7 +83,7 @@ jq --version
 
 ### On Proxmox
 
-- **Proxmox VE 8.x** or later
+- **Proxmox VE 7.x** or later
 - **Root SSH access** enabled (temporary, for initial setup)
 - **API access** enabled (default)
 
@@ -100,12 +100,15 @@ Navigate to **Datacenter > Storage** and note:
 
 - [ ] **Storage name** for VM disks (e.g., `local-lvm`, `zfs-pool`)
 - [ ] **Storage name** for ISO/templates (e.g., `local`)
-- [ ] Sufficient free space for templates and VMs
+- [ ] Sufficient free space for templates and VMs (~428 GB total)
 
 !!! info "Common Storage Types"
-    - `local` - Directory storage, good for ISOs and templates
-    - `local-lvm` - LVM thin-provisioned, good for VM disks
-    - `zfs-pool` - ZFS storage, excellent performance
+    - `local` -- Directory storage, good for ISOs and templates
+    - `local-lvm` -- LVM thin-provisioned, good for VM disks
+    - `zfs-pool` -- ZFS storage, excellent performance
+
+!!! tip "Cluster Considerations"
+    If running a Proxmox cluster, the **template storage** must be shared storage accessible by all nodes (e.g., NFS, Ceph, or shared LVM).
 
 ### Network Bridge
 
@@ -117,7 +120,7 @@ Navigate to **Node > Network** and verify:
 
 ## Network Information
 
-Gather this information before starting:
+Gather this information before starting. You'll need to know your own network subnet — the examples below use `192.168.1.0/24` but **your network will likely be different**. Check your router's admin page to confirm your subnet, gateway, and DHCP range.
 
 ### External Network (Your LAN)
 
@@ -126,24 +129,49 @@ This is the network where your Proxmox server lives:
 | Setting | Example | Your Value |
 |---------|---------|------------|
 | Network Bridge | `vmbr0` | |
-| Gateway IP | `10.1.50.1` | |
-| Pihole External IP | `10.1.50.3` | |
-| Step-CA IP | `10.1.50.4` | |
+| Network Subnet | `192.168.1.0/24` | |
+| Gateway IP | `192.168.1.1` | |
 | DNS Postfix | `mylab.lan` | |
 
+!!! tip "Find Your Network Details"
+    Most home routers use `192.168.1.0/24` or `192.168.0.0/24`. Check your router's admin page or run `ip route` (Linux/macOS) to find your gateway and subnet.
+
+### DNS Cluster IPs (Static)
+
+Reserve static IPs **outside your router's DHCP range** for each DNS node. For example, if your DHCP range is `192.168.1.100-200`, choose IPs below 100 or above 200:
+
+| Node | Example IP | Your Value |
+|------|------------|------------|
+| dns-01 (VMID 910) | `192.168.1.3` | |
+| dns-02 (VMID 911) | `192.168.1.4` | |
+| dns-03 (VMID 912) | `192.168.1.5` | |
+| Step-CA (VMID 902) | `192.168.1.6` | |
+
 !!! warning "Static IPs Required"
-    You'll need to reserve static IPs for Pihole and Step-CA. Choose IPs outside your router's DHCP range.
+    DNS and Step-CA nodes must have static IPs outside your router's DHCP range. The number of DNS nodes matches the number of Proxmox cluster nodes (one per node, up to 3).
+
+### Nomad Cluster and Kasm
+
+Nomad nodes and Kasm can use DHCP or static IPs:
+
+| Node | VMID | Notes |
+|------|------|-------|
+| nomad01 | 905 | Hosts all pinned services (Traefik, Vault, Authentik) |
+| nomad02 | 906 | Worker node |
+| nomad03 | 907 | Worker node |
+| Kasm | 930 | Remote desktop platform |
 
 ### Internal Network (Lab SDN)
 
-The setup script automatically creates this network:
+The setup script automatically creates this network. Values are user-configured during setup:
 
-| Setting | Value | Notes |
-|---------|-------|-------|
+| Setting | Default Example | Notes |
+|---------|-----------------|-------|
 | Network Name | `labnet` | SDN virtual network |
-| Network Range | `172.16.0.0/24` | Private range |
+| Network Range | `172.16.0.0/24` | User-defined CIDR |
 | Gateway | `172.16.0.1` | Proxmox SDN |
-| Pihole Internal | `172.16.0.3` | DNS + DHCP |
+| labnet-dns-01 (VMID 920) | `172.16.0.3` | DNS for labnet |
+| labnet-dns-02 (VMID 921) | `172.16.0.4` | DNS for labnet |
 
 ## Network Architecture
 
@@ -153,22 +181,22 @@ graph TD
         WAN[WAN Connection]
     end
 
-    subgraph lan["Your Network (e.g., 10.1.50.0/24)"]
-        ROUTER[Router/Gateway<br/>10.1.50.1]
+    subgraph lan["Your Network (e.g., 192.168.1.0/24)"]
+        ROUTER[Router/Gateway<br/>192.168.1.1]
 
         subgraph proxmox["Proxmox Host"]
             VMBR0["vmbr0 Bridge"]
 
             subgraph external["External Services"]
-                PIHOLE_EXT[pihole-external<br/>10.1.50.3]
-                STEPCA[step-ca<br/>10.1.50.4]
-                DOCKER[Docker Swarm<br/>DHCP]
-                KASM_VM[Kasm<br/>DHCP]
+                DNS_CLUSTER[DNS Cluster<br/>dns-01, dns-02, dns-03]
+                STEPCA[Step-CA<br/>902]
+                NOMAD[Nomad Cluster<br/>nomad01-03]
+                KASM_VM[Kasm<br/>930]
             end
 
             subgraph internal["Lab Network (labnet)"]
                 SDN_GW[SDN Gateway<br/>172.16.0.1]
-                PIHOLE_INT[pihole-internal<br/>172.16.0.3]
+                LABNET_DNS[Labnet DNS<br/>labnet-dns-01, -02]
                 LAB_VMS[Lab VMs<br/>DHCP]
             end
         end
@@ -176,13 +204,13 @@ graph TD
 
     WAN --> ROUTER
     ROUTER --> VMBR0
-    VMBR0 --> PIHOLE_EXT
+    VMBR0 --> DNS_CLUSTER
     VMBR0 --> STEPCA
-    VMBR0 --> DOCKER
+    VMBR0 --> NOMAD
     VMBR0 --> KASM_VM
     VMBR0 --> SDN_GW
-    SDN_GW --> PIHOLE_INT
-    PIHOLE_INT --> LAB_VMS
+    SDN_GW --> LABNET_DNS
+    LABNET_DNS --> LAB_VMS
 ```
 
 ## DNS Resolution
@@ -192,10 +220,9 @@ After deployment, DNS queries flow through this chain:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Pihole as pihole-external
+    participant Pihole as Pi-hole v6
     participant Unbound
-    participant DNSCrypt as dnscrypt-proxy
-    participant Internet
+    participant Internet as Cloudflare / Quad9
 
     Client->>Pihole: DNS Query
 
@@ -205,14 +232,14 @@ sequenceDiagram
         Pihole-->>Client: Block (0.0.0.0)
     else External Query
         Pihole->>Unbound: Forward query
-        Unbound->>DNSCrypt: Recursive lookup
-        DNSCrypt->>Internet: DNS-over-HTTPS
-        Internet-->>DNSCrypt: Response
-        DNSCrypt-->>Unbound: Response
+        Unbound->>Internet: DNS-over-TLS
+        Internet-->>Unbound: Response
         Unbound-->>Pihole: Response
         Pihole-->>Client: Response
     end
 ```
+
+The DNS resolution chain is: **Client** --> **Pi-hole** (ad blocking) --> **Unbound** (DNS-over-TLS) --> **Cloudflare/Quad9**
 
 ## Firewall Considerations
 

@@ -21,31 +21,34 @@ After running the setup script, you'll have:
 graph TB
     subgraph proxmox["Proxmox VE Host"]
         subgraph vms["Virtual Machines"]
-            docker1[Docker Node 1]
-            docker2[Docker Node 2]
-            docker3[Docker Node 3]
-            kasm[Kasm Workspaces]
+            nomad1[Nomad Node 1<br/>905]
+            nomad2[Nomad Node 2<br/>906]
+            nomad3[Nomad Node 3<br/>907]
+            kasm[Kasm Workspaces<br/>930]
         end
 
         subgraph lxc["LXC Containers"]
-            pihole_ext[Pihole External]
-            pihole_int[Pihole Internal]
-            stepca[Step-CA]
+            dns1[DNS-01<br/>910]
+            dns2[DNS-02<br/>911]
+            dns3[DNS-03<br/>912]
+            labdns1[Labnet DNS-01<br/>920]
+            labdns2[Labnet DNS-02<br/>921]
+            stepca[Step-CA<br/>902]
         end
     end
 
-    docker1 <--> docker2
-    docker2 <--> docker3
-    docker3 <--> docker1
+    nomad1 <--> nomad2
+    nomad2 <--> nomad3
+    nomad3 <--> nomad1
 ```
 
 | Component | What It Does |
 |-----------|--------------|
-| **Docker Swarm** (3 VMs) | A cluster of Docker hosts for running containers with high availability |
+| **Nomad Cluster** (3 VMs) | HashiCorp Nomad for container orchestration with GlusterFS shared storage |
 | **Kasm Workspaces** (1 VM) | Browser-based remote desktops and applications |
-| **Pihole External** (LXC) | DNS server with ad-blocking for your main network |
-| **Pihole Internal** (LXC) | DNS + DHCP for the isolated lab network |
-| **Step-CA** (LXC) | Your own Certificate Authority for issuing TLS certificates |
+| **DNS Cluster** (3 LXCs) | Pi-hole v6 with ad-blocking for your main network, synced via Gravity Sync |
+| **Labnet DNS** (2 LXCs) | Pi-hole DNS for the isolated lab SDN network |
+| **Step-CA** (1 LXC) | Your own Certificate Authority for issuing TLS certificates via ACME |
 
 ## Technology Stack
 
@@ -57,30 +60,33 @@ This project uses industry-standard tools:
     |------|---------|
     | **Proxmox VE** | Hypervisor for running VMs and containers |
     | **Terraform** | Provisions infrastructure declaratively |
-    | **Packer** | Creates golden VM/LXC templates |
+    | **Packer** | Creates golden VM templates |
 
 === "Networking"
 
     | Tool | Purpose |
     |------|---------|
-    | **Pihole** | DNS sinkhole with ad-blocking |
-    | **Unbound** | Recursive DNS resolver |
-    | **dnscrypt-proxy** | DNS-over-HTTPS for privacy |
+    | **Pi-hole v6** | DNS sinkhole with ad-blocking |
+    | **Unbound** | DNS-over-TLS recursive resolver |
+    | **Gravity Sync** | Replicates Pi-hole configuration across nodes |
 
 === "Security"
 
     | Tool | Purpose |
     |------|---------|
-    | **Step-CA** | Internal Certificate Authority |
+    | **Step-CA** | Internal Certificate Authority with ACME |
+    | **HashiCorp Vault** | Secrets management (deployed via Nomad) |
+    | **Authentik** | SSO / Identity Provider (OAuth2, OIDC, SAML, LDAP) |
     | **acme.sh** | ACME client for automated certificates |
 
-=== "Containers"
+=== "Orchestration"
 
     | Tool | Purpose |
     |------|---------|
-    | **Docker Swarm** | Container orchestration |
-    | **GlusterFS** | Distributed storage |
-    | **Portainer** | Container management UI |
+    | **HashiCorp Nomad** | Container orchestration and scheduling |
+    | **Traefik** | Reverse proxy and load balancer |
+    | **GlusterFS** | Distributed replicated storage |
+    | **Samba AD** | Active Directory Domain Controllers |
 
 ## How It Works
 
@@ -88,36 +94,38 @@ The `setup.sh` script orchestrates the entire deployment:
 
 ### Phase 1: Preparation
 
-1. **Check Requirements** - Verifies Docker, jq, and sshpass are installed
-2. **Generate SSH Keys** - Creates `crypto/labadmin` (VMs/containers) and `crypto/labenterpriseadmin` (Proxmox nodes) key pairs
-3. **Verify Proxmox** - Tests connectivity and credentials
+1. **Check Requirements** -- Verifies Docker, jq, and sshpass are installed
+2. **Generate SSH Keys** -- Creates `crypto/lab-deploy` key pair for automation
+3. **Connect to Proxmox** -- Tests connectivity and installs SSH keys
 
 ### Phase 2: Proxmox Configuration
 
-4. **Install SSH Keys** - Enables passwordless access to Proxmox
-5. **Post-Installation** - Runs community script to configure repositories
-6. **Build SDN** - Creates the `labnet` Software Defined Network (172.16.0.0/24)
+4. **Detect Cluster Nodes** -- Discovers all nodes in the Proxmox cluster
+5. **Configure Networking** -- Gathers network info and creates the `labnet` SDN
+6. **Select Storage** -- Identifies storage targets for disks and templates
+7. **Node Setup** -- Runs Proxmox node setup (SDN, templates, user accounts)
 
-### Phase 3: Templates
+### Phase 3: LXC Containers (Terraform)
 
-7. **Download Images** - Fetches Ubuntu, Fedora, and Debian cloud images
-8. **Create Templates** - Converts images to Proxmox templates
+8. **Deploy DNS Cluster** -- Provisions Pi-hole v6 + Unbound containers (910-912, 920-921)
+9. **Deploy Step-CA** -- Provisions the internal Certificate Authority (902)
 
-### Phase 4: Certificate Authority
+### Phase 4: Packer Templates
 
-9. **Generate CA** - Creates root and intermediate certificates
-10. **Deploy Step-CA** - Provisions the CA container
+10. **Build Docker Template** -- Base image with Ubuntu + Docker + GlusterFS + acme.sh (VMID 9001)
+11. **Build Nomad Template** -- Docker base + Nomad + Consul (VMID 9002)
 
-### Phase 5: Services
+### Phase 5: Virtual Machines (Terraform)
 
-11. **Deploy Pihole** - Both internal and external DNS servers
-12. **Deploy Docker Swarm** - Three-node cluster
-13. **Deploy Kasm** - Browser isolation platform
+12. **Deploy Nomad Cluster** -- Three-node Nomad cluster with GlusterFS (905-907)
+13. **Deploy Kasm** -- Browser isolation platform (930)
 
 ### Phase 6: Finalization
 
-14. **Update DNS** - Adds service records to Pihole
-15. **Install Certificates** - Provisions TLS cert for Proxmox UI
+14. **Setup GlusterFS** -- Configures replicated storage across Nomad nodes
+15. **Initialize Nomad** -- Starts the Nomad cluster with DNS-based discovery
+16. **Update DNS Records** -- Adds all service records to Pi-hole
+17. **Distribute CA Certificates** -- Pushes root CA to Proxmox nodes
 
 !!! info "Deployment Time"
     The full deployment takes approximately **30-45 minutes** depending on your network speed and hardware.
@@ -128,18 +136,23 @@ The `setup.sh` script orchestrates the entire deployment:
 proxmox-lab/
 ├── setup.sh              # Main orchestration script
 ├── compose.yml           # Docker Compose for dev tools
-├── crypto/               # SSH keys (generated, git-ignored)
+├── lib/                  # Bash helper libraries (util.sh)
+├── crypto/               # SSH keys and Vault credentials (git-ignored)
 ├── docs/                 # This documentation
 ├── packer/               # VM template definitions
-│   ├── build_docker.pkr.hcl
-│   └── variables.pkr.hcl
+│   ├── build_docker.pkr.hcl   # Docker base template (VMID 9001)
+│   ├── build_nomad.pkr.hcl    # Nomad template (VMID 9002)
+│   └── dev/                   # Development templates
 ├── terraform/            # Infrastructure modules
 │   ├── main.tf
-│   ├── vm-docker-swarm/
-│   ├── vm-kasm/
-│   ├── lxc-pihole/
-│   └── lxc-step-ca/
-└── proxmox/              # Proxmox helper scripts
+│   ├── vm-nomad/         # 3-node Nomad cluster
+│   ├── vm-kasm/          # Kasm Workspaces
+│   ├── lxc-pihole/       # Pi-hole + Unbound DNS
+│   └── lxc-step-ca/      # Certificate Authority
+├── nomad/                # Nomad job definitions
+│   ├── jobs/             # traefik, vault, authentik, samba-dc
+│   └── vault-policies/   # Vault ACL policies
+└── proxmox/              # Proxmox host setup helpers
 ```
 
 ## Next Steps

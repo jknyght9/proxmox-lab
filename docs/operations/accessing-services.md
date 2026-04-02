@@ -1,370 +1,197 @@
 # Accessing Services
 
-This guide provides URLs and access information for all services in the Proxmox Lab.
+This page provides a consolidated reference for reaching every service deployed by Proxmox Lab, including URLs, ports, and default credential locations.
 
-## Service Directory
+---
 
-| Service | URL | Port | Credentials |
-|---------|-----|------|-------------|
-| **Proxmox VE** | `https://<proxmox-ip>:8006` | 8006 | root / your password |
-| **Nomad UI** | `http://nomad01.mylab.lan:4646` | 4646 | No auth |
-| **Vault** | `https://vault.mylab.lan` | 443 (via Traefik) | Root token in `crypto/vault-credentials.json` |
-| **Vault Direct** | `http://nomad01:8200` | 8200 | Same as above |
-| **Authentik** | `https://auth.mylab.lan` | 443 (via Traefik) | Admin account (created on first run) |
-| **Authentik Direct** | `http://nomad01:9000` | 9000 | Same as above |
-| **Traefik Dashboard** | `http://nomad01:8081` | 8081 | No auth (localhost only) |
-| **Pi-hole** | `http://<dns-ip>/admin` | 80 | Admin password from terraform.tfvars |
-| **Kasm Workspaces** | `https://kasm.mylab.lan` | 443 | Admin password from terraform.tfvars |
-| **step-ca Health** | `https://ca.mylab.lan/health` | 443 | No auth (public endpoint) |
+## Service URL Reference
 
-## Quick Access
+| Service | URL | Port | Protocol |
+|---------|-----|------|----------|
+| **Proxmox VE** | `https://<proxmox-ip>:8006` | 8006 | HTTPS |
+| **Pi-hole** | `http://<dns-ip>/admin` | 80 | HTTP |
+| **Step-CA** | `https://ca.<domain>/health` | 443 | HTTPS |
+| **Nomad UI** | `http://<nomad01-ip>:4646` | 4646 | HTTP |
+| **Traefik Dashboard** | `http://<nomad01-ip>:8081/dashboard/` | 8081 | HTTP |
+| **Vault UI** | `https://vault.<domain>` or `http://<nomad01-ip>:8200` | 8200 | HTTPS via Traefik or HTTP direct |
+| **Authentik** | `https://auth.<domain>` | 443 | HTTPS via Traefik |
+| **Kasm Workspaces** | `https://kasm.<domain>` | 443 | HTTPS |
 
-### From Your Workstation
+!!! tip "Replace placeholders"
+    - `<proxmox-ip>` -- your Proxmox host IP (e.g., `192.168.1.100`)
+    - `<dns-ip>` -- one of the Pi-hole LXC IPs (e.g., `192.168.1.3`)
+    - `<nomad01-ip>` -- the first Nomad node IP (e.g., `192.168.1.50`)
+    - `<domain>` -- your configured `dns_postfix` (e.g., `mylab.lan`)
 
-```bash
-# Proxmox (after installing CA cert)
-open https://<proxmox-ip>:8006
+---
 
-# Nomad UI
-open http://nomad01.mylab.lan:4646
+## Proxmox VE
 
-# Vault (via Traefik with TLS)
-open https://vault.mylab.lan
+Access the Proxmox web interface at `https://<proxmox-ip>:8006`.
 
-# Authentik SSO
-open https://auth.mylab.lan
+- **Username**: `root` (or any user configured in Proxmox)
+- **Password**: the password you provided during `setup.sh` or your Proxmox root password
+- **Realm**: PAM or PVE, depending on your Proxmox configuration
 
-# Pi-hole
-open http://dns-01.mylab.lan/admin
+!!! note
+    The Proxmox web UI uses a self-signed certificate by default. Your browser will display a security warning that you can safely accept for your lab environment.
 
-# Kasm
-open https://kasm.mylab.lan
-```
+---
 
-### SSH Access
+## Pi-hole DNS
 
-```bash
-# Nomad nodes
-ssh ubuntu@nomad01.mylab.lan
-ssh ubuntu@nomad02.mylab.lan
-ssh ubuntu@nomad03.mylab.lan
+Access the Pi-hole admin dashboard at `http://<dns-ip>/admin`.
 
-# Kasm
-ssh ubuntu@kasm.mylab.lan
+- **Password**: the `pihole_admin_password` value set in `terraform/terraform.tfvars`
+- **Multiple instances**: each Pi-hole LXC (dns-01, dns-02, dns-03) runs its own admin interface on the same port
 
-# LXC containers (via Proxmox host)
-ssh root@<proxmox-ip>
-pct enter 902  # step-ca
-pct enter 910  # dns-01
-```
+To check which Pi-hole instances are deployed, refer to `hosts.json` or run setup.sh menu option 10 to view DNS records.
 
-## Nomad Services
+---
 
-### Accessing via Traefik
+## Step-CA (Certificate Authority)
 
-All Nomad services are accessible via Traefik with automatic TLS:
+The Step-CA health endpoint is available at `https://ca.<domain>/health`.
 
-```bash
-# HTTPS (recommended)
-https://vault.mylab.lan
-https://auth.mylab.lan
+- **No web UI**: Step-CA is a headless certificate authority
+- **Root CA certificate**: stored locally in `crypto/` after deployment
+- **Health check**: a `200 OK` response from `/health` confirms the service is running
 
-# HTTP (redirects to HTTPS)
-http://vault.mylab.lan
-```
+---
 
-### Direct Access
+## Nomad UI
 
-Services can also be accessed directly on nomad01:
+Access the Nomad web UI at `http://<nomad01-ip>:4646`.
 
-```bash
-# Vault
-http://nomad01:8200
+- **No authentication by default**: the Nomad UI is open when ACLs are not enabled
+- **Job management**: view running jobs, allocations, and task logs
+- **Topology view**: see cluster node status and resource usage
 
-# Authentik
-http://nomad01:9000
+The Nomad UI provides:
 
-# Traefik API
-http://nomad01:8081
-```
+- **Jobs** -- list all deployed jobs and their status
+- **Allocations** -- inspect individual task allocations and their health
+- **Servers** -- view server members and leader election status
+- **Clients** -- check node status and available resources
 
-### Short Names
-
-Traefik accepts both FQDN and short names:
-
-```bash
-# Both work (if DNS configured)
-https://vault.mylab.lan
-https://vault
-```
-
-## Vault Access
-
-### Web UI
-
-1. Navigate to `https://vault.mylab.lan`
-2. Select "Token" auth method
-3. Enter root token from `crypto/vault-credentials.json`
-
-### CLI Access
-
-```bash
-# Set environment
-export VAULT_ADDR="http://nomad01:8200"
-export VAULT_TOKEN=$(jq -r .root_token crypto/vault-credentials.json)
-
-# Test access
-vault status
-vault kv list secret/
-```
-
-### Unseal After Restart
-
-```bash
-./setup.sh
-# Select option 10: Unseal Vault
-
-# Or manually
-UNSEAL_KEY=$(jq -r .unseal_key crypto/vault-credentials.json)
-curl -X PUT http://nomad01:8200/v1/sys/unseal \
-  -d "{\"key\": \"$UNSEAL_KEY\"}"
-```
-
-## Authentik Access
-
-### Initial Setup
-
-First-time access requires creating admin account:
-
-1. Navigate to `https://auth.mylab.lan/if/flow/initial-setup/`
-2. Create admin account with email and password
-3. Complete setup wizard
-
-### Admin Interface
-
-URL: `https://auth.mylab.lan/if/admin/`
-
-Use the credentials you created during initial setup.
-
-### User Portal
-
-URL: `https://auth.mylab.lan/if/user/`
-
-Regular users login here after admin configures authentication.
-
-## DNS Management
-
-### Pi-hole Admin
-
-1. Navigate to `http://<dns-ip>/admin`
-2. Click "Login"
-3. Enter password from `pihole_admin_password` in terraform.tfvars
-
-### Adding Local DNS Records
-
-Pi-hole v6 uses TOML configuration:
-
-```bash
-# SSH to dns-01
-pct enter 910
-
-# Edit config
-nano /etc/pihole/pihole.toml
-
-# Add host record in [dns.hosts] section
-[[dns.hosts]]
-  domain = "newhost.mylab.lan"
-  addr = "10.1.50.100"
-
-# Restart FTL
-pihole restartdns
-```
-
-Or use `./setup.sh` option 10 to rebuild all DNS records.
+---
 
 ## Traefik Dashboard
 
-### Accessing Dashboard
+Access the Traefik dashboard at `http://<nomad01-ip>:8081/dashboard/`.
+
+!!! warning "Trailing slash required"
+    The URL must end with `/dashboard/` (including the trailing slash). Without it, Traefik returns a 404.
+
+- **No authentication by default**: the dashboard is read-only
+- **HTTP Routers**: view all configured routing rules
+- **HTTP Services**: see discovered Nomad services and their health
+- **Entrypoints**: check which ports Traefik is listening on
+
+The Traefik API is also available at `http://<nomad01-ip>:8081/api/` for programmatic access:
 
 ```bash
-# Via SSH tunnel (recommended)
-ssh -L 8081:localhost:8081 ubuntu@nomad01
+# List all HTTP routers
+curl http://<nomad01-ip>:8081/api/http/routers | jq .
 
-# Then open in browser
-open http://localhost:8081
+# List all HTTP services
+curl http://<nomad01-ip>:8081/api/http/services | jq .
 ```
 
-### Dashboard Features
+---
 
-- HTTP routers and rules
-- Services and backends
-- Middleware configuration
-- TLS certificates
-- Access logs
+## Vault
 
-### API Queries
+Access the Vault UI through Traefik at `https://vault.<domain>` or directly at `http://<nomad01-ip>:8200`.
+
+### Credentials
+
+Vault credentials are stored in `crypto/vault-credentials.json` after initial setup:
+
+```json
+{
+  "unseal_key": "<base64-encoded-key>",
+  "root_token": "hvs.xxxxxxxxxxxx",
+  "vault_address": "http://192.168.1.50:8200",
+  "initialized_at": "2026-02-22T12:00:00Z"
+}
+```
+
+- **Root token**: use `root_token` to log in to the Vault UI (select "Token" as the authentication method)
+- **Unseal key**: needed to unseal Vault after a restart (see [Backup & Recovery](backup-recovery.md))
+
+!!! danger "Protect these credentials"
+    The `crypto/vault-credentials.json` file is gitignored for a reason. Never commit this file or share the unseal key and root token outside of secure channels.
+
+### Checking Vault Status
 
 ```bash
-# List all routers
-curl http://nomad01:8081/api/http/routers | jq .
+# Via Docker Compose
+docker compose run --rm nomad alloc logs -job vault
 
-# List services
-curl http://nomad01:8081/api/http/services | jq .
-
-# TLS certificates
-curl http://nomad01:8081/api/http/routers | jq '.[] | select(.tls) | {name, rule, certResolver: .tls.certResolver}'
+# Direct API check
+curl -s http://<nomad01-ip>:8200/v1/sys/health | jq .
 ```
 
-## Certificate Authority
+---
 
-### Health Check
+## Authentik
 
-```bash
-curl https://ca.mylab.lan/health
+Access Authentik at `https://auth.<domain>`.
 
-# Expected:
-{"status":"ok"}
-```
+- **Initial admin user**: `akadmin`
+- **Password**: stored in Vault at `secret/data/authentik` (the `authentik_secret_key` or bootstrap password configured during deployment)
+- **Routed through Traefik**: Authentik is accessed via HTTPS through the Traefik reverse proxy
 
-### Download Root Certificate
+Authentik provides:
 
-```bash
-# From browser
-open https://ca.mylab.lan/roots.pem
+- **Admin interface**: `https://auth.<domain>/if/admin/` for system configuration
+- **User interface**: `https://auth.<domain>/if/user/` for end-user self-service
+- **OAuth2/OIDC endpoints**: for application integration
 
-# Via curl
-curl -k https://ca.mylab.lan/roots.pem -o root_ca.crt
-```
-
-### ACME Directory
-
-```bash
-curl https://ca.mylab.lan/acme/acme/directory | jq .
-```
+---
 
 ## Kasm Workspaces
 
-### Admin Portal
+Access Kasm at `https://kasm.<domain>`.
 
-1. Navigate to `https://kasm.mylab.lan/admin`
-2. Login with admin credentials from terraform.tfvars
+- **Default admin user**: `admin@kasm.local`
+- **Password**: set during the Kasm installation process
+- **Direct HTTPS**: Kasm manages its own TLS certificate via acme.sh
 
-### User Portal
+---
 
-URL: `https://kasm.mylab.lan`
+## Service Discovery via DNS
 
-### Available Workspaces
+All service hostnames are registered in Pi-hole as local DNS records. The setup process (menu option 10) automatically configures:
 
-Default workspaces (configured during deployment):
-- Ubuntu Desktop
-- Firefox Browser
-- Chrome Browser
+| DNS Record | Points To |
+|-----------|-----------|
+| `vault.<domain>` | nomad01 IP |
+| `auth.<domain>` | nomad01 IP |
+| `traefik.<domain>` | nomad01 IP |
+| `ca.<domain>` | step-ca LXC IP |
 
-## Network Considerations
+If a service hostname is not resolving, see [DNS Management](dns-management.md) or run setup.sh menu option 10 to rebuild DNS records.
 
-### DNS Configuration
+---
 
-For best experience, configure your workstation or router to use dns-01 as primary DNS:
+## Docker Compose CLI Tools
 
-```bash
-# Router method (recommended)
-Set primary DNS: <dns-01-ip>
-Set secondary DNS: <dns-02-ip>
-
-# Per-device (macOS)
-System Preferences → Network → Advanced → DNS
-Add: <dns-01-ip>
-
-# Per-device (Linux)
-Edit /etc/resolv.conf:
-nameserver <dns-01-ip>
-```
-
-### Hosts File (Alternative)
-
-If not using Pi-hole as DNS:
+Several services are managed through Docker Compose wrappers from the project root:
 
 ```bash
-# macOS/Linux: /etc/hosts
-# Windows: C:\Windows\System32\drivers\etc\hosts
+# Serve documentation locally (port 8000)
+docker compose up mkdocs
 
-10.1.50.114 nomad01 nomad01.mylab.lan
-10.1.50.114 vault vault.mylab.lan
-10.1.50.114 auth auth.mylab.lan
-10.1.50.114 traefik traefik.mylab.lan
+# Packer commands
+docker compose run packer <command>
+
+# Terraform commands
+docker compose run terraform <command>
+
+# Nomad CLI
+docker compose run --rm nomad <command>
 ```
 
-### Installing CA Certificate
-
-To trust TLS certificates issued by step-ca:
-
-=== "macOS"
-
-    ```bash
-    curl -k -o root_ca.crt https://ca.mylab.lan/roots.pem
-    sudo security add-trusted-cert -d -r trustRoot \
-      -k /Library/Keychains/System.keychain root_ca.crt
-    ```
-
-=== "Ubuntu/Debian"
-
-    ```bash
-    curl -k -o root_ca.crt https://ca.mylab.lan/roots.pem
-    sudo cp root_ca.crt /usr/local/share/ca-certificates/
-    sudo update-ca-certificates
-    ```
-
-=== "Windows"
-
-    ```powershell
-    Invoke-WebRequest -Uri "https://ca.mylab.lan/roots.pem" -OutFile root_ca.crt
-    Import-Certificate -FilePath .\root_ca.crt -CertStoreLocation Cert:\LocalMachine\Root
-    ```
-
-## Troubleshooting
-
-### Cannot Access Services
-
-```bash
-# Check DNS resolution
-nslookup vault.mylab.lan <dns-01-ip>
-
-# Check Nomad job is running
-nomad job status vault
-
-# Check Traefik routes
-curl http://nomad01:8081/api/http/routers | jq '.[] | select(.name | contains("vault"))'
-```
-
-### Certificate Errors
-
-```bash
-# Install CA certificate (see above)
-
-# Or accept self-signed for testing
-curl -k https://vault.mylab.lan
-```
-
-### Service Unavailable
-
-```bash
-# Check job allocation
-nomad alloc status $(nomad job status -short vault | grep running | awk '{print $1}')
-
-# View logs
-nomad alloc logs -job vault
-```
-
-### Vault is Sealed
-
-```bash
-./setup.sh
-# Select option 10: Unseal Vault
-```
-
-## Next Steps
-
-- [:octicons-arrow-right-24: Nomad Operations](nomad-operations.md)
-- [:octicons-arrow-right-24: Vault Operations](vault-operations.md)
-- [:octicons-arrow-right-24: DNS Management](dns-management.md)
-- [:octicons-arrow-right-24: Troubleshooting](../troubleshooting/common-issues.md)
+These wrappers handle container networking and credential mounting automatically. See [Nomad Operations](nomad-operations.md) for detailed Nomad CLI usage.

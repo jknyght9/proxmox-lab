@@ -33,6 +33,8 @@ theme:
         name: Switch to system preference
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
@@ -62,8 +64,8 @@ nav:
   - Getting Started:
       - Introduction: getting-started/introduction.md
       - Prerequisites: getting-started/prerequisites.md
-      - Quick Start: getting-started/quick-start.md
       - Pre-Flight Checklist: getting-started/checklist.md
+      - Quick Start: getting-started/quick-start.md
   - Architecture:
       - Overview: architecture/overview.md
       - Network Topology: architecture/network-topology.md
@@ -75,20 +77,20 @@ nav:
       - Module Reference: configuration/module-reference.md
       - Cloud-Init Templates: configuration/cloudinit-templates.md
   - Modules:
-      - Nomad Cluster: modules/nomad.md
-      - Vault: modules/vault.md
-      - Authentik SSO: modules/authentik.md
-      - Samba AD: modules/samba-ad.md
-      - Traefik: modules/traefik.md
+      - Nomad Cluster: modules/nomad-cluster.md
       - Kasm Workspaces: modules/kasm.md
-      - Pihole DNS: modules/pihole.md
+      - Pi-hole DNS: modules/pihole.md
       - Step-CA: modules/step-ca.md
+  - Services:
+      - Traefik: services/traefik.md
+      - Vault: services/vault.md
+      - Authentik: services/authentik.md
+      - Samba AD: services/samba-ad.md
   - Operations:
       - Accessing Services: operations/accessing-services.md
-      - Nomad Operations: operations/nomad-operations.md
-      - Vault Operations: operations/vault-operations.md
       - DNS Management: operations/dns-management.md
       - Certificate Operations: operations/certificate-operations.md
+      - Nomad Operations: operations/nomad-operations.md
       - Backup & Recovery: operations/backup-recovery.md
   - Troubleshooting:
       - Common Issues: troubleshooting/common-issues.md

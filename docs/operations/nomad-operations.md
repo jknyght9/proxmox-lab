@@ -1,467 +1,329 @@
 # Nomad Operations
 
-Daily operations guide for managing the Nomad cluster and deploying jobs.
+This page covers day-to-day Nomad cluster operations, including CLI usage through Docker Compose, job management, cluster health monitoring, and GlusterFS volume management.
 
-## Accessing Nomad
+---
 
-### Web UI
+## Nomad CLI via Docker Compose
 
-URL: `http://nomad01.mylab.lan:4646`
-
-Features:
-- Job status and history
-- Allocation logs
-- Node health
-- Service registry
-- Evaluation details
-
-### SSH Access
+All Nomad commands are run through Docker Compose from the project root. The container is pre-configured with the correct `NOMAD_ADDR` environment variable.
 
 ```bash
-ssh ubuntu@nomad01.mylab.lan
-# or nomad02, nomad03
+docker compose run --rm nomad <command>
 ```
 
-### Docker CLI
+!!! note "NOMAD_ADDR"
+    The Nomad address is configured in `compose.yml`. If your nomad01 IP differs from the default (`192.168.1.50`), update the `NOMAD_ADDR` environment variable in `compose.yml`.
 
-For interactive commands, use the Docker Compose wrapper:
+---
+
+## Common Commands
+
+### Job Management
 
 ```bash
-# From project root
+# List all jobs and their status
 docker compose run --rm nomad job status
-docker compose run --rm nomad node status
-```
 
-Update `NOMAD_ADDR` in `docker-compose.yml` if needed.
+# View detailed status for a specific job
+docker compose run --rm nomad job status vault
 
-## Cluster Management
+# Deploy a job from a file
+docker compose run --rm nomad job run /nomad/jobs/vault.nomad.hcl
 
-### Check Cluster Status
+# Plan a job (dry-run, shows what will change)
+docker compose run --rm nomad job plan /nomad/jobs/vault.nomad.hcl
 
-```bash
-# Server members
-nomad server members
+# Stop a running job
+docker compose run --rm nomad job stop vault
 
-# Expected output:
-Name             Address      Port  Status  Leader  Raft Version  Build   Datacenter  Region
-nomad01.global  10.1.50.114  4648  alive   true    3             1.7.0   dc1         global
-nomad02.global  10.1.50.115  4648  alive   false   3             1.7.0   dc1         global
-nomad03.global  10.1.50.116  4648  alive   false   3             1.7.0   dc1         global
-```
-
-### Check Node Status
-
-```bash
-# List all nodes
-nomad node status
-
-# Detailed node info
-nomad node status <node-id>
-
-# Node resource usage
-nomad node status -stats <node-id>
-```
-
-### Check Raft Peers
-
-```bash
-nomad operator raft list-peers
-
-# Expected: 3 peers, one leader
-```
-
-## Job Management
-
-### Listing Jobs
-
-```bash
-# All jobs
-nomad job status
-
-# Specific job
-nomad job status vault
-
-# Compact output
-nomad job status -short
-```
-
-### Deploying Jobs
-
-```bash
-# Run job from file
-nomad job run /path/to/job.nomad.hcl
-
-# Run with variables
-nomad job run -var='replicas=3' job.nomad.hcl
-
-# Dry run (plan)
-nomad job plan job.nomad.hcl
-```
-
-### Stopping Jobs
-
-```bash
-# Stop job (keep in history)
-nomad job stop vault
-
-# Stop and purge (remove from history)
-nomad job stop -purge vault
-
-# Force stop (skip graceful shutdown)
-nomad job stop -detach vault
-```
-
-### Viewing Job Details
-
-```bash
-# Job specification
-nomad job inspect vault
-
-# Job history
-nomad job history vault
-
-# Deployments
-nomad job deployments vault
-```
-
-## Allocation Management
-
-### Viewing Allocations
-
-```bash
-# List allocations for a job
-nomad job status vault
-
-# Allocation details
-nomad alloc status <alloc-id>
-
-# Allocation logs
-nomad alloc logs <alloc-id>
-
-# Follow logs in real-time
-nomad alloc logs -f <alloc-id>
-
-# Logs for specific task
-nomad alloc logs -task server <alloc-id>
-```
-
-### Restarting Allocations
-
-```bash
-# Restart specific allocation
-nomad alloc restart <alloc-id>
-
-# Restart specific task
-nomad alloc restart -task worker <alloc-id>
-```
-
-### Exec into Allocation
-
-```bash
-# Open shell in allocation
-nomad alloc exec -task server <alloc-id> /bin/sh
-
-# Run command
-nomad alloc exec <alloc-id> ps aux
-```
-
-## Service Registry
-
-### Listing Services
-
-```bash
-# All registered services
-nomad service list
-
-# Services for specific job
-nomad job status vault | grep -A 10 "Services"
-```
-
-### Service Details
-
-```bash
-# Query service info
-nomad service info vault
-
-# JSON output for scripting
-nomad service info -json vault | jq .
-```
-
-## Monitoring and Debugging
-
-### Check System Health
-
-```bash
-# Garbage collection status
-nomad system gc
-
-# Reconcile job summaries
-nomad system reconcile summaries
-```
-
-### View Evaluations
-
-```bash
-# List evaluations
-nomad eval list
-
-# Evaluation details
-nomad eval status <eval-id>
-```
-
-### Node Drain
-
-```bash
-# Drain node for maintenance
-nomad node drain -enable -yes <node-id>
-
-# Check drain status
-nomad node status <node-id>
-
-# Re-enable node
-nomad node drain -disable <node-id>
-```
-
-### Node Eligibility
-
-```bash
-# Mark node ineligible for scheduling
-nomad node eligibility -disable <node-id>
-
-# Re-enable
-nomad node eligibility -enable <node-id>
-```
-
-## Common Operations
-
-### Deploying Vault
-
-```bash
-./setup.sh
-# Select option 8: Deploy Vault secrets manager (on Nomad)
-
-# Or manually:
-nomad job run nomad/jobs/vault.nomad.hcl
-```
-
-### Deploying Authentik
-
-```bash
-./setup.sh
-# Select option 9: Deploy Authentik SSO (on Nomad)
-
-# Or manually (ensure secrets in Vault first):
-nomad job run nomad/jobs/authentik.nomad.hcl
-```
-
-### Deploying Traefik
-
-```bash
-./setup.sh
-# Select option 7: Deploy Traefik load balancer (on Nomad)
-
-# Or manually:
-nomad job run nomad/jobs/traefik.nomad.hcl
-```
-
-### Redeploying a Job
-
-```bash
-# Stop and purge old job
-nomad job stop -purge vault
-
-# Deploy new version
-nomad job run nomad/jobs/vault.nomad.hcl
-
-# Monitor deployment
-nomad job status vault
+# Stop and completely purge a job (removes all history)
+docker compose run --rm nomad job stop -purge vault
 ```
 
 ### Viewing Logs
 
 ```bash
-# Latest logs
-nomad alloc logs -job vault
+# View logs for the most recent allocation of a job
+docker compose run --rm nomad alloc logs -job vault
 
-# Follow logs
-nomad alloc logs -f -job vault
+# View stderr logs
+docker compose run --rm nomad alloc logs -job vault -stderr
 
-# Stderr only
-nomad alloc logs -stderr -job vault
+# Follow logs in real time
+docker compose run --rm nomad alloc logs -job vault -f
 
-# Last 50 lines
-nomad alloc logs -tail -n 50 -job vault
+# View logs for a specific allocation (use alloc ID from job status)
+docker compose run --rm nomad alloc logs <alloc-id>
 ```
 
-## GlusterFS Operations
-
-### Check Volume Status
+### Service Discovery
 
 ```bash
-ssh ubuntu@nomad01
+# List all registered services
+docker compose run --rm nomad service list
 
-# Volume status
+# View details for a specific service
+docker compose run --rm nomad service info <service-name>
+```
+
+### Cluster Health
+
+```bash
+# View server members and leader status
+docker compose run --rm nomad server members
+
+# View node (client) status
+docker compose run --rm nomad node status
+
+# View detailed status for a specific node
+docker compose run --rm nomad node status <node-id>
+
+# Check cluster operator status (raft configuration)
+docker compose run --rm nomad operator raft list-peers
+```
+
+---
+
+## Deploying Jobs
+
+### Standard Deployment
+
+To deploy a Nomad job:
+
+```bash
+# 1. Plan the job to see what will change
+docker compose run --rm nomad job plan /nomad/jobs/traefik.nomad.hcl
+
+# 2. Run the job
+docker compose run --rm nomad job run /nomad/jobs/traefik.nomad.hcl
+
+# 3. Verify the job is running
+docker compose run --rm nomad job status traefik
+```
+
+### Available Jobs
+
+| Job File | Service | Description |
+|----------|---------|-------------|
+| `traefik.nomad.hcl` | Traefik | Reverse proxy and load balancer |
+| `vault.nomad.hcl` | Vault | Secrets management |
+| `authentik.nomad.hcl` | Authentik | Identity provider (SSO) |
+| `samba-dc.nomad.hcl` | Samba AD | Active Directory Domain Controllers |
+
+### Job Constraints
+
+All service jobs are pinned to nomad01 using a hostname constraint:
+
+```hcl
+constraint {
+  attribute = "${attr.unique.hostname}"
+  value     = "nomad01"
+}
+```
+
+This ensures consistent DNS resolution and avoids cross-node routing complexity.
+
+---
+
+## Monitoring Allocations
+
+### Allocation Lifecycle
+
+Each job deployment creates allocations. An allocation goes through these states:
+
+1. **Pending** -- waiting for resources
+2. **Running** -- task is executing
+3. **Complete** -- task finished successfully
+4. **Failed** -- task exited with an error
+
+### Inspecting Allocations
+
+```bash
+# List allocations for a job
+docker compose run --rm nomad job status vault
+
+# View detailed allocation info
+docker compose run --rm nomad alloc status <alloc-id>
+
+# View allocation events (scheduling, restarts, failures)
+docker compose run --rm nomad alloc status -verbose <alloc-id>
+```
+
+### Handling Failed Allocations
+
+If an allocation fails:
+
+1. Check the logs for error messages:
+   ```bash
+   docker compose run --rm nomad alloc logs <alloc-id>
+   docker compose run --rm nomad alloc logs <alloc-id> -stderr
+   ```
+
+2. Check the allocation status for scheduling issues:
+   ```bash
+   docker compose run --rm nomad alloc status <alloc-id>
+   ```
+
+3. If the job is stuck, stop and purge it before redeploying:
+   ```bash
+   docker compose run --rm nomad job stop -purge <job-name>
+   docker compose run --rm nomad job run /nomad/jobs/<job-file>
+   ```
+
+---
+
+## Cluster Health Monitoring
+
+### Server Quorum
+
+The Nomad cluster runs 3 server nodes. At least 2 must be healthy to maintain quorum:
+
+```bash
+# Check server members and leader
+docker compose run --rm nomad server members
+```
+
+Expected output shows 3 members with one marked as `leader`:
+
+```
+Name           Address       Port  Status  Leader  Raft Version  Build   Datacenter  Region
+nomad01.global 192.168.1.50   4648  alive   true    3             1.x.x   dc1         global
+nomad02.global 192.168.1.51   4648  alive   false   3             1.x.x   dc1         global
+nomad03.global 192.168.1.52   4648  alive   false   3             1.x.x   dc1         global
+```
+
+### Node (Client) Status
+
+```bash
+# Check all client nodes
+docker compose run --rm nomad node status
+```
+
+All 3 nodes should show as `ready` and `eligible`:
+
+```
+ID        DC   Name     Class   Drain  Eligibility  Status
+abc123    dc1  nomad01  <none>  false  eligible     ready
+def456    dc1  nomad02  <none>  false  eligible     ready
+ghi789    dc1  nomad03  <none>  false  eligible     ready
+```
+
+### Raft Consensus
+
+```bash
+# View raft peer configuration
+docker compose run --rm nomad operator raft list-peers
+```
+
+This shows the Raft consensus state and which nodes are voters.
+
+---
+
+## GlusterFS Volume Management
+
+The Nomad cluster uses GlusterFS for replicated storage across all 3 nodes. The shared volume is mounted at `/srv/gluster/nomad-data` on each node.
+
+### Volume Structure
+
+```
+/srv/gluster/nomad-data/
+  +-- vault/              # Vault persistent data
+  +-- traefik/            # Traefik config and ACME certificates
+  |     +-- acme.json     # ACME certificate store
+  +-- authentik/          # Authentik data
+  |     +-- postgres/     # PostgreSQL database
+  |     +-- redis/        # Redis cache
+  +-- samba-dc01/         # Primary Samba DC data
+  +-- samba-dc02/         # Secondary Samba DC data
+```
+
+### Checking GlusterFS Status
+
+SSH into any Nomad node to check GlusterFS:
+
+```bash
+# Check volume status
 sudo gluster volume status nomad-data
 
-# Volume info
+# Check volume info
 sudo gluster volume info nomad-data
 
-# Peer status
+# Check peer status
 sudo gluster peer status
+
+# Verify the mount
+df -h /srv/gluster/nomad-data
 ```
 
-### Heal Operations
+### Common GlusterFS Issues
+
+**Volume not mounted:**
 
 ```bash
-# Check for files needing heal
+# Remount the volume
+sudo mount -t glusterfs localhost:/nomad-data /srv/gluster/nomad-data
+```
+
+**Split-brain or heal needed:**
+
+```bash
+# Check heal status
 sudo gluster volume heal nomad-data info
 
-# Check heal status
-sudo gluster volume heal nomad-data info healed
-
-# Trigger full heal
-sudo gluster volume heal nomad-data full
+# Trigger a heal
+sudo gluster volume heal nomad-data
 ```
 
-### Mount Issues
+**Stale data from a previous deployment:**
 
 ```bash
-# Check if mounted
-df -h | grep nomad-data
-
-# Remount
-sudo umount /srv/gluster/nomad-data
-sudo mount -t glusterfs nomad01:/nomad-data /srv/gluster/nomad-data
-
-# Check fstab entry
-cat /etc/fstab | grep nomad-data
+# Clean up a service directory (e.g., Vault)
+sudo rm -rf /srv/gluster/nomad-data/vault/*
 ```
 
-## Troubleshooting
+!!! warning
+    Clearing service data is destructive. Only do this when you intend to redeploy the service from scratch. For Vault, this means reinitializing and generating new unseal keys.
 
-### Job Won't Start
+---
+
+## Restarting Services
+
+### Restart a Single Job
 
 ```bash
-# Check allocation events
-nomad alloc status <alloc-id>
-
-# Check for errors in logs
-nomad alloc logs <alloc-id>
-
-# Check node resources
-nomad node status -stats
+# Stop and redeploy
+docker compose run --rm nomad job stop <job-name>
+docker compose run --rm nomad job run /nomad/jobs/<job-file>
 ```
 
-### Port Already in Use
+### Restart with Purge
+
+If a job has stale allocations or failed deployments:
 
 ```bash
-# Find conflicting allocation
-nomad job status -all-allocs
-
-# Stop old allocations
-nomad job stop -purge <old-job>
+docker compose run --rm nomad job stop -purge <job-name>
+docker compose run --rm nomad job run /nomad/jobs/<job-file>
 ```
 
-### Service Not Registered
+### Deployment Order
 
-```bash
-# Check job service block
-nomad job inspect <job-name> | jq '.Job.TaskGroups[].Services'
+When deploying all services, follow this order due to dependencies:
 
-# Verify provider is set
-# Should have: provider = "nomad"
+1. **Traefik** -- reverse proxy must be running first
+2. **Vault** -- secrets manager needed by other services
+3. **Authentik** -- depends on Vault for secrets
+4. **Samba AD** -- depends on Vault for secrets
 
-# Check Nomad service list
-nomad service list
-```
+---
 
-### Node Unresponsive
+## Nomad UI
 
-```bash
-# SSH to node and check Nomad service
-ssh ubuntu@nomad02
-sudo systemctl status nomad
+The Nomad web UI is available at `http://<nomad01-ip>:4646` and provides:
 
-# Restart Nomad
-sudo systemctl restart nomad
+- **Jobs view**: see all jobs, their status, and recent deployments
+- **Allocations**: drill into individual allocations for logs and events
+- **Topology**: visual representation of the cluster and resource usage
+- **Server status**: view leader election and server health
 
-# Check logs
-sudo journalctl -u nomad -f
-```
-
-### Raft Issues
-
-```bash
-# Check Raft peers
-nomad operator raft list-peers
-
-# If split brain or no leader, may need to recover
-# (Rare - consult Nomad docs for recovery procedures)
-```
-
-## Best Practices
-
-### Job Deployment
-
-1. Always use `nomad job plan` before `nomad job run`
-2. Use version control for job files
-3. Test in development before production
-4. Use constraints to control placement
-5. Set appropriate resource limits
-
-### Resource Management
-
-1. Monitor node resource usage
-2. Set realistic CPU/memory requests
-3. Use `resources` block in all tasks
-4. Plan for peak load + headroom
-
-### Service Registration
-
-1. Always set `provider = "nomad"` for Traefik discovery
-2. Use meaningful service names
-3. Configure health checks
-4. Tag services appropriately
-
-### Maintenance
-
-1. Drain nodes before maintenance
-2. Verify job status after node returns
-3. Keep Nomad version consistent across cluster
-4. Backup GlusterFS data regularly
-
-## Automation
-
-### Checking Job Health
-
-```bash
-#!/bin/bash
-# check-nomad-jobs.sh
-
-for job in traefik vault authentik; do
-  status=$(nomad job status -short $job | grep -c running)
-  if [ "$status" -eq 0 ]; then
-    echo "CRITICAL: $job is not running"
-    # Send alert
-  fi
-done
-```
-
-### Restarting Failed Allocations
-
-```bash
-#!/bin/bash
-# restart-failed.sh
-
-nomad job status -short | grep failed | awk '{print $1}' | while read job; do
-  echo "Restarting $job"
-  nomad job stop -purge $job
-  nomad job run "nomad/jobs/${job}.nomad.hcl"
-done
-```
-
-## Next Steps
-
-- [:octicons-arrow-right-24: Vault Operations](vault-operations.md)
-- [:octicons-arrow-right-24: Nomad Module](../modules/nomad.md)
-- [:octicons-arrow-right-24: Troubleshooting](../troubleshooting/common-issues.md)
+The UI is a convenient alternative to the CLI for monitoring and troubleshooting, though deployments should be done through the CLI to ensure reproducibility.
