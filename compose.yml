@@ -12,7 +12,7 @@ services:
       - ./docs:/docs
     ports:
       - 8000:8000
-    command: "serve -a 0.0.0.0:8000"
+    command: serve -a 0.0.0.0:8000
   nomad:
     image: hashicorp/nomad:1.9
     container_name: nomad
@@ -20,8 +20,9 @@ services:
     volumes:
       - ./nomad:/nomad:z
     environment:
-      NOMAD_ADDR: "http://10.1.50.114:4646" # Update to your nomad01 IP
-    entrypoint: ["nomad"]
+      NOMAD_ADDR: "${NOMAD_ADDR}"
+    entrypoint: [nomad]
+    network_mode: host
   packer:
     build: ./packer
     #image: hashicorp/packer:latest
@@ -48,8 +49,8 @@ services:
       - ./terraform/lxc-step-ca/step-ca:/etc/step-ca:z
       - ./terraform/lxc-step-ca/init-step-ca.sh:/init-step-ca.sh:ro
     environment:
-      STEPPATH: "/etc/step-ca"
-    entrypoint: ["/bin/bash", "/init-step-ca.sh"]
+      STEPPATH: /etc/step-ca
+    entrypoint: [/bin/bash, /init-step-ca.sh]
   terraform:
     image: hashicorp/terraform
     userns_mode: host  # Bypass userns-remap for volume write access
@@ -58,7 +59,7 @@ services:
     volumes:
       - ./crypto:/crypto:ro
       - ./terraform:/terraform:z
-      - ./logs:/logs:z
+      - ./logs:/logs:zß
     environment:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
