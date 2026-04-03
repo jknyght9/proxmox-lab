@@ -15,3 +15,22 @@ http:
           - X-authentik-jwt
           - X-authentik-meta-app
           - X-authentik-meta-provider
+
+  routers:
+    nomad:
+      rule: "Host(`nomad.${DNS_POSTFIX}`)"
+      entryPoints:
+        - websecure
+      service: nomad
+      middlewares:
+        - authentik
+      tls:
+        certResolver: step-ca
+
+  services:
+    nomad:
+      loadBalancer:
+        servers:
+          - url: "http://${NOMAD01_IP}:4646"
+          - url: "http://${NOMAD02_IP}:4646"
+          - url: "http://${NOMAD03_IP}:4646"

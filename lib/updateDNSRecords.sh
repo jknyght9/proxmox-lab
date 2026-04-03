@@ -116,13 +116,15 @@ function updateDNSRecords() {
         "\($ip) vault vault.\($suffix)",
         "\($ip) auth auth.\($suffix)",
         "\($ip) traefik traefik.\($suffix)",
-        "\($ip) status status.\($suffix)"
+        "\($ip) status status.\($suffix)",
+        "\($ip) nomad nomad.\($suffix)"
       ]')"
       echo "  Nomad services (via Traefik @ $TRAEFIK_IP):"
       echo "    - vault.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - auth.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - traefik.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - status.$DNS_POSTFIX -> $TRAEFIK_IP"
+      echo "    - nomad.$DNS_POSTFIX -> $TRAEFIK_IP"
     fi
   fi
 
