@@ -32,7 +32,21 @@ EOF
 
   # Create storage directory for Traefik
   doing "Preparing Traefik storage directory..."
-  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/certs && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/certs"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs"
+
+  # Copy Authentik middleware config (for forward auth)
+  if [ -f "nomad/config/traefik/authentik.yml" ]; then
+    doing "Deploying Authentik forward auth middleware config..."
+    # Get nomad01 IP (where Authentik runs)
+    local NOMAD01_IP
+    NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    export DNS_POSTFIX NOMAD01_IP
+    envsubst '${DNS_POSTFIX} ${NOMAD01_IP}' < "nomad/config/traefik/authentik.yml" > "/tmp/authentik-middleware.yml"
+    scpToAdmin "/tmp/authentik-middleware.yml" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.yml"
+    sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/authentik.yml /srv/gluster/nomad-data/traefik/config/authentik.yml && sudo chmod 644 /srv/gluster/nomad-data/traefik/config/authentik.yml"
+    rm -f "/tmp/authentik-middleware.yml"
+    success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
+  fi
 
   # Copy CA certificate for ACME trust
   doing "Copying CA certificate for Traefik..."
