@@ -43,14 +43,14 @@ EOF
   if ! sshScriptAdmin "$VM_USER" "$NOMAD_IP" <<'REMOTE_SCRIPT'
     VAULT_DIR="/srv/gluster/nomad-data/vault"
 
-    # Clean up any stale data from previous deployments
+    # Create storage directory if it doesn't exist (preserve existing data!)
     if [ -d "$VAULT_DIR" ]; then
-      echo "Cleaning up previous Vault data..."
-      sudo rm -rf "$VAULT_DIR"
+      echo "Vault storage directory exists, preserving data..."
+    else
+      echo "Creating Vault storage directory..."
+      sudo mkdir -p "$VAULT_DIR"
     fi
 
-    # Create storage directory with permissive permissions
-    sudo mkdir -p "$VAULT_DIR"
     sudo chmod 777 "$VAULT_DIR"
 
     # Verify directory is writable
