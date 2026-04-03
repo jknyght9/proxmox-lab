@@ -51,6 +51,8 @@ job "traefik" {
           "--providers.nomad.exposedByDefault=false",
           "--providers.nomad.namespaces=default",
           "--providers.nomad.allowEmptyServices=true",
+          "--providers.file.directory=/data/traefik/config",
+          "--providers.file.watch=true",
           "--certificatesresolvers.step-ca.acme.email=admin@${DNS_POSTFIX}",
           "--certificatesresolvers.step-ca.acme.storage=/data/traefik/acme.json",
           "--certificatesresolvers.step-ca.acme.caserver=https://ca.${DNS_POSTFIX}/acme/acme/directory",
