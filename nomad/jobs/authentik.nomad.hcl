@@ -83,7 +83,6 @@ EOH
 {{ with secret "secret/data/authentik" }}
 AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
-# Bootstrap credentials (only used on first startup)
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
 AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
 {{ end }}
