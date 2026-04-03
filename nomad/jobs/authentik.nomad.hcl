@@ -149,6 +149,8 @@ EOH
 {{ with secret "secret/data/authentik" }}
 AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
+AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
+AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
 {{ end }}
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
