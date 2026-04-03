@@ -22,7 +22,6 @@ services:
     environment:
       NOMAD_ADDR: "${NOMAD_ADDR}"
     entrypoint: [nomad]
-    network_mode: host
   packer:
     build: ./packer
     #image: hashicorp/packer:latest
@@ -39,7 +38,6 @@ services:
       PACKER_LOG: "1"
     stdin_open: true
     tty: true
-    network_mode: host
   step-ca:
     image: smallstep/step-ca
     user: root
@@ -59,8 +57,7 @@ services:
     volumes:
       - ./crypto:/crypto:ro
       - ./terraform:/terraform:z
-      - ./logs:/logs:zß
+      - ./logs:/logs:z
     environment:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
-    network_mode: host
