@@ -23,6 +23,8 @@ job "vault" {
       env {
         SKIP_CHOWN = "true"
         VAULT_ADDR = "http://127.0.0.1:8200"
+        # Trust internal CA for OIDC discovery
+        SSL_CERT_FILE = "/certs/root_ca.crt"
       }
 
       config {
@@ -32,6 +34,7 @@ job "vault" {
         args         = ["server", "-config=/local/vault.hcl"]
         volumes = [
           "/srv/gluster/nomad-data/vault:/data/vault",
+          "/srv/gluster/nomad-data/certs:/certs:ro",
         ]
       }
 
