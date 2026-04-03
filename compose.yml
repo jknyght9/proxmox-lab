@@ -22,7 +22,6 @@ services:
     environment:
       NOMAD_ADDR: "http://10.1.50.114:4646" # Update to your nomad01 IP
     entrypoint: ["nomad"]
-    network_mode: host
   packer:
     build: ./packer
     #image: hashicorp/packer:latest
