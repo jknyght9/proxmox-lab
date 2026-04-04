@@ -28,7 +28,7 @@ job "vault" {
       }
 
       config {
-        image        = "hashicorp/vault:1.15"
+        image        = "hashicorp/vault:1.21.4"
         network_mode = "host"
         privileged   = true
         args         = ["server", "-config=/local/vault.hcl"]

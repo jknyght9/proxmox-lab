@@ -537,6 +537,17 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Port already in use**: Stop/purge old allocations: `nomad job stop -purge vault`
 - **Vault not responding**: Check all Nomad node IPs, Vault may be scheduled on different node than expected
 
+#### Vault Data Loss
+- **Critical**: Vault data at `/srv/gluster/nomad-data/vault` must be preserved across redeployments - never delete unless intentionally resetting
+- The `deployVault.sh` script was fixed to not delete existing Vault data during redeployment
+- **If Vault is accidentally reinitialized, all secrets are lost** and dependent services (Authentik, Samba AD, backups) will fail to start
+- **Recovery steps** (Authentik example):
+  1. Generate new `AUTHENTIK_SECRET_KEY` and `POSTGRES_PASSWORD`
+  2. Connect to Authentik's PostgreSQL container: `docker exec -it <container> psql -U authentik`
+  3. Update password: `ALTER USER authentik WITH PASSWORD 'new_password';`
+  4. Store new secrets in Vault: `vault kv put secret/authentik AUTHENTIK_SECRET_KEY=... POSTGRES_PASSWORD=...`
+  5. Redeploy Authentik job with new secrets
+
 ### Traefik Issues
 - **404 errors**: Check Traefik API for routers: `curl http://nomad01:8081/api/http/routers | jq .`
 - **ACME challenges failing**: Ensure DNS resolves to Traefik node, clear stale acme.json: `rm /srv/gluster/nomad-data/traefik/acme.json`
