@@ -73,11 +73,12 @@ EOH
           # HTTP router for ACME challenges and short name
           "traefik.http.routers.vault-http.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`)",
           "traefik.http.routers.vault-http.entrypoints=web",
-          # HTTPS router with TLS - accepts both FQDN and short name
+          # HTTPS router with TLS and Authentik forward auth
           "traefik.http.routers.vault.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`)",
           "traefik.http.routers.vault.entrypoints=websecure",
           "traefik.http.routers.vault.tls=true",
           "traefik.http.routers.vault.tls.certresolver=step-ca",
+          "traefik.http.routers.vault.middlewares=authentik@file",
           "traefik.http.services.vault.loadbalancer.server.port=8200",
         ]
 
