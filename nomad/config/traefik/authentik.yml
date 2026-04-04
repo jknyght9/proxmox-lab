@@ -27,6 +27,16 @@ http:
       tls:
         certResolver: step-ca
 
+    pihole:
+      rule: "Host(`pihole.${DNS_POSTFIX}`)"
+      entryPoints:
+        - websecure
+      service: pihole
+      middlewares:
+        - authentik
+      tls:
+        certResolver: step-ca
+
   services:
     nomad:
       loadBalancer:
@@ -34,3 +44,8 @@ http:
           - url: "http://${NOMAD01_IP}:4646"
           - url: "http://${NOMAD02_IP}:4646"
           - url: "http://${NOMAD03_IP}:4646"
+
+    pihole:
+      loadBalancer:
+        servers:
+          - url: "http://${DNS01_IP}:80"
