@@ -168,9 +168,22 @@ REMOTE_SCRIPT
 
     if [ "$IS_SEALED" = "true" ]; then
       warn "Vault is sealed and requires unsealing."
-      echo
-      read -rsp "$(question "Enter your Vault unseal key: ")" UNSEAL_KEY
-      echo
+
+      # Try to read unseal key from credentials file first
+      local UNSEAL_KEY=""
+      if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+        UNSEAL_KEY=$(jq -r '.unseal_key // empty' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+        if [ -n "$UNSEAL_KEY" ]; then
+          doing "Using unseal key from $VAULT_CREDENTIALS_FILE..."
+        fi
+      fi
+
+      # Fall back to prompting if no credentials file
+      if [ -z "$UNSEAL_KEY" ]; then
+        echo
+        read -rsp "$(question "Enter your Vault unseal key: ")" UNSEAL_KEY
+        echo
+      fi
 
       if [ -n "$UNSEAL_KEY" ]; then
         local UNSEAL_RESPONSE
