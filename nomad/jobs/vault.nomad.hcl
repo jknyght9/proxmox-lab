@@ -52,8 +52,8 @@ listener "tcp" {
   tls_disable = true
 }
 
-api_addr = "http://{{ env "NOMAD_IP_api" }}:8200"
-cluster_addr = "http://{{ env "NOMAD_IP_cluster" }}:8201"
+api_addr = "http://{{ sockaddr "GetPrivateIP" }}:8200"
+cluster_addr = "http://{{ sockaddr "GetPrivateIP" }}:8201"
 EOH
         destination = "local/vault.hcl"
       }
