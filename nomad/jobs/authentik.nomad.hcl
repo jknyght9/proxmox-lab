@@ -95,6 +95,7 @@ AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
 AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
+AUTHENTIK_MEDIA_ROOT=/data/media
 EOH
         destination = "secrets/authentik.env"
         env         = true
@@ -161,6 +162,7 @@ AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
+AUTHENTIK_MEDIA_ROOT=/data/media
 EOH
         destination = "secrets/authentik.env"
         env         = true
