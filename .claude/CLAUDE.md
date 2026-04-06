@@ -449,7 +449,22 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 - **Storage**: GlusterFS at `/srv/gluster/nomad-data/authentik/` with subdirectories:
   - `postgres/` - PostgreSQL data (handles all caching, sessions, tasks)
   - `data/` - Authentik data (media, templates, certs)
+  - `branding/` - Custom branding files (logo, background)
 - **Vault Integration**: Job uses `vault { role = "authentik" }` stanza; secrets injected via templates
+- **CA Trust**: Mounts `/srv/gluster/nomad-data/certs/root_ca.crt` and sets `REQUESTS_CA_BUNDLE` for internal HTTPS
+
+**Custom Branding Setup:**
+1. Create branding directory and add files:
+   ```bash
+   mkdir -p /srv/gluster/nomad-data/authentik/branding
+   cp your-background.png /srv/gluster/nomad-data/authentik/branding/background.png
+   cp your-logo.svg /srv/gluster/nomad-data/authentik/branding/logo.svg
+   ```
+2. Redeploy Authentik - files are mounted into `/web/dist/assets/images/`
+3. In Authentik Admin → System → Brands, set:
+   - **Logo**: `/static/dist/assets/images/icon_left_brand.svg`
+   - **Background**: `/static/dist/assets/images/flow_background.jpg`
+   - **Favicon**: `/static/dist/assets/images/icon_left_brand.svg` (or upload separately)
 
 ### Uptime Kuma Configuration
 - **Docker Image**: `louislam/uptime-kuma:1`

@@ -118,8 +118,7 @@ function updateDNSRecords() {
         "\($ip) traefik traefik.\($suffix)",
         "\($ip) status status.\($suffix)",
         "\($ip) nomad nomad.\($suffix)",
-        "\($ip) pihole pihole.\($suffix)",
-        "\($ip) assets assets.\($suffix)"
+        "\($ip) pihole pihole.\($suffix)"
       ]')"
       echo "  Nomad services (via Traefik @ $TRAEFIK_IP):"
       echo "    - vault.$DNS_POSTFIX -> $TRAEFIK_IP"
@@ -128,7 +127,6 @@ function updateDNSRecords() {
       echo "    - status.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - nomad.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - pihole.$DNS_POSTFIX -> $TRAEFIK_IP"
-      echo "    - assets.$DNS_POSTFIX -> $TRAEFIK_IP"
     fi
   fi
 
