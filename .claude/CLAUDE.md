@@ -466,22 +466,42 @@ The integration uses JWT-based authentication instead of long-lived tokens:
    - **Background**: `/static/dist/assets/images/flow_background.jpg`
    - **Favicon**: `/static/dist/assets/images/icon_left_brand.svg` (or upload separately)
 
-### Tailscale Subnet Router
-Enables remote access to the lab network via Tailscale VPN.
+### Tailscale Subnet Router (HA)
+Enables remote access to the lab network via Tailscale VPN with high availability.
 
 - **Docker Image**: `tailscale/tailscale:latest`
-- **Storage**: `/srv/gluster/nomad-data/tailscale` (persists auth state)
-- **Constraint**: Pinned to nomad01
+- **Job Type**: System (runs on ALL Nomad nodes for HA)
+- **Storage**: `/srv/gluster/nomad-data/tailscale/${node.unique.name}` (per-node state)
+- **Auth**: Reusable auth key stored in Vault at `secret/tailscale`
 - **Network**: Host mode with privileged access
 
+**Auth Key Requirements:**
+- Generate at https://login.tailscale.com/admin/settings/keys
+- Reusable: YES (multiple nodes use same key)
+- Pre-authorized: YES (optional, skips manual approval)
+- Expiry: 90 days (rotate before expiry)
+
 **Deployment** (setup.sh --dev → d9):
-1. Deploy the Nomad job (automatically enables IP forwarding and iptables rules)
-2. Authenticate: `docker exec -it $(docker ps -q --filter ancestor=tailscale/tailscale:latest) tailscale up --accept-routes --advertise-routes=SUBNET --accept-dns=false`
-3. Approve subnet route in Tailscale Admin Console → Machines → Edit route settings
-4. Configure split DNS in Tailscale Admin Console → DNS:
-   - Add nameserver: Pi-hole IP (e.g., `10.10.0.4` or DNS VIP)
-   - Restrict to search domain: `yourdomain.lab`
-5. On remote clients: `tailscale up --accept-routes`
+1. Prompts for auth key if not in Vault
+2. Stores key in Vault, creates policy/role
+3. Configures all Nomad nodes (IP forwarding, iptables)
+4. Deploys system job to all nodes
+5. Nodes auto-register with Tailscale
+
+**Post-deployment:**
+1. Approve subnet routes: Tailscale Admin → Machines → Edit route settings
+2. Configure split DNS: Tailscale Admin → DNS → Add nameserver (Pi-hole IP) → Restrict to `yourdomain.lab`
+3. Remote clients: `tailscale up --accept-routes`
+
+**Auth Key Rotation (every 90 days):**
+```bash
+# Option 1: Use rotation function
+source lib/deploy/nomadJob/deployTailscale.sh && rotateTailscaleKey
+
+# Option 2: Manual
+vault kv put secret/tailscale auth_key=tskey-auth-xxxxx
+nomad job restart tailscale
+```
 
 **Requirements for subnet routing:**
 - IP forwarding enabled (`net.ipv4.ip_forward=1`)
@@ -491,7 +511,8 @@ Enables remote access to the lab network via Tailscale VPN.
 **Troubleshooting:**
 - Can't ping internal IPs: Check `iptables -L FORWARD -n -v` and `iptables-legacy -L FORWARD -n -v`
 - DNS not resolving: Ensure split DNS is configured in Tailscale admin and client has `--accept-routes`
-- Auth issues: Check `/srv/gluster/nomad-data/tailscale` for state persistence
+- Auth issues: Check Vault `secret/tailscale` and container logs
+- Node not registering: Verify auth key hasn't expired, check `docker logs`
 
 ### Uptime Kuma Configuration
 - **Docker Image**: `louislam/uptime-kuma:1`
