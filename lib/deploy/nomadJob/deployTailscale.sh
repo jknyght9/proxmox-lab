@@ -80,17 +80,40 @@ EOF
   sshRunAdmin "$VM_USER" "$NOMAD_IP" "command -v iptables-legacy >/dev/null && (sudo iptables-legacy -C FORWARD -i tailscale0 -j ACCEPT 2>/dev/null || sudo iptables-legacy -I FORWARD 1 -i tailscale0 -j ACCEPT) || true"
   sshRunAdmin "$VM_USER" "$NOMAD_IP" "command -v iptables-legacy >/dev/null && (sudo iptables-legacy -C FORWARD -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables-legacy -I FORWARD 2 -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT) || true"
 
+  # Get DNS server IP for instructions
+  local DNS_IP=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local DNS_HA_VIP
+    DNS_HA_VIP=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE" | cut -d'/' -f1)
+    if [ -n "$DNS_HA_VIP" ] && [ "$DNS_HA_VIP" != "null" ]; then
+      DNS_IP="$DNS_HA_VIP"
+    fi
+  fi
+  if [ -z "$DNS_IP" ]; then
+    DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  fi
+
   echo
   warn "Tailscale container is running but needs authentication!"
   echo
-  info "To authenticate, run:"
+  info "Step 1: Authenticate Tailscale"
   echo "  ssh labadmin@$NOMAD_IP"
   echo "  docker exec -it \$(docker ps -q --filter ancestor=tailscale/tailscale:latest) tailscale up --accept-routes --advertise-routes=$TAILSCALE_SUBNET --accept-dns=false"
   echo
-  info "Then approve the subnet route in Tailscale Admin Console:"
+  info "Step 2: Approve subnet route in Tailscale Admin Console"
   echo "  https://login.tailscale.com/admin/machines"
   echo "  Find the machine → Edit route settings → Approve routes"
   echo
+  info "Step 3: Configure split DNS for internal domain resolution"
+  echo "  https://login.tailscale.com/admin/dns"
+  echo "  → Nameservers → Add nameserver → Custom"
+  echo "  → Enter: $DNS_IP"
+  echo "  → Check 'Restrict to search domain' → Enter: $DNS_POSTFIX"
+  echo "  → Save"
+  echo
+  info "Step 4: On remote Tailscale clients, accept routes"
+  echo "  tailscale up --accept-routes"
+  echo
 
-  success "Tailscale deployment complete (authentication required)!"
+  success "Tailscale deployment complete (follow steps above to finish setup)!"
 }
