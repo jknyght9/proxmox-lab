@@ -75,6 +75,7 @@ EOH
         args         = ["server"]
         volumes = [
           "/srv/gluster/nomad-data/authentik/data:/data",
+          "/srv/gluster/nomad-data/certs:/certs:ro",
         ]
       }
 
@@ -96,6 +97,9 @@ AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
 AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
 AUTHENTIK_MEDIA_ROOT=/data/media
+# Trust internal CA for HTTPS requests
+REQUESTS_CA_BUNDLE=/certs/root_ca.crt
+SSL_CERT_FILE=/certs/root_ca.crt
 EOH
         destination = "secrets/authentik.env"
         env         = true
@@ -144,6 +148,7 @@ EOH
         args         = ["worker"]
         volumes = [
           "/srv/gluster/nomad-data/authentik/data:/data",
+          "/srv/gluster/nomad-data/certs:/certs:ro",
         ]
       }
 
@@ -163,6 +168,9 @@ AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_MEDIA_ROOT=/data/media
+# Trust internal CA for HTTPS requests
+REQUESTS_CA_BUNDLE=/certs/root_ca.crt
+SSL_CERT_FILE=/certs/root_ca.crt
 EOH
         destination = "secrets/authentik.env"
         env         = true
