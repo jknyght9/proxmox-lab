@@ -58,8 +58,15 @@ EOF
   VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
   ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
+  # Test Vault connectivity first
+  if ! curl -sf "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
+    error "Cannot reach Vault at $VAULT_ADDR"
+    error "Check vault-credentials.json has the correct address"
+    return 1
+  fi
+
   local EXISTING_KEY
-  EXISTING_KEY=$(curl -sf -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/tailscale" 2>/dev/null | jq -r '.data.data.auth_key // empty')
+  EXISTING_KEY=$(curl -s -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/tailscale" 2>/dev/null | jq -r '.data.data.auth_key // empty' 2>/dev/null) || EXISTING_KEY=""
 
   if [ -z "$EXISTING_KEY" ]; then
     echo
