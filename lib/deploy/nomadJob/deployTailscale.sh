@@ -45,6 +45,10 @@ EOF
   doing "Preparing Tailscale state directory..."
   sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/tailscale && sudo chmod 755 /srv/gluster/nomad-data/tailscale"
 
+  # Enable IP forwarding for subnet routing
+  doing "Enabling IP forwarding..."
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null && echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-tailscale.conf > /dev/null"
+
   # Export for envsubst
   export TAILSCALE_SUBNET
 
@@ -67,6 +71,14 @@ EOF
 
   # Wait for container to start
   sleep 5
+
+  # Add iptables rules for subnet routing (both nft and legacy)
+  doing "Configuring iptables for subnet routing..."
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo iptables -C FORWARD -i tailscale0 -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i tailscale0 -j ACCEPT"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo iptables -C FORWARD -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 2 -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+  # Also add to iptables-legacy if present
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "command -v iptables-legacy >/dev/null && (sudo iptables-legacy -C FORWARD -i tailscale0 -j ACCEPT 2>/dev/null || sudo iptables-legacy -I FORWARD 1 -i tailscale0 -j ACCEPT) || true"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "command -v iptables-legacy >/dev/null && (sudo iptables-legacy -C FORWARD -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables-legacy -I FORWARD 2 -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT) || true"
 
   echo
   warn "Tailscale container is running but needs authentication!"
