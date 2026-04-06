@@ -73,7 +73,7 @@ EOF
   echo
   info "To authenticate, run:"
   echo "  ssh labadmin@$NOMAD_IP"
-  echo "  docker exec -it \$(docker ps -q --filter ancestor=tailscale/tailscale:latest) tailscale up --advertise-routes=$TAILSCALE_SUBNET --accept-routes"
+  echo "  docker exec -it \$(docker ps -q --filter ancestor=tailscale/tailscale:latest) tailscale up --accept-routes --advertise-routes=$TAILSCALE_SUBNET --accept-dns=false"
   echo
   info "Then approve the subnet route in Tailscale Admin Console:"
   echo "  https://login.tailscale.com/admin/machines"
