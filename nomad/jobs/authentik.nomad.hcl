@@ -77,9 +77,9 @@ EOH
           "/srv/gluster/nomad-data/authentik/data:/data",
           "/srv/gluster/nomad-data/certs:/certs:ro",
           # Custom branding files (mount directly into images directory)
+          # Ensure these files exist before deploying: /srv/gluster/nomad-data/authentik/branding/
           "/srv/gluster/nomad-data/authentik/branding/background.png:/web/dist/assets/images/flow_background.jpg:ro",
           "/srv/gluster/nomad-data/authentik/branding/logo.svg:/web/dist/assets/images/icon_left_brand.svg:ro",
-          "/srv/gluster/nomad-data/authentik/branding/favicon.ico:/web/dist/assets/images/favicon.ico:ro",
         ]
       }
 
