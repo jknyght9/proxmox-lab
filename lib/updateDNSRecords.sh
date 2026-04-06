@@ -132,6 +132,20 @@ function updateDNSRecords() {
     fi
   fi
 
+  # Add Kasm DNS record if deployed
+  local KASM_RECORDS_JSON="[]"
+  local KASM_IP=""
+  if [ -s hosts.json ]; then
+    KASM_IP=$(jq -r '.external[] | select(.hostname | startswith("kasm")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+    if [ -n "$KASM_IP" ] && [ "$KASM_IP" != "null" ]; then
+      KASM_RECORDS_JSON="$(jq -c -n --arg ip "$KASM_IP" --arg suffix "$DNS_POSTFIX" '[
+        "\($ip) kasm kasm.\($suffix)"
+      ]')"
+      echo "  Kasm Workspaces:"
+      echo "    - kasm.$DNS_POSTFIX -> $KASM_IP"
+    fi
+  fi
+
   # Add Samba AD DNS records if AD is configured
   local AD_RECORDS_JSON="[]"
   local AD_REALM_FROM_CONFIG=""
@@ -163,7 +177,8 @@ function updateDNSRecords() {
     --argjson d "$DNS_ALIAS_JSON" \
     --argjson e "$NOMAD_SERVICES_JSON" \
     --argjson f "$AD_RECORDS_JSON" \
-    '$a + $b + $c + $d + $e + $f | unique')"
+    --argjson g "$KASM_RECORDS_JSON" \
+    '$a + $b + $c + $d + $e + $f + $g | unique')"
 
   local RECORD_COUNT
   RECORD_COUNT=$(jq -r 'length' <<<"$ALL_DNS_RECORDS_JSON")
