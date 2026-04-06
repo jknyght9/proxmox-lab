@@ -66,10 +66,9 @@ EOH
 
         tags = [
           "traefik.enable=true",
+          # Serve over HTTP only (no TLS) to avoid CA trust issues for branding assets
           "traefik.http.routers.static-assets.rule=Host(`assets.${DNS_POSTFIX}`)",
-          "traefik.http.routers.static-assets.entrypoints=websecure",
-          "traefik.http.routers.static-assets.tls=true",
-          "traefik.http.routers.static-assets.tls.certresolver=step-ca",
+          "traefik.http.routers.static-assets.entrypoints=web",
           "traefik.http.services.static-assets.loadbalancer.server.port=8088",
         ]
 
