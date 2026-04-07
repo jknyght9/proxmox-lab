@@ -504,8 +504,9 @@ function updateADDNSRecords() {
   done
 
   # Get existing DNS records and merge
+  # Pi-hole LXC containers use root user and admin key
   local EXISTING_RECORDS
-  EXISTING_RECORDS=$(sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts" 2>/dev/null || echo "")
+  EXISTING_RECORDS=$(sshRunAdmin "root" "$DNS_IP" "pihole-FTL --config dns.hosts" 2>/dev/null || echo "")
 
   # Validate that EXISTING_RECORDS is valid JSON array, default to empty array if not
   if ! echo "$EXISTING_RECORDS" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -517,7 +518,7 @@ function updateADDNSRecords() {
   MERGED_RECORDS=$(echo "{\"existing\": $EXISTING_RECORDS, \"new\": $AD_DNS_RECORDS}" | jq '.existing + .new | unique')
 
   # Update Pi-hole
-  if sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$MERGED_RECORDS'"; then
+  if sshRunAdmin "root" "$DNS_IP" "pihole-FTL --config dns.hosts '$MERGED_RECORDS'"; then
     success "AD DNS records added to Pi-hole"
   else
     warn "Failed to update Pi-hole with AD records"
@@ -530,7 +531,7 @@ function updateADDNSRecords() {
   # Also need to disable dns.domain.local to allow forwarding queries for the local domain
   local FORWARD_CONFIG="server=/${AD_REALM_LOWER}/${NOMAD01_IP}"
 
-  if sshRun "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.domain.local false && pihole-FTL --config misc.dnsmasq_lines '[\"$FORWARD_CONFIG\"]' && systemctl restart pihole-FTL"; then
+  if sshRunAdmin "root" "$DNS_IP" "pihole-FTL --config dns.domain.local false && pihole-FTL --config misc.dnsmasq_lines '[\"$FORWARD_CONFIG\"]' && systemctl restart pihole-FTL"; then
     success "Conditional forwarding configured for $AD_REALM_LOWER"
   else
     warn "Failed to configure conditional forwarding"
