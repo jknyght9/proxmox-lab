@@ -135,36 +135,39 @@ EOF
   warn "Manual configuration required:"
   echo
   echo "  1. Log into Authentik at: https://auth.${DNS_POSTFIX}/"
-  echo "     (Complete initial setup if not done)"
   echo
-  echo "  2. Go to: Directory -> Federation & Social login"
+  echo "  2. Go to: Directory -> Federation & Social Logins"
   echo "     Click: Create -> LDAP Source"
   echo
-  echo "  3. Configure LDAP Source with these settings:"
+  echo "  3. Configure LDAP Source - Basic Settings:"
   echo
   echo "     Name: Active Directory"
-  echo "     Server URI: ldap://${NOMAD01_IP}:389"
-  echo "     Bind CN: cn=Administrator,cn=Users,${BASE_DN}"
-  echo "     Bind Password: (retrieve from Vault: vault kv get secret/samba-ad)"
+  echo "     Slug: active-directory"
+  echo "     Enabled: checked"
+  echo
+  echo "  4. Connection Settings:"
+  echo
+  echo "     Server URI: ldap://${NOMAD01_IP}"
+  echo "     Enable StartTLS: unchecked"
+  echo "     Bind CN: ${SYNC_DN}"
+  echo "     Bind Password: ${SYNC_PASSWORD}"
   echo "     Base DN: ${BASE_DN}"
   echo
-  echo "     Property Mappings (select all Active Directory mappings):"
-  echo "       - authentik Active Directory Mapping: sAMAccountName"
-  echo "       - authentik Active Directory Mapping: givenName"
-  echo "       - authentik Active Directory Mapping: sn"
-  echo "       - authentik Active Directory Mapping: mail"
+  echo "  5. LDAP Attribute Mapping:"
   echo
-  echo "     Additional Settings:"
-  echo "       - User Property Mappings: Select AD mappings"
-  echo "       - Group Property Mappings: Select AD mappings"
-  echo "       - Sync parent group: Create a group for imported AD users"
+  echo "     User Property Mappings: Select all 'LDAP - ...' mappings"
+  echo "     Group Property Mappings: Select 'authentik default LDAP Mapping: cn'"
   echo
-  echo "  4. Save and click 'Run sync' to test"
+  echo "  6. Additional Settings:"
   echo
-  echo "  5. Enable MFA for users:"
-  echo "     Go to: Flows & Stages -> Stages"
-  echo "     Create: authenticator_totp_setup stage"
-  echo "     Add to default-authentication-flow"
+  echo "     User object filter: (objectClass=user)"
+  echo "     Group object filter: (objectClass=group)"
+  echo "     User group membership field: memberOf"
+  echo "     Object uniqueness field: objectSid"
+  echo "     Sync users: checked"
+  echo "     Sync groups: checked"
+  echo
+  echo "  7. Click Save, then click the Sync button to pull users/groups"
   echo
 
   # Store LDAP config for reference
@@ -174,16 +177,19 @@ EOF
 # Authentik LDAP Source Configuration
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-Server URI: ldap://${NOMAD01_IP}:389
-Bind DN: cn=Administrator,cn=Users,${BASE_DN}
+# Connection Settings
+Server URI: ldap://${NOMAD01_IP}
+Bind DN: ${SYNC_DN}
+Bind Password: ${SYNC_PASSWORD}
 Base DN: ${BASE_DN}
-User Search Filter: (objectClass=user)
-Group Search Filter: (objectClass=group)
 
-# Retrieve bind password from Vault:
-#   vault kv get secret/samba-ad
-#   Or: curl -H "X-Vault-Token: <token>" ${VAULT_ADDR}/v1/secret/data/samba-ad
+# Filter Settings
+User object filter: (objectClass=user)
+Group object filter: (objectClass=group)
+User group membership field: memberOf
+Object uniqueness field: objectSid
 
+# AD Info
 AD Realm: ${AD_REALM}
 AD Domain: ${AD_DOMAIN}
 EOF
