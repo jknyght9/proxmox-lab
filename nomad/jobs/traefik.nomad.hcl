@@ -36,6 +36,7 @@ job "traefik" {
       config {
         image        = "traefik:v3.6"
         network_mode = "host"
+        dns_servers  = ["${DNS_SERVER}"]
         args = [
           "--log.level=DEBUG",
           "--api=true",

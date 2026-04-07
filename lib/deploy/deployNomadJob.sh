@@ -42,9 +42,20 @@ function deployNomadJob() {
     return 1
   fi
 
+  # Get DNS server IP (VIP if HA enabled, otherwise dns-01)
+  local DNS_SERVER
+  DNS_SERVER=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE" 2>/dev/null | cut -d'/' -f1)
+  if [ -z "$DNS_SERVER" ] || [ "$DNS_SERVER" = "null" ]; then
+    DNS_SERVER=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  fi
+  if [ -z "$DNS_SERVER" ] || [ "$DNS_SERVER" = "null" ]; then
+    DNS_SERVER="10.10.0.3"  # Fallback
+    warn "Could not determine DNS server, using fallback: $DNS_SERVER"
+  fi
+
   # Render template with environment variables
-  export DNS_POSTFIX
-  envsubst '${DNS_POSTFIX}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
+  export DNS_POSTFIX DNS_SERVER
+  envsubst '${DNS_POSTFIX} ${DNS_SERVER}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
 
   # Copy to Nomad node
   scpToAdmin "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"
