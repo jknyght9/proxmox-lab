@@ -111,18 +111,6 @@ EOF
     warn "dns-01 not found in hosts.json, using gateway as DNS forwarder: $DNS_FORWARDER"
   fi
 
-  # Samba AD Docker image - use custom image from cluster-info.json or default
-  local SAMBA_AD_IMAGE
-  SAMBA_AD_IMAGE=$(jq -r '.samba_ad_image // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
-  if [ -z "$SAMBA_AD_IMAGE" ] || [ "$SAMBA_AD_IMAGE" = "null" ]; then
-    # Default to the original image until custom image is configured
-    SAMBA_AD_IMAGE="nowsci/samba-domain:latest"
-    info "Using default Samba AD image: $SAMBA_AD_IMAGE"
-    info "To use custom image, set samba_ad_image in cluster-info.json"
-  else
-    info "Using custom Samba AD image: $SAMBA_AD_IMAGE"
-  fi
-
   # Create Vault policy for samba-dc
   doing "Creating Vault policy for Samba DC..."
   local SAMBA_POLICY
@@ -289,7 +277,7 @@ REMOTE_SCRIPT
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
 
   # Export variables for envsubst
-  export AD_REALM AD_DOMAIN DNS_FORWARDER AD_REALM_LOWER DNS_POSTFIX NOMAD01_IP NOMAD02_IP SAMBA_AD_IMAGE
+  export AD_REALM AD_DOMAIN DNS_FORWARDER AD_REALM_LOWER DNS_POSTFIX NOMAD01_IP NOMAD02_IP
 
   # Check if we're deploying single DC or dual DC setup
   local DEPLOY_REPLICA=false
@@ -313,7 +301,7 @@ REMOTE_SCRIPT
   generateSambaDCJob "false" > "/tmp/samba-dc-rendered.nomad.hcl"
 
   # Apply variable substitution
-  envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP} ${SAMBA_AD_IMAGE}' \
+  envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP}' \
     < "/tmp/samba-dc-rendered.nomad.hcl" \
     > "/tmp/samba-dc-final.nomad.hcl"
   mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
@@ -364,7 +352,7 @@ REMOTE_SCRIPT
     generateSambaDCJob "true" > "/tmp/samba-dc-rendered.nomad.hcl"
 
     # Apply variable substitution
-    envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP} ${SAMBA_AD_IMAGE}' \
+    envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP}' \
       < "/tmp/samba-dc-rendered.nomad.hcl" \
       > "/tmp/samba-dc-final.nomad.hcl"
     mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
@@ -710,7 +698,7 @@ job "samba-dc" {
       kill_timeout = "120s"
 
       config {
-        image        = "${SAMBA_AD_IMAGE}"
+        image        = "ghcr.io/jknyght9/samba-ad-dc:latest"
         network_mode = "host"
         privileged   = true
 
@@ -828,7 +816,7 @@ EOF_JOB_START
       kill_timeout = "120s"
 
       config {
-        image        = "${SAMBA_AD_IMAGE}"
+        image        = "ghcr.io/jknyght9/samba-ad-dc:latest"
         network_mode = "host"
         privileged   = true
 

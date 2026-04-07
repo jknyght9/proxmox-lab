@@ -1,7 +1,7 @@
 # NOTE: This is a REFERENCE TEMPLATE. The actual job file is generated dynamically
 # by lib/deploy/nomadJob/deploySambaAD.sh with variable substitution.
 #
-# Uses nowsci/samba-domain Docker image which supports both:
+# Uses ghcr.io/jknyght9/samba-ad-dc Docker image which supports both:
 # - JOIN=false: Provision new AD domain (DC01)
 # - JOIN=true: Join existing domain as replica (DC02)
 
@@ -54,7 +54,7 @@ job "samba-dc" {
       kill_timeout = "120s"
 
       config {
-        image        = "${SAMBA_AD_IMAGE}"
+        image        = "ghcr.io/jknyght9/samba-ad-dc:latest"
         network_mode = "host"
         privileged   = true
 
@@ -166,7 +166,7 @@ EOH
       kill_timeout = "120s"
 
       config {
-        image        = "${SAMBA_AD_IMAGE}"
+        image        = "ghcr.io/jknyght9/samba-ad-dc:latest"
         network_mode = "host"
         privileged   = true
 
