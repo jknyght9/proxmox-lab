@@ -160,7 +160,7 @@ EOF
   echo
   echo "  6. Additional Settings:"
   echo
-  echo "     User object filter: (objectClass=user)"
+  echo "     User object filter: (&(objectClass=user)(!(objectClass=computer)))"
   echo "     Group object filter: (objectClass=group)"
   echo "     User group membership field: memberOf"
   echo "     Object uniqueness field: objectSid"
@@ -184,7 +184,7 @@ Bind Password: ${SYNC_PASSWORD}
 Base DN: ${BASE_DN}
 
 # Filter Settings
-User object filter: (objectClass=user)
+User object filter: (&(objectClass=user)(!(objectClass=computer)))
 Group object filter: (objectClass=group)
 User group membership field: memberOf
 Object uniqueness field: objectSid
