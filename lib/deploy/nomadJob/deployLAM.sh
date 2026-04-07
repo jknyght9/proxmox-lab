@@ -63,9 +63,26 @@ EOF
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
   BASE_DN=$(echo "$AD_REALM_LOWER" | sed 's/\./,dc=/g' | sed 's/^/dc=/')
 
-  # Create storage directories
+  # Create storage directories and bootstrap default config
   doing "Creating LAM storage directories..."
   sshRunAdmin "$VM_USER" "$NOMAD01_IP" "sudo mkdir -p /srv/gluster/nomad-data/lam/{config,session} && sudo chmod -R 777 /srv/gluster/nomad-data/lam"
+
+  # Check if config already exists, if not bootstrap from container defaults
+  doing "Bootstrapping LAM default configuration..."
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" bash <<'BOOTSTRAP'
+    if [ ! -f /srv/gluster/nomad-data/lam/config/config.cfg ]; then
+      echo "Extracting default LAM config from container..."
+      docker pull ghcr.io/ldapaccountmanager/lam:stable
+      # Create temp container and copy defaults
+      docker create --name lam-temp ghcr.io/ldapaccountmanager/lam:stable
+      docker cp lam-temp:/etc/ldap-account-manager/. /srv/gluster/nomad-data/lam/config/
+      docker rm lam-temp
+      chmod -R 777 /srv/gluster/nomad-data/lam/config
+      echo "Default config extracted"
+    else
+      echo "LAM config already exists, skipping bootstrap"
+    fi
+BOOTSTRAP
 
   # Export variables for envsubst
   export DNS_POSTFIX DNS_SERVER AD_REALM_LOWER BASE_DN NOMAD01_IP
