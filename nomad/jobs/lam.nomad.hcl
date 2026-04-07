@@ -17,17 +17,19 @@ job "lam" {
     }
 
     network {
-      mode = "host"
-      port "http" { static = 8380 }
+      port "http" {
+        static = 8380
+        to     = 80
+      }
     }
 
     task "lam" {
       driver = "docker"
 
       config {
-        image        = "ghcr.io/ldapaccountmanager/lam:stable"
-        network_mode = "host"
-        dns_servers  = ["${DNS_SERVER}"]
+        image       = "ghcr.io/ldapaccountmanager/lam:stable"
+        dns_servers = ["${DNS_SERVER}"]
+        ports       = ["http"]
 
         volumes = [
           "/srv/gluster/nomad-data/lam/config:/etc/ldap-account-manager",
@@ -67,7 +69,7 @@ job "lam" {
           "traefik.http.routers.lam.tls=true",
           "traefik.http.routers.lam.tls.certresolver=step-ca",
           "traefik.http.routers.lam.middlewares=authentik@file",
-          "traefik.http.services.lam.loadbalancer.server.port=80",
+          "traefik.http.services.lam.loadbalancer.server.port=8380",
         ]
 
         check {
