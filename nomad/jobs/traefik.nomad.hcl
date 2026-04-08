@@ -22,15 +22,29 @@ job "traefik" {
     task "traefik" {
       driver = "docker"
 
+      # Pull the root CA directly from Vault PKI via Workload Identity.
+      # Vault is the single source of truth; no bind-mounted copies.
+      vault {
+        role = "traefik"
+      }
+
       volume_mount {
         volume      = "traefik-data"
         destination = "/data"
       }
 
+      template {
+        data = <<EOH
+{{ with secret "pki/cert/ca" }}{{ .Data.certificate }}{{ end }}
+EOH
+        destination = "local/root_ca.crt"
+        change_mode = "restart"
+      }
+
       env {
-        # Trust the internal CA for ACME requests
-        SSL_CERT_FILE = "/data/certs/root_ca.crt"
-        LEGO_CA_CERTIFICATES = "/data/certs/root_ca.crt"
+        # Trust the internal CA for ACME requests (rendered from Vault)
+        SSL_CERT_FILE        = "${NOMAD_TASK_DIR}/root_ca.crt"
+        LEGO_CA_CERTIFICATES = "${NOMAD_TASK_DIR}/root_ca.crt"
       }
 
       config {

@@ -54,22 +54,63 @@ EOF
     success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
   fi
 
-  # Copy CA certificate for ACME trust (from Vault PKI)
-  doing "Copying CA certificate for Traefik..."
+  # Register Vault policy + jwt-nomad role for Traefik so the job can
+  # render the root CA at runtime via a template stanza (Vault = single
+  # source of truth; no bind-mounted copies drifting on GlusterFS).
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local VAULT_ADDR ROOT_TOKEN
+    VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+    ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
-  # Vault runs on nomad01 - fetch root CA from Vault PKI
-  if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ]; then
-    # Fetch root CA from Vault PKI endpoint
-    if curl -sf "http://$NOMAD_IP:8200/v1/pki/ca/pem" -o /tmp/root_ca.crt 2>/dev/null; then
-      scpToAdmin "/tmp/root_ca.crt" "$VM_USER" "$NOMAD_IP" "/tmp/root_ca.crt"
-      sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/root_ca.crt /srv/gluster/nomad-data/certs/root_ca.crt && sudo chmod 644 /srv/gluster/nomad-data/certs/root_ca.crt"
-      success "CA certificate installed for Traefik (from Vault PKI)"
+    if [ -n "$VAULT_ADDR" ] && [ -n "$ROOT_TOKEN" ]; then
+      doing "Creating Vault policy for Traefik..."
+      local TRAEFIK_POLICY
+      TRAEFIK_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/traefik.hcl")
+      if ! curl -sf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/traefik" \
+        -H "X-Vault-Token: $ROOT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"policy\": $(echo "$TRAEFIK_POLICY" | jq -Rs .)}" > /dev/null; then
+        warn "Failed to create traefik policy"
+      else
+        success "Created traefik policy"
+      fi
+
+      doing "Creating Vault role 'traefik' for WIF..."
+      local TRAEFIK_ROLE
+      TRAEFIK_ROLE=$(cat <<'ROLE_JSON'
+{
+  "role_type": "jwt",
+  "bound_audiences": ["vault.io"],
+  "user_claim": "/nomad_job_id",
+  "user_claim_json_pointer": true,
+  "claim_mappings": {
+    "nomad_namespace": "nomad_namespace",
+    "nomad_job_id": "nomad_job_id",
+    "nomad_task": "nomad_task"
+  },
+  "token_type": "service",
+  "token_policies": ["traefik"],
+  "token_period": "1h",
+  "token_ttl": "1h",
+  "bound_claims": {
+    "nomad_job_id": "traefik"
+  }
+}
+ROLE_JSON
+)
+      if ! curl -sf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/traefik" \
+        -H "X-Vault-Token: $ROOT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$TRAEFIK_ROLE" > /dev/null; then
+        warn "Failed to create traefik Vault role"
+      else
+        success "Created Vault role 'traefik'"
+      fi
     else
-      warn "Could not fetch CA certificate from Vault at $NOMAD_IP:8200"
-      warn "Vault may not be running or PKI not initialized"
+      warn "Vault credentials incomplete - skipping Traefik Vault setup"
     fi
   else
-    warn "Nomad IP not found in hosts.json, skipping CA certificate"
+    warn "$VAULT_CREDENTIALS_FILE not found - Traefik will not be able to render CA from Vault"
   fi
 
   # Deploy Traefik using the generic Nomad job deployer
