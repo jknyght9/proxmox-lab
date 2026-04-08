@@ -14,7 +14,7 @@ function rollbackDeployment() {
         -target=module.nomad \
         -target=module.kasm \
         -auto-approve 2>/dev/null || true
-      warn "VMs destroyed. LXC infrastructure (DNS, step-ca) preserved."
+      warn "VMs destroyed. LXC infrastructure (DNS) preserved."
       ;;
     2)
       # Phase 2 failed: Clean up any partial Packer artifacts
@@ -22,7 +22,7 @@ function rollbackDeployment() {
       rm -rf packer/packer-outputs 2>/dev/null || true
       warn "Packer artifacts cleaned."
 
-      read -rp "$(question "Do you want to also destroy LXC containers (DNS, step-ca)? [y/N]: ")" DESTROY_LXC
+      read -rp "$(question "Do you want to also destroy LXC containers (DNS)? [y/N]: ")" DESTROY_LXC
       if [[ "$DESTROY_LXC" =~ ^[Yy]$ ]]; then
         rollbackDeployment 1
       else
@@ -35,11 +35,10 @@ function rollbackDeployment() {
       docker compose run --rm terraform destroy \
         -target=module.dns-main \
         -target=module.dns-labnet \
-        -target=module.step-ca \
         -auto-approve 2>/dev/null || true
 
-      # Also clean up any LXC VMIDs that might be orphaned (dns + step-ca)
-      for VMID in 902 909 910 911 912 920 921 922; do
+      # Also clean up any LXC VMIDs that might be orphaned (dns only - step-ca removed)
+      for VMID in 909 910 911 912 920 921 922; do
         ssh -i "$ENTERPRISE_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$REMOTE_USER@$PROXMOX_HOST" \
           "pct stop $VMID 2>/dev/null; pct destroy $VMID 2>/dev/null" 2>/dev/null || true
       done

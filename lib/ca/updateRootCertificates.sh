@@ -13,11 +13,12 @@ function updateRootCertificates() {
   fi
 
   if [ -s hosts.json ]; then
-    CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+    # Vault PKI is the CA - get nomad01 IP (where Vault runs)
+    VAULT_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
     DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
   fi
-  if [[ -z "$CA_IP" || "$CA_IP" == "null" ]]; then
-    read -rp "Enter CA IP address: " CA_IP
+  if [[ -z "$VAULT_IP" || "$VAULT_IP" == "null" ]]; then
+    read -rp "Enter Vault/Nomad01 IP address: " VAULT_IP
   fi
   if [[ -z "$DNS_IP" || "$DNS_IP" == "null" ]]; then
     read -rp "Enter primary DNS server IP (dns-01): " DNS_IP
@@ -35,8 +36,9 @@ function updateRootCertificates() {
     fi
   fi
 
-  local CA_URL="https://$CA_IP/roots.pem"
-  local ACME_DIR="https://ca.${DNS_POSTFIX}/acme/acme/directory"
+  # Vault PKI endpoints (HTTP for local access, HTTPS via Traefik for ACME)
+  local CA_URL="http://${VAULT_IP}:8200/v1/pki/ca/pem"
+  local ACME_DIR="https://vault.${DNS_POSTFIX}/v1/pki_int/acme/directory"
 
   doing "Reading node list from ${PROXMOX_HOST}:/etc/pve/.members"
   local MEMBERS_JSON
@@ -50,8 +52,8 @@ function updateRootCertificates() {
     error "No nodes found in /etc/pve/.members"; return 1
   fi
 
-  doing "Downloading Step CA root bundle: $CA_URL"
-  curl -fsS -k -o proxmox-lab-root-ca.crt "$CA_URL" || { echo "Failed to fetch $CA_URL"; return 1; }
+  doing "Downloading Vault PKI root certificate: $CA_URL"
+  curl -fsS -o proxmox-lab-root-ca.crt "$CA_URL" || { echo "Failed to fetch $CA_URL"; return 1; }
 
   doing "Installing root CA on all nodes and updating trust"
   for name in "${NODE_IPS[@]}"; do
@@ -69,13 +71,13 @@ function updateRootCertificates() {
   done
 
   # Verify DNS resolution works before proceeding with ACME
-  doing "Verifying DNS resolution for ca.${DNS_POSTFIX}..."
+  doing "Verifying DNS resolution for vault.${DNS_POSTFIX}..."
   local dns_ok=false
   for attempt in $(seq 1 10); do
     local resolved_ip
-    resolved_ip=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "dig +short ca.${DNS_POSTFIX} 2>/dev/null | head -1" || echo "")
+    resolved_ip=$(sshRun "$REMOTE_USER" "$PROXMOX_HOST" "dig +short vault.${DNS_POSTFIX} 2>/dev/null | head -1" || echo "")
     if [ -n "$resolved_ip" ]; then
-      success "ca.${DNS_POSTFIX} resolves to $resolved_ip"
+      success "vault.${DNS_POSTFIX} resolves to $resolved_ip"
       dns_ok=true
       break
     fi
@@ -84,9 +86,9 @@ function updateRootCertificates() {
   done
 
   if [ "$dns_ok" != "true" ]; then
-    warn "DNS resolution failed for ca.${DNS_POSTFIX}"
+    warn "DNS resolution failed for vault.${DNS_POSTFIX}"
     warn "Falling back to IP-based ACME directory (may fail cert verification)"
-    ACME_DIR="https://${CA_IP}/acme/acme/directory"
+    ACME_DIR="http://${VAULT_IP}:8200/v1/pki_int/acme/directory"
   fi
 
   doing "Registering ACME account 'default' against Step CA directory"

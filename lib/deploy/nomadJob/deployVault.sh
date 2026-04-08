@@ -292,5 +292,311 @@ EOF
     return 1
   fi
 
+  # Initialize PKI secrets engine for certificate management
+  if ! initVaultPKI; then
+    warn "Failed to initialize PKI - you can retry with menu option"
+  fi
+
+  return 0
+}
+
+# initVaultPKI - Initialize Vault PKI secrets engine as a Certificate Authority
+#
+# Sets up a two-tier PKI with:
+#   - pki/ - Root CA (10-year TTL)
+#   - pki_int/ - Intermediate CA (5-year TTL) with ACME enabled
+#
+# The Intermediate CA handles all certificate issuance via ACME,
+# replacing the step-ca LXC container.
+#
+# Arguments: None (reads from VAULT_CREDENTIALS_FILE)
+# Returns: 0 on success, 1 on failure
+function initVaultPKI() {
+  doing "Initializing Vault PKI secrets engine..."
+
+  # Check credentials file exists
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    error "Vault credentials file not found: $VAULT_CREDENTIALS_FILE"
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  if [ -z "$VAULT_ADDR" ] || [ -z "$ROOT_TOKEN" ]; then
+    error "Could not read Vault credentials"
+    return 1
+  fi
+
+  # Get DNS postfix for CA naming
+  local DNS_POSTFIX_LOCAL=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX_LOCAL=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  fi
+  if [ -z "$DNS_POSTFIX_LOCAL" ]; then
+    DNS_POSTFIX_LOCAL="${DNS_POSTFIX:-lab.local}"
+  fi
+
+  # Check if PKI engines are already mounted
+  local MOUNTS
+  MOUNTS=$(curl -sf -H "X-Vault-Token: $ROOT_TOKEN" "${VAULT_ADDR}/v1/sys/mounts" 2>/dev/null || echo "{}")
+
+  local PKI_EXISTS PKI_INT_EXISTS
+  PKI_EXISTS=$(echo "$MOUNTS" | jq -e '."pki/"' > /dev/null 2>&1 && echo "true" || echo "false")
+  PKI_INT_EXISTS=$(echo "$MOUNTS" | jq -e '."pki_int/"' > /dev/null 2>&1 && echo "true" || echo "false")
+
+  # Enable Root PKI secrets engine
+  if [ "$PKI_EXISTS" = "true" ]; then
+    info "Root PKI engine already mounted at pki/"
+  else
+    doing "Enabling Root PKI secrets engine at pki/..."
+    if ! curl -sf -X POST "${VAULT_ADDR}/v1/sys/mounts/pki" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"type": "pki", "description": "Root CA", "config": {"max_lease_ttl": "87600h"}}' > /dev/null; then
+      error "Failed to enable Root PKI secrets engine"
+      return 1
+    fi
+    success "Root PKI engine enabled"
+  fi
+
+  # Enable Intermediate PKI secrets engine
+  if [ "$PKI_INT_EXISTS" = "true" ]; then
+    info "Intermediate PKI engine already mounted at pki_int/"
+  else
+    doing "Enabling Intermediate PKI secrets engine at pki_int/..."
+    if ! curl -sf -X POST "${VAULT_ADDR}/v1/sys/mounts/pki_int" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"type": "pki", "description": "Intermediate CA", "config": {"max_lease_ttl": "43800h"}}' > /dev/null; then
+      error "Failed to enable Intermediate PKI secrets engine"
+      return 1
+    fi
+    success "Intermediate PKI engine enabled"
+  fi
+
+  # Check if Root CA already exists
+  local ROOT_CA_EXISTS
+  ROOT_CA_EXISTS=$(curl -sf "${VAULT_ADDR}/v1/pki/ca/pem" 2>/dev/null | head -1 | grep -q "BEGIN CERTIFICATE" && echo "true" || echo "false")
+
+  if [ "$ROOT_CA_EXISTS" = "true" ]; then
+    info "Root CA already exists, skipping generation"
+  else
+    # Generate Root CA
+    doing "Generating Root CA..."
+    local ROOT_CA_CONFIG
+    ROOT_CA_CONFIG=$(jq -n \
+      --arg cn "Proxmox Lab Root CA" \
+      --arg issuer "proxmox-lab-root" \
+      '{
+        common_name: $cn,
+        issuer_name: $issuer,
+        ttl: "87600h",
+        key_type: "ec",
+        key_bits: 256
+      }')
+
+    if ! curl -sf -X POST "${VAULT_ADDR}/v1/pki/root/generate/internal" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$ROOT_CA_CONFIG" > /dev/null; then
+      error "Failed to generate Root CA"
+      return 1
+    fi
+    success "Root CA generated"
+  fi
+
+  # Configure Root CA URLs
+  doing "Configuring Root CA URLs..."
+  local ROOT_URLS
+  ROOT_URLS=$(jq -n \
+    --arg vault_addr "$VAULT_ADDR" \
+    '{
+      issuing_certificates: [$vault_addr + "/v1/pki/ca"],
+      crl_distribution_points: [$vault_addr + "/v1/pki/crl"]
+    }')
+
+  curl -sf -X POST "${VAULT_ADDR}/v1/pki/config/urls" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$ROOT_URLS" > /dev/null || true
+
+  # Check if Intermediate CA already exists
+  local INT_CA_EXISTS
+  INT_CA_EXISTS=$(curl -sf "${VAULT_ADDR}/v1/pki_int/ca/pem" 2>/dev/null | head -1 | grep -q "BEGIN CERTIFICATE" && echo "true" || echo "false")
+
+  if [ "$INT_CA_EXISTS" = "true" ]; then
+    info "Intermediate CA already exists, skipping generation"
+  else
+    # Generate Intermediate CSR
+    doing "Generating Intermediate CA CSR..."
+    local INT_CSR_CONFIG
+    INT_CSR_CONFIG=$(jq -n \
+      --arg cn "Proxmox Lab Intermediate CA" \
+      --arg issuer "proxmox-lab-intermediate" \
+      '{
+        common_name: $cn,
+        issuer_name: $issuer,
+        key_type: "ec",
+        key_bits: 256
+      }')
+
+    local CSR_RESPONSE
+    CSR_RESPONSE=$(curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/intermediate/generate/internal" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$INT_CSR_CONFIG" 2>&1)
+
+    local INT_CSR
+    INT_CSR=$(echo "$CSR_RESPONSE" | jq -r '.data.csr // empty')
+
+    if [ -z "$INT_CSR" ]; then
+      error "Failed to generate Intermediate CSR"
+      echo "$CSR_RESPONSE"
+      return 1
+    fi
+
+    # Sign Intermediate with Root CA
+    doing "Signing Intermediate CA with Root CA..."
+    local SIGN_CONFIG
+    SIGN_CONFIG=$(jq -n \
+      --arg csr "$INT_CSR" \
+      --arg cn "Proxmox Lab Intermediate CA" \
+      '{
+        csr: $csr,
+        common_name: $cn,
+        format: "pem_bundle",
+        ttl: "43800h"
+      }')
+
+    local SIGN_RESPONSE
+    SIGN_RESPONSE=$(curl -sf -X POST "${VAULT_ADDR}/v1/pki/root/sign-intermediate" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$SIGN_CONFIG" 2>&1)
+
+    local INT_CERT
+    INT_CERT=$(echo "$SIGN_RESPONSE" | jq -r '.data.certificate // empty')
+
+    if [ -z "$INT_CERT" ]; then
+      error "Failed to sign Intermediate CA"
+      echo "$SIGN_RESPONSE"
+      return 1
+    fi
+
+    # Import signed Intermediate certificate
+    doing "Importing signed Intermediate CA..."
+    local IMPORT_CONFIG
+    IMPORT_CONFIG=$(jq -n --arg cert "$INT_CERT" '{certificate: $cert}')
+
+    if ! curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/intermediate/set-signed" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$IMPORT_CONFIG" > /dev/null; then
+      error "Failed to import signed Intermediate CA"
+      return 1
+    fi
+    success "Intermediate CA signed and imported"
+  fi
+
+  # Configure Intermediate CA URLs
+  doing "Configuring Intermediate CA URLs..."
+  local INT_URLS
+  INT_URLS=$(jq -n \
+    --arg vault_addr "$VAULT_ADDR" \
+    '{
+      issuing_certificates: [$vault_addr + "/v1/pki_int/ca"],
+      crl_distribution_points: [$vault_addr + "/v1/pki_int/crl"]
+    }')
+
+  curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/config/urls" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$INT_URLS" > /dev/null || true
+
+  # Create ACME role for certificate issuance
+  doing "Creating ACME certificate role..."
+  local ACME_ROLE
+  ACME_ROLE=$(jq -n \
+    --arg domain "$DNS_POSTFIX_LOCAL" \
+    '{
+      allow_any_name: true,
+      allow_ip_sans: true,
+      allow_localhost: true,
+      allow_bare_domains: true,
+      allow_subdomains: true,
+      allow_wildcard_certificates: true,
+      enforce_hostnames: false,
+      server_flag: true,
+      client_flag: true,
+      key_type: "ec",
+      key_bits: 256,
+      ttl: "2160h",
+      max_ttl: "8760h"
+    }')
+
+  if ! curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/roles/acme-certs" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$ACME_ROLE" > /dev/null; then
+    error "Failed to create ACME role"
+    return 1
+  fi
+  success "Created ACME certificate role 'acme-certs'"
+
+  # Configure cluster path for ACME (required for external access)
+  doing "Configuring cluster path for ACME..."
+  local CLUSTER_CONFIG
+  CLUSTER_CONFIG=$(jq -n \
+    --arg dns "$DNS_POSTFIX_LOCAL" \
+    '{
+      path: ("https://vault." + $dns + "/v1/pki_int")
+    }')
+
+  curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/config/cluster" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$CLUSTER_CONFIG" > /dev/null || true
+
+  # Enable ACME on Intermediate CA
+  doing "Enabling ACME on Intermediate CA..."
+  local ACME_CONFIG
+  ACME_CONFIG=$(jq -n '{
+    enabled: true,
+    default_directory_policy: "sign-verbatim",
+    allowed_roles: ["acme-certs"],
+    allow_role_ext_key_usage: true
+  }')
+
+  if ! curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/config/acme" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$ACME_CONFIG" > /dev/null; then
+    error "Failed to enable ACME"
+    return 1
+  fi
+  success "ACME enabled on Intermediate CA"
+
+  # Verify ACME directory is accessible
+  doing "Verifying ACME directory..."
+  sleep 2
+  local ACME_DIR
+  ACME_DIR=$(curl -sf "${VAULT_ADDR}/v1/pki_int/acme/directory" 2>/dev/null || echo "")
+
+  if echo "$ACME_DIR" | jq -e '.newAccount' > /dev/null 2>&1; then
+    success "ACME directory accessible at ${VAULT_ADDR}/v1/pki_int/acme/directory"
+  else
+    warn "ACME directory not yet accessible - may need Traefik for HTTPS access"
+  fi
+
+  success "Vault PKI initialization complete!"
+
+  echo
+  info "Root CA: ${VAULT_ADDR}/v1/pki/ca/pem"
+  info "Intermediate CA: ${VAULT_ADDR}/v1/pki_int/ca/pem"
+  info "ACME Directory: https://vault.${DNS_POSTFIX_LOCAL}/v1/pki_int/acme/directory"
+  echo
+
   return 0
 }

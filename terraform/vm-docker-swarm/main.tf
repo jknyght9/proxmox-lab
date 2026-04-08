@@ -6,7 +6,7 @@ resource "local_file" "docker_user_data" {
   for_each = var.vm_configs
   filename = "${path.module}/rendered/${each.value.name}-user-data.yml"
   content  = templatefile("${path.module}/cloudinit/docker-user-data.tmpl", {
-    acme_dir            = "https://ca.${var.dns_postfix}/acme/acme/directory"
+    acme_dir            = "https://vault.${var.dns_postfix}/v1/pki_int/acme/directory"
     dns_postfix         = "${var.dns_postfix}"
     hostname            = each.value.name
     sans                = "${each.value.name}.${var.dns_postfix} kasm.${var.dns_postfix} kasm",

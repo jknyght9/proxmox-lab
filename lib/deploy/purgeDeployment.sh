@@ -74,15 +74,16 @@ EOF
   done
   success "ACME certificates removed"
 
-  # Step 4: Remove step-ca root cert from trust store
-  doing "Step 4/10: Removing step-ca root certificate from trust store..."
+  # Step 4: Remove root CA cert from trust store
+  doing "Step 4/10: Removing root certificate from trust store..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Removing CA cert on $node..."
-    sshRun "$REMOTE_USER" "$ip" "rm -f /usr/local/share/ca-certificates/step-ca-root.crt 2>/dev/null; update-ca-certificates 2>/dev/null" || true
+    # Remove both old step-ca and new proxmox-lab CA certs
+    sshRun "$REMOTE_USER" "$ip" "rm -f /usr/local/share/ca-certificates/step-ca-root.crt /usr/local/share/ca-certificates/proxmox-lab*.crt 2>/dev/null; update-ca-certificates 2>/dev/null" || true
   done
-  success "Step-CA root certificate removed"
+  success "Root certificate removed"
 
   # Step 5: Reset node DNS configuration to original values
   doing "Step 5/10: Resetting DNS configuration..."

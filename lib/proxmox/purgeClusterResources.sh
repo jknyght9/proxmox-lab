@@ -32,9 +32,9 @@ function purgeClusterResources() {
   fi
 
   # Define project VMID ranges
-  # LXC containers
+  # LXC containers (902 was step-ca, now retired - CA is in Vault PKI)
   local LXC_VMIDS=(
-    902         # step-ca
+    902         # legacy step-ca (kept for cleanup of old deployments)
     909         # legacy (kept for cleanup of old deployments)
     910 911 912 # dns-main (dns-01, dns-02, dns-03)
     920 921 922 # dns-labnet (labnet-dns-01, labnet-dns-02, labnet-dns-03)

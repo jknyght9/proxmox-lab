@@ -54,11 +54,11 @@ job "traefik" {
           "--providers.nomad.allowEmptyServices=true",
           "--providers.file.directory=/data/traefik/config",
           "--providers.file.watch=true",
-          "--certificatesresolvers.step-ca.acme.email=admin@${DNS_POSTFIX}",
-          "--certificatesresolvers.step-ca.acme.storage=/data/traefik/acme.json",
-          "--certificatesresolvers.step-ca.acme.caserver=https://ca.${DNS_POSTFIX}/acme/acme/directory",
-          "--certificatesresolvers.step-ca.acme.httpchallenge=true",
-          "--certificatesresolvers.step-ca.acme.httpchallenge.entrypoint=web",
+          "--certificatesresolvers.vault-pki.acme.email=admin@${DNS_POSTFIX}",
+          "--certificatesresolvers.vault-pki.acme.storage=/data/traefik/acme.json",
+          "--certificatesresolvers.vault-pki.acme.caserver=https://vault.${DNS_POSTFIX}/v1/pki_int/acme/directory",
+          "--certificatesresolvers.vault-pki.acme.httpchallenge=true",
+          "--certificatesresolvers.vault-pki.acme.httpchallenge.entrypoint=web",
         ]
       }
 

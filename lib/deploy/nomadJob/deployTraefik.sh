@@ -54,22 +54,22 @@ EOF
     success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
   fi
 
-  # Copy CA certificate for ACME trust
+  # Copy CA certificate for ACME trust (from Vault PKI)
   doing "Copying CA certificate for Traefik..."
-  local CA_IP
-  CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
 
-  if [ -n "$CA_IP" ] && [ "$CA_IP" != "null" ]; then
-    # Fetch root CA and copy to GlusterFS
-    if curl -sk "https://$CA_IP/roots.pem" -o /tmp/root_ca.crt 2>/dev/null; then
+  # Vault runs on nomad01 - fetch root CA from Vault PKI
+  if [ -n "$NOMAD_IP" ] && [ "$NOMAD_IP" != "null" ]; then
+    # Fetch root CA from Vault PKI endpoint
+    if curl -sf "http://$NOMAD_IP:8200/v1/pki/ca/pem" -o /tmp/root_ca.crt 2>/dev/null; then
       scpToAdmin "/tmp/root_ca.crt" "$VM_USER" "$NOMAD_IP" "/tmp/root_ca.crt"
       sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/root_ca.crt /srv/gluster/nomad-data/certs/root_ca.crt && sudo chmod 644 /srv/gluster/nomad-data/certs/root_ca.crt"
-      success "CA certificate installed for Traefik"
+      success "CA certificate installed for Traefik (from Vault PKI)"
     else
-      warn "Could not fetch CA certificate from $CA_IP"
+      warn "Could not fetch CA certificate from Vault at $NOMAD_IP:8200"
+      warn "Vault may not be running or PKI not initialized"
     fi
   else
-    warn "step-ca not found in hosts.json, skipping CA certificate"
+    warn "Nomad IP not found in hosts.json, skipping CA certificate"
   fi
 
   # Deploy Traefik using the generic Nomad job deployer

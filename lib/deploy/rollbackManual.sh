@@ -6,7 +6,7 @@ function rollbackManual() {
 #############################################################################
 Rollback Service Deployment (Terraform)
 
-  1) Rollback LXC containers (DNS, CA)
+  1) Rollback LXC containers (DNS)
   2) Rollback VMs (Nomad, Kasm)
   0) Back to main menu
 #############################################################################
@@ -24,7 +24,8 @@ EOF
       warn "This will DESTROY the following LXC containers:"
       echo "  - DNS cluster (dns-01, dns-02, dns-03)"
       echo "  - Labnet DNS cluster (labnet-dns-01, labnet-dns-02)"
-      echo "  - Step-CA (Certificate Authority)"
+      echo
+      echo "Note: CA is now provided by Vault PKI (in Nomad VMs)"
       echo
       read -rp "$(question "Are you sure you want to proceed? [y/N]: ")" CONFIRM
       if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
@@ -32,11 +33,10 @@ EOF
         return 0
       fi
 
-      doing "Destroying LXC containers (DNS, step-ca)..."
+      doing "Destroying LXC containers (DNS)..."
       docker compose run --rm terraform destroy \
         -target=module.dns-main \
         -target=module.dns-labnet \
-        -target=module.step-ca \
         -auto-approve 2>/dev/null || true
       success "LXC containers destroyed"
       ;;

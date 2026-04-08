@@ -23,15 +23,7 @@ function generateHostsJsonFromModules() {
        {hostname: .values.hostname, ip: .values.network[0].ip}
       ] // []' 2>/dev/null) || DNS_HOSTS="[]"
 
-    # Extract step-ca hosts from state
-    local STEP_CA_HOSTS
-    STEP_CA_HOSTS=$(echo "$TF_STATE" | jq -c '
-      [.values.root_module.child_modules[]? |
-       select(.address | startswith("module.step-ca")) |
-       .resources[]? |
-       select(.type == "proxmox_lxc") |
-       {hostname: .values.hostname, ip: .values.network[0].ip}
-      ] // []' 2>/dev/null) || STEP_CA_HOSTS="[]"
+    # Note: step-ca has been replaced by Vault PKI - no LXC container to track
 
     # Extract dns-labnet hosts from state (internal)
     local LABNET_HOSTS
@@ -43,8 +35,8 @@ function generateHostsJsonFromModules() {
        {hostname: .values.hostname, ip: .values.network[0].ip}
       ] // []' 2>/dev/null) || LABNET_HOSTS="[]"
 
-    # Combine external hosts
-    EXTERNAL_HOSTS=$(jq -c -n --argjson dns "$DNS_HOSTS" --argjson ca "$STEP_CA_HOSTS" '$dns + $ca')
+    # Combine external hosts (step-ca removed - CA is now Vault PKI)
+    EXTERNAL_HOSTS="$DNS_HOSTS"
     INTERNAL_HOSTS="$LABNET_HOSTS"
   fi
 
@@ -302,11 +294,9 @@ function updateTerraformFromClusterInfo() {
   fi
   info "  labnet_bootstrap_dns = \"$DNS_START\""
 
-  # Update step-ca_eth0_ipv4_cidr (service start IP with /24)
+  # Note: step-ca_eth0_ipv4_cidr is deprecated - CA is now provided by Vault PKI
   local EXT_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
   local CIDR_MASK=$(echo "$EXT_CIDR_VAL" | grep -oE '/[0-9]+$')
-  sed_inplace "s|^step-ca_eth0_ipv4_cidr[[:space:]]*=.*|step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\"|" "$TFVARS_FILE"
-  info "  step-ca_eth0_ipv4_cidr = \"${SVC_START}${CIDR_MASK}\""
 
   # Update DNS HA VIP settings if configured
   local HA_VIP=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE")

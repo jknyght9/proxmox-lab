@@ -118,7 +118,8 @@ function updateDNSRecords() {
         "\($ip) traefik traefik.\($suffix)",
         "\($ip) status status.\($suffix)",
         "\($ip) nomad nomad.\($suffix)",
-        "\($ip) pihole pihole.\($suffix)"
+        "\($ip) pihole pihole.\($suffix)",
+        "\($ip) ca ca.\($suffix)"
       ]')"
       echo "  Nomad services (via Traefik @ $TRAEFIK_IP):"
       echo "    - vault.$DNS_POSTFIX -> $TRAEFIK_IP"
@@ -127,6 +128,7 @@ function updateDNSRecords() {
       echo "    - status.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - nomad.$DNS_POSTFIX -> $TRAEFIK_IP"
       echo "    - pihole.$DNS_POSTFIX -> $TRAEFIK_IP"
+      echo "    - ca.$DNS_POSTFIX -> $TRAEFIK_IP (Vault PKI ACME)"
     fi
   fi
 
@@ -185,7 +187,8 @@ function updateDNSRecords() {
   info "Summary: $RECORD_COUNT A-records to add"
 
   doing "Updating Pi-hole @ $DNS_IP..."
-  sshRunAdmin "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' && pihole-FTL --config dns.cnameRecords '[\"ca.$DNS_POSTFIX,step-ca.$DNS_POSTFIX\"]'" \
+  # Note: ca.<domain> now points directly to Traefik/Vault, no CNAME needed
+  sshRunAdmin "$REMOTE_USER" "$DNS_IP" "pihole-FTL --config dns.hosts '$ALL_DNS_RECORDS_JSON' && pihole-FTL --config dns.cnameRecords '[]'" \
     && success "Pi-hole DNS records updated" || error "Failed to update Pi-hole"
 
   # Trigger Nebula-Sync to propagate changes
