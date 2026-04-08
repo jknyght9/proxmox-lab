@@ -28,6 +28,7 @@ source "$SCRIPT_DIR/lib/deploy/nomadJob/deployUptimeKuma.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployVault.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/unsealVault.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployTailscale.sh"
+source "$SCRIPT_DIR/lib/deploy/nomadJob/deployLAM.sh"
 source "$SCRIPT_DIR/lib/deploy/configureVaultWIF.sh"
 source "$SCRIPT_DIR/lib/deploy/configureNomadVaultIntegration.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployKasm.sh"
@@ -302,6 +303,7 @@ function showMenu() {
     echo " b1) Deploy Samba AD Domain Controllers (on Nomad)"
     echo " b2) Configure Authentik AD Sync"
     echo " b3) Configure automated backups (on Nomad)"
+    echo " b4) Deploy LDAP Account Manager (on Nomad)"
     echo
     echo "------------------------------------------"
     echo "  Developer Tools"
@@ -347,6 +349,7 @@ while true; do
     b1|B1) if [ "$DEV_MODE" = true ]; then deploySambaADOnly; else error "Invalid option: $choice"; fi;;
     b2|B2) if [ "$DEV_MODE" = true ]; then configureAuthentikADSyncOnly; else error "Invalid option: $choice"; fi;;
     b3|B3) if [ "$DEV_MODE" = true ]; then deployBackupOnly; else error "Invalid option: $choice"; fi;;
+    b4|B4) if [ "$DEV_MODE" = true ]; then deployLAMOnly; else error "Invalid option: $choice"; fi;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;
