@@ -221,6 +221,27 @@ REMOTE_SCRIPT
   success "Vault deployment complete!"
 }
 
+# deployVaultWithCA - Deploy Vault and initialize PKI/ACME for internal CA
+#
+# Beta migration path: wraps deployVaultOnly and then runs initVaultPKI
+# unconditionally. Safe to run against an already-initialized Vault because
+# initVaultPKI checks for existing mounts/CAs before creating them.
+#
+# Requires crypto/vault-credentials.json to exist (written during first
+# Vault init). If it doesn't, run option 6 first.
+function deployVaultWithCA() {
+  deployVaultOnly || return 1
+
+  echo
+  info "Running PKI/ACME initialization (idempotent)..."
+  if ! initVaultPKI; then
+    error "Vault PKI initialization failed"
+    return 1
+  fi
+
+  success "Vault + PKI/ACME deployment complete!"
+}
+
 # Check if Vault is deployed as a Nomad job
 function isVaultDeployed() {
   local nomad_ip
