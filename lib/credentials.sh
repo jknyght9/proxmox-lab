@@ -43,7 +43,6 @@ function generateServicePasswords() {
 
   local PIHOLE_ADMIN=$(generatePassword 20)
   local PIHOLE_ROOT=$(generatePassword 20)
-  local STEPCA_ROOT=$(generatePassword 20)
   local KASM_ADMIN=$(generatePassword 20)
   local AUTHENTIK_ADMIN=$(generatePassword 24)
   local PACKER_ROOT=$(generatePassword 16)
@@ -53,7 +52,6 @@ function generateServicePasswords() {
   jq -n \
     --arg pihole_admin "$PIHOLE_ADMIN" \
     --arg pihole_root "$PIHOLE_ROOT" \
-    --arg stepca_root "$STEPCA_ROOT" \
     --arg kasm_admin "$KASM_ADMIN" \
     --arg authentik_admin "$AUTHENTIK_ADMIN" \
     --arg packer_root "$PACKER_ROOT" \
@@ -62,7 +60,6 @@ function generateServicePasswords() {
     '{
       pihole_admin_password: $pihole_admin,
       pihole_root_password: $pihole_root,
-      "step-ca_root_password": $stepca_root,
       kasm_admin_password: $kasm_admin,
       authentik_admin_password: $authentik_admin,
       packer_root_password: $packer_root,
@@ -79,7 +76,7 @@ function generateServicePasswords() {
 # Must call generateServicePasswords first if passwords don't exist.
 #
 # Globals read: CRYPTO_DIR
-# Globals modified: PIHOLE_ADMIN_PASSWORD, PIHOLE_ROOT_PASSWORD, STEPCA_ROOT_PASSWORD,
+# Globals modified: PIHOLE_ADMIN_PASSWORD, PIHOLE_ROOT_PASSWORD,
 #                   KASM_ADMIN_PASSWORD, PACKER_ROOT_PASSWORD, PACKER_SSH_PASSWORD
 # Arguments: None
 # Returns: 0 on success, 1 if passwords file not found
@@ -94,14 +91,13 @@ function loadServicePasswords() {
 
   PIHOLE_ADMIN_PASSWORD=$(jq -r '.pihole_admin_password' "$PASSWORDS_FILE")
   PIHOLE_ROOT_PASSWORD=$(jq -r '.pihole_root_password' "$PASSWORDS_FILE")
-  STEPCA_ROOT_PASSWORD=$(jq -r '.["step-ca_root_password"]' "$PASSWORDS_FILE")
   KASM_ADMIN_PASSWORD=$(jq -r '.kasm_admin_password' "$PASSWORDS_FILE")
   AUTHENTIK_ADMIN_PASSWORD=$(jq -r '.authentik_admin_password // ""' "$PASSWORDS_FILE")
   PACKER_ROOT_PASSWORD=$(jq -r '.packer_root_password' "$PASSWORDS_FILE")
   PACKER_SSH_PASSWORD=$(jq -r '.packer_ssh_password' "$PASSWORDS_FILE")
   TEMPLATE_PASSWORD=$(jq -r '.template_password // ""' "$PASSWORDS_FILE")
 
-  export PIHOLE_ADMIN_PASSWORD PIHOLE_ROOT_PASSWORD STEPCA_ROOT_PASSWORD
+  export PIHOLE_ADMIN_PASSWORD PIHOLE_ROOT_PASSWORD
   export KASM_ADMIN_PASSWORD AUTHENTIK_ADMIN_PASSWORD PACKER_ROOT_PASSWORD PACKER_SSH_PASSWORD TEMPLATE_PASSWORD
 }
 
@@ -111,4 +107,112 @@ function loadServicePasswords() {
 function hasServicePasswords() {
   local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
   [ -f "$PASSWORDS_FILE" ]
+}
+
+# Sync local secrets (service passwords + SSH keys) into Vault KV.
+# This makes Vault the single source of truth for all credentials.
+# Idempotent — overwrites existing entries with current local values.
+#
+# Writes:
+#   secret/services/pihole    - admin_password, root_password
+#   secret/services/kasm      - admin_password
+#   secret/services/packer    - root_password, ssh_password, template_password
+#   secret/services/ssh-keys  - labadmin (private), labadmin_pub (public),
+#                               enterprise (private), enterprise_pub (public)
+#
+# Globals read: CRYPTO_DIR, VAULT_CREDENTIALS_FILE
+# Arguments: None
+# Returns: 0 on success, 1 on failure
+function syncSecretsToVault() {
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    error "Vault credentials file not found — deploy Vault first"
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  if [ -z "$VAULT_ADDR" ] || [ -z "$ROOT_TOKEN" ]; then
+    error "Could not read Vault credentials"
+    return 1
+  fi
+
+  local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
+  if [ ! -f "$PASSWORDS_FILE" ]; then
+    error "Service passwords file not found at $PASSWORDS_FILE"
+    return 1
+  fi
+
+  doing "Syncing service passwords to Vault KV..."
+
+  # Pi-hole
+  local PIHOLE_PAYLOAD
+  PIHOLE_PAYLOAD=$(jq -n \
+    --arg admin "$(jq -r '.pihole_admin_password' "$PASSWORDS_FILE")" \
+    --arg root "$(jq -r '.pihole_root_password' "$PASSWORDS_FILE")" \
+    '{data: {admin_password: $admin, root_password: $root}}')
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/pihole" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$PIHOLE_PAYLOAD" > /dev/null; then
+    success "  secret/services/pihole"
+  else
+    warn "  Failed to write secret/services/pihole"
+  fi
+
+  # Kasm
+  local KASM_PAYLOAD
+  KASM_PAYLOAD=$(jq -n \
+    --arg admin "$(jq -r '.kasm_admin_password' "$PASSWORDS_FILE")" \
+    '{data: {admin_password: $admin}}')
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/kasm" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$KASM_PAYLOAD" > /dev/null; then
+    success "  secret/services/kasm"
+  else
+    warn "  Failed to write secret/services/kasm"
+  fi
+
+  # Packer
+  local PACKER_PAYLOAD
+  PACKER_PAYLOAD=$(jq -n \
+    --arg root "$(jq -r '.packer_root_password' "$PASSWORDS_FILE")" \
+    --arg ssh "$(jq -r '.packer_ssh_password' "$PASSWORDS_FILE")" \
+    --arg template "$(jq -r '.template_password' "$PASSWORDS_FILE")" \
+    '{data: {root_password: $root, ssh_password: $ssh, template_password: $template}}')
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/packer" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$PACKER_PAYLOAD" > /dev/null; then
+    success "  secret/services/packer"
+  else
+    warn "  Failed to write secret/services/packer"
+  fi
+
+  # SSH keys — store both key pairs for disaster recovery
+  doing "Syncing SSH keys to Vault KV..."
+
+  local SSH_PAYLOAD
+  SSH_PAYLOAD=$(jq -n \
+    --arg labadmin "$(cat "$CRYPTO_DIR/labadmin" 2>/dev/null || echo "")" \
+    --arg labadmin_pub "$(cat "$CRYPTO_DIR/labadmin.pub" 2>/dev/null || echo "")" \
+    --arg enterprise "$(cat "$CRYPTO_DIR/labenterpriseadmin" 2>/dev/null || echo "")" \
+    --arg enterprise_pub "$(cat "$CRYPTO_DIR/labenterpriseadmin.pub" 2>/dev/null || echo "")" \
+    '{data: {labadmin: $labadmin, labadmin_pub: $labadmin_pub, enterprise: $enterprise, enterprise_pub: $enterprise_pub}}')
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/ssh-keys" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$SSH_PAYLOAD" > /dev/null; then
+    success "  secret/services/ssh-keys"
+  else
+    warn "  Failed to write secret/services/ssh-keys"
+  fi
+
+  success "Secrets synced to Vault"
 }

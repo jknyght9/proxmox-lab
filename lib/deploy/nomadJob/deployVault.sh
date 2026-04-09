@@ -360,6 +360,10 @@ function deployVaultWithCA() {
     fi
   fi
 
+  # Sync local secrets (service passwords + SSH keys) into Vault KV
+  # so Vault becomes the single source of truth for all credentials.
+  syncSecretsToVault || warn "Failed to sync secrets to Vault — run manually later"
+
   success "Vault + PKI/ACME deployment complete!"
 }
 
