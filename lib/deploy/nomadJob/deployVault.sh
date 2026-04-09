@@ -331,6 +331,14 @@ function deployVaultWithCA() {
       fi
 
       success "Vault is now serving HTTPS with an internally-issued cert"
+
+      # Nomad's vault.hcl still points at http:// — reconfigure the
+      # integration so Nomad talks to Vault over HTTPS and trusts the cert.
+      doing "Reconfiguring Nomad-Vault integration for HTTPS..."
+      if ! configureNomadVaultIntegration; then
+        warn "Failed to reconfigure Nomad-Vault integration"
+        warn "Run setup.sh --dev and re-run the Nomad-Vault integration manually"
+      fi
     fi
   fi
 
