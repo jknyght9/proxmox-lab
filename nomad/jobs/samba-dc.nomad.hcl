@@ -76,7 +76,7 @@ DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD01_IP}
 DNSFORWARDER=${DNS_FORWARDER}
 JOIN=false
-INSECURELDAP=false
+INSECURELDAP=true
 NOCOMPLEXITY=true
 EOH
         destination = "secrets/samba.env"
@@ -189,7 +189,7 @@ DNSFORWARDER=${NOMAD01_IP}
 DCIP=${NOMAD01_IP}
 JOIN=true
 JOINSITE=Default-First-Site-Name
-INSECURELDAP=false
+INSECURELDAP=true
 NOCOMPLEXITY=true
 EOH
         destination = "secrets/samba.env"
