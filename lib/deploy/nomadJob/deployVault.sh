@@ -228,6 +228,21 @@ REMOTE_SCRIPT
     fi
   fi
 
+  # Keep the credentials file in sync with the actual protocol so that
+  # initVaultPKI and other callers use the right address.
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local STORED_ADDR
+    STORED_ADDR=$(jq -r '.vault_address // ""' "$VAULT_CREDENTIALS_FILE")
+    local EXPECTED_ADDR="${VAULT_PROTO}://${VAULT_IP}:8200"
+
+    if [ "$STORED_ADDR" != "$EXPECTED_ADDR" ]; then
+      doing "Updating vault_address in credentials file (${STORED_ADDR} → ${EXPECTED_ADDR})..."
+      local tmp; tmp=$(mktemp)
+      jq --arg addr "$EXPECTED_ADDR" '.vault_address = $addr' "$VAULT_CREDENTIALS_FILE" > "$tmp" && mv "$tmp" "$VAULT_CREDENTIALS_FILE"
+      chmod 600 "$VAULT_CREDENTIALS_FILE"
+    fi
+  fi
+
   # Update DNS records for vault
   updateDNSRecords
 
@@ -235,7 +250,7 @@ REMOTE_SCRIPT
 
   echo
   info "Vault is running at: https://vault.${DNS_POSTFIX}/ (via Traefik)"
-  info "Or directly at: http://${VAULT_IP}:8200/"
+  info "Or directly at: ${VAULT_PROTO}://${VAULT_IP}:8200/"
   info "Credentials: $VAULT_CREDENTIALS_FILE"
   echo
   warn "If Vault restarts, run 'Unseal Vault' (option 10) to unseal it."
