@@ -127,7 +127,10 @@ REMOTE_SCRIPT
   doing "Checking Vault initialization status..."
 
   local VAULT_STATUS
-  VAULT_STATUS=$(curl -skf --connect-timeout 5 --max-time 10 "${VAULT_PROTO}://$VAULT_IP:8200/v1/sys/health" 2>/dev/null || echo '{"initialized": false}')
+  # Use uninitcode/sealedcode=200 so curl -f doesn't error out on a
+  # sealed-but-already-initialized Vault (which is the normal state
+  # right after a container restart).
+  VAULT_STATUS=$(curl -skf --connect-timeout 5 --max-time 10 "${VAULT_PROTO}://$VAULT_IP:8200/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200" 2>/dev/null || echo '{"initialized": false}')
 
   local IS_INITIALIZED
   IS_INITIALIZED=$(echo "$VAULT_STATUS" | jq -r '.initialized // false')
