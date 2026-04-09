@@ -70,7 +70,10 @@ EOH
           "--providers.file.watch=true",
           "--certificatesresolvers.vault-pki.acme.email=admin@${DNS_POSTFIX}",
           "--certificatesresolvers.vault-pki.acme.storage=/data/traefik/acme.json",
-          "--certificatesresolvers.vault-pki.acme.caserver=https://vault.${DNS_POSTFIX}/v1/pki_int/acme/directory",
+          # ACME client talks to Vault directly on its HTTP API to avoid
+          # the Traefik -> Traefik bootstrap loop. URL is rendered at deploy
+          # time from hosts.json (nomad01 IP).
+          "--certificatesresolvers.vault-pki.acme.caserver=${VAULT_ACME_URL}",
           "--certificatesresolvers.vault-pki.acme.httpchallenge=true",
           "--certificatesresolvers.vault-pki.acme.httpchallenge.entrypoint=web",
         ]

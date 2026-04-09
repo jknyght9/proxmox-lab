@@ -566,13 +566,27 @@ function initVaultPKI() {
   fi
   success "Created ACME certificate role 'acme-certs'"
 
-  # Configure cluster path for ACME (required for external access)
-  doing "Configuring cluster path for ACME..."
+  # Configure cluster path for ACME.
+  #
+  # This MUST point at Vault's direct HTTP API, not at Traefik
+  # (https://vault.<domain>/...). Traefik consumes this PKI to obtain its
+  # own cert — if the ACME directory URL goes back through Traefik,
+  # Traefik can't bootstrap (chicken-and-egg: no cert yet, so the TLS
+  # handshake to itself fails). Using the direct HTTP API on nomad01:8200
+  # breaks the cycle. Vault is pinned to nomad01.
+  local NOMAD01_IP
+  NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  if [ -z "$NOMAD01_IP" ] || [ "$NOMAD01_IP" = "null" ]; then
+    # Fall back to whatever IP Vault reported during init
+    NOMAD01_IP=$(echo "$VAULT_ADDR" | sed -E 's#https?://([^:/]+).*#\1#')
+  fi
+
+  doing "Configuring cluster path for ACME (http://${NOMAD01_IP}:8200)..."
   local CLUSTER_CONFIG
   CLUSTER_CONFIG=$(jq -n \
-    --arg dns "$DNS_POSTFIX_LOCAL" \
+    --arg ip "$NOMAD01_IP" \
     '{
-      path: ("https://vault." + $dns + "/v1/pki_int")
+      path: ("http://" + $ip + ":8200/v1/pki_int")
     }')
 
   curl -sf -X POST "${VAULT_ADDR}/v1/pki_int/config/cluster" \
@@ -616,7 +630,7 @@ function initVaultPKI() {
   echo
   info "Root CA: ${VAULT_ADDR}/v1/pki/ca/pem"
   info "Intermediate CA: ${VAULT_ADDR}/v1/pki_int/ca/pem"
-  info "ACME Directory: https://vault.${DNS_POSTFIX_LOCAL}/v1/pki_int/acme/directory"
+  info "ACME Directory: http://${NOMAD01_IP}:8200/v1/pki_int/acme/directory (direct, bypasses Traefik)"
   echo
 
   return 0
