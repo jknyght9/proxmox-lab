@@ -342,6 +342,24 @@ function deployVaultWithCA() {
     fi
   fi
 
+  # Ensure Nomad-Vault integration matches the current Vault address.
+  # This catches the case where Vault is already on HTTPS (no second-
+  # phase redeploy needed) but Nomad nodes still have the old http://
+  # address in their vault.hcl.
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local CURRENT_VAULT_ADDR
+    CURRENT_VAULT_ADDR=$(jq -r '.vault_address // ""' "$VAULT_CREDENTIALS_FILE")
+    local NOMAD_IP_CHECK
+    NOMAD_IP_CHECK=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+    local NOMAD_VAULT_ADDR
+    NOMAD_VAULT_ADDR=$(sshRunAdmin "$VM_USER" "$NOMAD_IP_CHECK" "grep -oP 'address\s*=\s*\"\\K[^\"]+' /etc/nomad.d/vault.hcl 2>/dev/null" || echo "")
+
+    if [ -n "$CURRENT_VAULT_ADDR" ] && [ "$NOMAD_VAULT_ADDR" != "$CURRENT_VAULT_ADDR" ]; then
+      doing "Nomad vault.hcl address mismatch ($NOMAD_VAULT_ADDR → $CURRENT_VAULT_ADDR) — reconfiguring..."
+      configureNomadVaultIntegration || warn "Failed to reconfigure Nomad-Vault integration"
+    fi
+  fi
+
   success "Vault + PKI/ACME deployment complete!"
 }
 
