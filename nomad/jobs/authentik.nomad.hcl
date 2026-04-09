@@ -129,7 +129,6 @@ EOH
           "traefik.http.routers.authentik.rule=Host(`auth.${DNS_POSTFIX}`) || Host(`auth`)",
           "traefik.http.routers.authentik.entrypoints=websecure",
           "traefik.http.routers.authentik.tls=true",
-          "traefik.http.routers.authentik.tls.certresolver=step-ca",
           "traefik.http.services.authentik.loadbalancer.server.port=9000",
         ]
 

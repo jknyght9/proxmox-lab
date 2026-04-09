@@ -94,31 +94,11 @@ module "dns-labnet" {
   ha_vrrp_password  = var.labnet_dns_ha_vrrp_password
 }
 
-module "step-ca" {
-  depends_on = [module.dns-main]
-  providers = {
-    proxmox = proxmox
-  }
-  eth0_vmbr           = var.network_interface_bridge
-  eth0_ipv4_cidr      = var.step-ca_eth0_ipv4_cidr
-  eth0_gateway        = var.network_gateway_address
-  dns_primary_ipv4    = var.dns_primary_ipv4
-  dns_postfix         = var.dns_postfix
-  proxmox_target_node = var.proxmox_target_node
-  root_password       = var.step-ca_root_password
-  bootstrap_dns       = var.bootstrap_dns
-
-  # Optional second NIC for ACME validation to Proxmox management network
-  eth1_enabled        = var.step-ca_eth1_enabled
-  eth1_vmbr           = var.step-ca_eth1_vmbr
-  eth1_ipv4_cidr      = var.step-ca_eth1_ipv4_cidr
-
-  # SSH key configuration
-  ssh_admin_private_key_file = replace(var.ssh_admin_public_key_file, ".pub", "")
-  ssh_admin_public_key_file  = var.ssh_admin_public_key_file
-
-  source              = "./lxc-step-ca"
-}
+# NOTE: step-ca module has been replaced by Vault PKI secrets engine
+# Certificate Authority is now provided by Vault at:
+#   - Root CA: https://vault.<domain>/v1/pki/ca/pem
+#   - ACME: https://vault.<domain>/v1/pki_int/acme/directory
+# The step-ca module has been archived to ./archive/lxc-step-ca
 
 module "kasm" {
   dns_postfix                     = var.dns_postfix

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home lab on Proxmox VE (>=7.x). It uses **Packer** for golden image creation and **Terraform** for infrastructure provisioning. The stack includes HashiCorp Nomad for container orchestration, Pi-hole for DNS, and step-ca for internal PKI.
+Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home lab on Proxmox VE (>=7.x). It uses **Packer** for golden image creation and **Terraform** for infrastructure provisioning. The stack includes HashiCorp Nomad for container orchestration, Pi-hole for DNS, and Vault PKI for internal certificate authority.
 
 ## Common Commands
 
@@ -37,6 +37,7 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
 b1) Deploy Samba AD              - Nomad job for Active Directory DCs
 b2) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
 b3) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
+b4) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
 ```
 
 ### Developer Menu (--dev flag)
@@ -110,7 +111,7 @@ Modules called from `main.tf`:
 - **vm-nomad/** - 3-node HashiCorp Nomad cluster with GlusterFS (nomad01-03)
 - **vm-kasm/** - Kasm Workspaces remote desktop platform
 - **lxc-pihole/** - Pi-hole v6 DNS + Unbound (DNS-over-TLS) with Gravity Sync
-- **lxc-step-ca/** - Internal Certificate Authority with ACME
+- **lxc-step-ca/** - (Removed) Replaced by Vault PKI secrets engine
 - **vm-docker-swarm/** - (Legacy) 3-node Docker Swarm cluster
 - **archive/** - Archived/deprecated modules
 
@@ -167,7 +168,7 @@ Labnet SDN DNS cluster (max 2 nodes on internal network):
 .4  - dns-01
 .5  - dns-02
 .6  - dns-03
-.7  - step-ca
+.7  - (available, formerly step-ca)
 .8+ - Other services
 ```
 
@@ -312,7 +313,7 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 
 | Range | Purpose |
 |-------|---------|
-| 902 | step-ca (Certificate Authority) |
+| 902 | (Retired) step-ca LXC - replaced by Vault PKI |
 | 905-907 | Nomad cluster (nomad01-03) |
 | 910-912 | Main DNS cluster (dns-01, dns-02, dns-03) |
 | 920-922 | Labnet DNS cluster (labnet-dns-01, labnet-dns-02, labnet-dns-03) |
@@ -337,14 +338,15 @@ constraint {
 ```
 This ensures:
 - Consistent DNS (service DNS points to nomad01 or VIP)
-- ACME challenges work (Traefik handles all challenges)
+- TLS cert issuance is simple (wildcard cert at deploy time)
 - No cross-node routing complexity for stateful services
 
 ### Traefik Configuration
 - **Type**: `system` job (runs on all Nomad nodes for HA) or `service` (single instance if HA disabled)
 - **Nomad Provider**: Discovers services via `http://127.0.0.1:4646`
-- **ACME**: Uses HTTP challenge with step-ca (`--certificatesresolvers.step-ca.acme.httpchallenge=true`)
-- **CA Trust**: Root CA mounted at `/data/certs/root_ca.crt` via `SSL_CERT_FILE` and `LEGO_CA_CERTIFICATES` env vars
+- **TLS Certs**: Wildcard cert (`*.<domain>`) issued directly from Vault PKI at deploy time (no ACME — Vault 1.21.x has a nonce bug). Re-run option 5 to reissue (1-year TTL).
+- **Cert Location**: `/srv/gluster/nomad-data/traefik/tls/cert.pem` + `key.pem`, configured as default cert via `tls.yml` in the file provider
+- **No certResolver tags**: All Nomad jobs use `tls=true` only; the default wildcard cert handles everything
 - **Host Matching**: Routers accept both FQDN and short name: `Host(\`vault.jdclabs.lan\`) || Host(\`vault\`)`
 
 ### Traefik High Availability (keepalived VIP)
@@ -407,9 +409,12 @@ curl -v http://10.1.50.100/
 - **Privileged Mode**: Required for GlusterFS volume writes (`privileged = true`)
 - **Storage**: Direct Docker bind mount `/srv/gluster/nomad-data/vault:/data/vault`
 - **Disable mlock**: Set `disable_mlock = true` in config (IPC_LOCK capability not allowed in Nomad Docker driver)
+- **TLS Listener**: Vault serves HTTPS using a cert issued by its own PKI. Two-phase bootstrap: first deploy uses `tls_disable=true`, then `initVaultPKI` issues a listener cert and Vault redeploys with HCL2 variable `vault_tls_enabled=true`. Cert/key at `/srv/gluster/nomad-data/vault-tls/`.
+- **Vault PKI**: Two-tier setup — `pki/` (root CA, 10-year TTL) and `pki_int/` (intermediate CA, 5-year TTL), initialized by `initVaultPKI` in `deployVault.sh`. Replaces the old step-ca LXC.
 - **Health Check**: Use `?uninitcode=200&sealedcode=200` to accept uninitialized/sealed Vault as healthy
-- **Credentials**: Saved to `crypto/vault-credentials.json` (gitignored) during initialization
-- **Nomad Integration**: Uses Workload Identity Federation (WIF) - no tokens stored on Nomad nodes
+- **Credentials**: Saved to `crypto/vault-credentials.json` (gitignored) during initialization. `vault_address` is updated from http:// to https:// by `deployVaultOnly` when TLS is enabled.
+- **Nomad Integration**: Uses Workload Identity Federation (WIF) - no tokens stored on Nomad nodes. When Vault is HTTPS, `configureNomadVaultIntegration` pushes the root CA to all Nomad VMs' system trust stores.
+- **curl -k required**: All deploy script curl calls to Vault use `-k` since the workstation may not trust the internal root CA
 
 ### Vault Credentials File (`crypto/vault-credentials.json`)
 ```json
@@ -527,7 +532,7 @@ nomad job restart tailscale
 - Traefik: `http://nomad01:8081/ping`
 - Nomad: `http://nomad01:4646/v1/status/leader`
 - Pi-hole: `http://dns-01:80/admin/`
-- step-ca: `https://step-ca.<dns_postfix>/health`
+- Vault PKI: `https://vault.<dns_postfix>/v1/sys/health` (use -k for self-signed)
 
 ### Automated Backup Configuration
 - **Job Type**: Periodic batch job (`cron = "0 2 * * *"` default)
@@ -613,7 +618,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 
 ### Traefik Issues
 - **404 errors**: Check Traefik API for routers: `curl http://nomad01:8081/api/http/routers | jq .`
-- **ACME challenges failing**: Ensure DNS resolves to Traefik node, clear stale acme.json: `rm /srv/gluster/nomad-data/traefik/acme.json`
+- **TLS cert missing/expired**: Re-run option 5 to reissue wildcard cert from Vault PKI. Cert lives at `/srv/gluster/nomad-data/traefik/tls/`
 - **Service not discovered**: Verify service registered in Nomad: `nomad service list`
 
 ### Traefik HA Issues
@@ -642,8 +647,8 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 The complete purge (setup.sh option 11) removes all project resources:
 1. VMs, LXC containers, Packer templates
 2. Cloud-init snippets
-3. ACME certificates
-4. Step-CA root certificate from trust store
+3. Vault PKI root CA from Proxmox and Nomad VM trust stores
+4. Traefik TLS certificates
 5. DNS configuration (reset to network gateway)
 6. Hashicorp API user AND HashicorpBuild role
 7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules, policy-based routing)

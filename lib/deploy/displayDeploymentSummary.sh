@@ -36,24 +36,6 @@ function displayDeploymentSummary() {
     echo
   fi
 
-  # Step-CA (Certificate Authority)
-  local ca_host
-  ca_host=$(jq -r '.external[] | select(.hostname == "step-ca") | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
-  if [ -n "$ca_host" ]; then
-    has_resources=true
-    local hostname ip ip_clean
-    hostname=$(echo "$ca_host" | cut -d: -f1)
-    ip=$(echo "$ca_host" | cut -d: -f2)
-    ip_clean=$(echo "$ip" | cut -d'/' -f1)
-    echo "  Step-CA (Certificate Authority)"
-    echo "  --------------------------------"
-    printf "    %-10s %-15s https://ca.%s\n" "$hostname:" "$ip_clean" "${DNS_POSTFIX:-local}"
-    echo "    ACME:    https://ca.${DNS_POSTFIX:-local}/acme/acme/directory"
-    echo "    Roots:   https://ca.${DNS_POSTFIX:-local}/roots.pem"
-    echo "    Credentials: terraform/terraform.tfvars (step-ca_root_password)"
-    echo
-  fi
-
   # Nomad Cluster
   local nomad_hosts
   nomad_hosts=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | "\(.hostname):\(.ip)"' hosts.json 2>/dev/null)
@@ -104,12 +86,14 @@ function displayDeploymentSummary() {
     has_resources=true
     local nomad_ip
     nomad_ip=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
-    echo "  Vault (Secrets Manager)"
-    echo "  -----------------------"
+    echo "  Vault (Secrets Manager + PKI CA)"
+    echo "  ---------------------------------"
     echo "    UI:        https://vault.${DNS_POSTFIX:-local}/"
     echo "    Direct:    http://$nomad_ip:8200/"
-    echo "    Root Token: /srv/gluster/nomad-data/vault/.root_token"
-    echo "    Unseal Key: /srv/gluster/nomad-data/vault/.unseal_key"
+    echo "    PKI:"
+    echo "      Root CA:   http://$nomad_ip:8200/v1/pki/ca/pem"
+    echo "      ACME:      https://vault.${DNS_POSTFIX:-local}/v1/pki_int/acme/directory"
+    echo "    Credentials: crypto/vault-credentials.json"
     echo
   fi
 

@@ -3,9 +3,11 @@
 # deployAllServices - Full deployment of all lab services
 #
 # Deploys in phases:
-#   Phase 1: LXC containers (DNS, step-ca)
+#   Phase 1: LXC containers (DNS)
 #   Phase 2: Packer templates (docker, nomad)
 #   Phase 3: VMs (Nomad cluster, Kasm)
+#
+# Note: Certificate Authority is provided by Vault PKI (deployed as Nomad job)
 #
 # Prerequisites:
 #   - cluster-info.json with network configuration
@@ -20,7 +22,7 @@
 # Side effects:
 #   - Creates LXC containers, VM templates, and VMs
 #   - Updates hosts.json with deployed IPs
-#   - Configures DNS records and root certificates
+#   - Configures DNS records
 function deployAllServices() {
   cat <<EOF
 
@@ -28,7 +30,8 @@ function deployAllServices() {
 Full Services Deployment
 
 Deploying all services: Pi-hole DNS with Unbound (DNS-over-TLS),
-Certificate Authority (Step-CA), Nomad cluster, and Kasm Workspaces.
+Nomad cluster, and Kasm Workspaces.
+Certificate Authority is provided by Vault PKI (deployed after Nomad).
 #############################################################################
 
 EOF
@@ -59,26 +62,22 @@ EOF
     local DNS_IP
     DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
     if [ -n "$DNS_IP" ] && [ "$DNS_IP" != "null" ]; then
-      # Verify the LXC container actually exists on Proxmox (VMID 910 = dns-01, 902 = step-ca)
-      doing "Verifying DNS and CA containers exist on Proxmox..."
+      # Verify the LXC container actually exists on Proxmox (VMID 910 = dns-01)
+      doing "Verifying DNS container exists on Proxmox..."
       local dns_exists=false
-      local ca_exists=false
 
       # Check across all cluster nodes for the containers
       for node_ip in "${CLUSTER_NODE_IPS[@]}"; do
         if sshRun "$REMOTE_USER" "$node_ip" "pct status $VMID_DNS_START" &>/dev/null; then
           dns_exists=true
         fi
-        if sshRun "$REMOTE_USER" "$node_ip" "pct status $VMID_STEP_CA" &>/dev/null; then
-          ca_exists=true
-        fi
       done
 
-      if [ "$dns_exists" = "true" ] && [ "$ca_exists" = "true" ]; then
+      if [ "$dns_exists" = "true" ]; then
         DNS_ALREADY_DEPLOYED=true
-        success "DNS ($DNS_IP) and CA containers verified on Proxmox"
+        success "DNS ($DNS_IP) container verified on Proxmox"
       else
-        warn "hosts.json has DNS/CA entries but containers not found on Proxmox"
+        warn "hosts.json has DNS entry but container not found on Proxmox"
         warn "Will redeploy LXC containers..."
         # Clean stale hosts.json entries
         rm -f hosts.json
@@ -124,23 +123,12 @@ EOF
     fi
   fi
 
-  # Skip LXC deployment if DNS and CA already exist
+  # Skip LXC deployment if DNS already exists
   if [ "$DNS_ALREADY_DEPLOYED" = "true" ]; then
-    info "Skipping LXC deployment - DNS and CA already deployed"
+    info "Skipping LXC deployment - DNS already deployed"
     info "Proceeding directly to Packer/VM phases..."
     DEPLOY_PHASE=1
   else
-    # Update the step-ca installation script with DNS postfix
-    if sed --version >/dev/null 2>&1; then
-        sed -i "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
-    else
-        sed -i '' "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
-    fi
-    success "Step-CA installation script updated"
-
-    # Generate certificates
-    generateCertificates
-
     # Verify all nodes can reach the internet before proceeding
     if ! checkClusterConnectivity; then
       error "Cannot proceed without internet connectivity on all nodes."
@@ -154,27 +142,26 @@ EOF
     fi
 
     # ============================================
-    # PHASE 1: Deploy LXC Containers (DNS, step-ca)
+    # PHASE 1: Deploy LXC Containers (DNS)
     # ============================================
     cat <<EOF
 
 #############################################################################
 LXC Container Deployment
 
-Deploying critical infrastructure: DNS servers and Certificate Authority.
-These must be operational before building VM templates.
+Deploying critical infrastructure: DNS servers.
+Certificate Authority will be provided by Vault PKI after Nomad deployment.
 #############################################################################
 EOF
     pressAnyKey
 
-    doing "Deploying LXC containers (DNS, step-ca)..."
+    doing "Deploying LXC containers (DNS)..."
     docker compose build terraform >/dev/null 2>&1
     docker compose run --rm -it terraform init
 
     if ! docker compose run --rm -it terraform apply \
       -target=module.dns-main \
-      -target=module.dns-labnet \
-      -target=module.step-ca; then
+      -target=module.dns-labnet; then
       error "Phase 1 failed: LXC container deployment"
       DEPLOY_PHASE=1
       read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
@@ -190,7 +177,7 @@ EOF
 
     # Refresh terraform state to update outputs after targeted apply
     doing "Refreshing Terraform state to update outputs..."
-    docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet -target=module.step-ca >/dev/null 2>&1 || true
+    docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet >/dev/null 2>&1 || true
 
     # Generate hosts.json from terraform output (may be partial during Phase 1)
     doing "Generating hosts.json from Terraform outputs..."
@@ -207,20 +194,8 @@ EOF
       generateHostsJsonFromModules
     fi
 
-    # Push certificates to step-ca container
-    # (Terraform only installs packages and creates directories; certs are generated locally)
-    if ! pushCertificatesToStepCA; then
-      error "Failed to push certificates to step-ca container"
-      read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
-      DO_ROLLBACK=${DO_ROLLBACK:-Y}
-      if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
-        rollbackDeployment 1
-      fi
-      return 1
-    fi
-
     updateDNSRecords
-    updateRootCertificates
+    # Note: Root certificates will be distributed after Vault PKI is initialized
   fi  # End of DNS_ALREADY_DEPLOYED=false block
 
   # Storage selection for multi-node clusters

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# deployCriticalServicesOnly - Deploy only DNS and CA (no VMs)
+# deployCriticalServicesOnly - Deploy only DNS (no VMs)
 #
-# Deploys Pi-hole DNS with Unbound (DNS-over-TLS) and step-ca Certificate Authority.
-# This is a subset of deployAllServices for when you only need infrastructure.
+# Deploys Pi-hole DNS with Unbound (DNS-over-TLS).
+# Certificate Authority is provided by Vault PKI (deployed with Nomad/Vault).
 #
 # Prerequisites:
 #   - cluster-info.json with network configuration
@@ -15,17 +15,17 @@
 # Returns: 0 on success, 1 on failure
 #
 # Side effects:
-#   - Creates LXC containers for DNS and CA
+#   - Creates LXC containers for DNS
 #   - Updates hosts.json with deployed IPs
-#   - Configures DNS records and root certificates
+#   - Configures DNS records
 function deployCriticalServicesOnly() {
   cat <<EOF
 
 ############################################################################
 Critical Services Deployment
 
-Deploying critical infrastructure only: Pi-hole DNS with Unbound (DNS-over-TLS)
-and Certificate Authority (Step-CA). No VMs will be deployed.
+Deploying critical infrastructure only: Pi-hole DNS with Unbound (DNS-over-TLS).
+Certificate Authority is provided by Vault PKI (deployed later with Vault).
 #############################################################################
 
 EOF
@@ -74,17 +74,6 @@ EOF
   CONFIRM=${CONFIRM:-Y}
   [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && warn "Deployment cancelled" && return 1
 
-  # Update the step-ca installation script with DNS postfix
-  if sed --version >/dev/null 2>&1; then
-      sed -i "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
-  else
-      sed -i '' "s/^DNS_NAME=.*/DNS_NAME=\"$DNS_POSTFIX\"/" terraform/lxc-step-ca/init-step-ca.sh
-  fi
-  success "Step-CA installation script updated"
-
-  # Generate certificates
-  generateCertificates
-
   # Load cluster info if not already loaded
   if [ ${#CLUSTER_NODES[@]} -eq 0 ]; then
     if [ -f "$CLUSTER_INFO_FILE" ]; then
@@ -106,25 +95,25 @@ EOF
     return 1
   fi
 
-  # Deploy LXC containers (DNS, step-ca)
+  # Deploy LXC containers (DNS only - CA is provided by Vault PKI)
   cat <<EOF
 
 #############################################################################
 LXC Container Deployment
 
-Deploying critical infrastructure: DNS servers and Certificate Authority.
+Deploying critical infrastructure: DNS servers.
+Certificate Authority will be provided by Vault PKI after Nomad deployment.
 #############################################################################
 EOF
   pressAnyKey
 
-  doing "Deploying LXC containers (DNS, step-ca)..."
+  doing "Deploying LXC containers (DNS)..."
   docker compose build terraform >/dev/null 2>&1
   docker compose run --rm -it terraform init
 
   if ! docker compose run --rm -it terraform apply \
     -target=module.dns-main \
-    -target=module.dns-labnet \
-    -target=module.step-ca; then
+    -target=module.dns-labnet; then
     error "LXC container deployment failed"
     read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
     DO_ROLLBACK=${DO_ROLLBACK:-Y}
@@ -138,7 +127,7 @@ EOF
 
   # Refresh terraform state
   doing "Refreshing Terraform state..."
-  docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet -target=module.step-ca >/dev/null 2>&1 || true
+  docker compose run --rm -T terraform refresh -target=module.dns-main -target=module.dns-labnet >/dev/null 2>&1 || true
 
   # Generate hosts.json
   doing "Generating hosts.json..."
@@ -154,55 +143,38 @@ EOF
     generateHostsJsonFromModules
   fi
 
-  # Push certificates to step-ca container
-  # (Terraform only installs packages and creates directories; certs are generated locally)
-  if ! pushCertificatesToStepCA; then
-    error "Failed to push certificates to step-ca container"
-    read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK
-    DO_ROLLBACK=${DO_ROLLBACK:-Y}
-    if [[ "$DO_ROLLBACK" =~ ^[Yy]$ ]]; then
-      rollbackDeployment 1
-    fi
-    return 1
-  fi
-
   updateDNSRecords
-  updateRootCertificates
+  # Note: Root certificates will be distributed after Vault PKI is initialized
 
   displayDeploymentSummary
 
   success "Critical services deployment complete!"
-  info "You can now deploy Nomad (option 5), Kasm (option 6), or both."
+  info "You can now deploy Nomad (option 5) then Vault to enable PKI/ACME."
 }
 
-# ensureCriticalServices - Verify DNS and CA are deployed and accessible
+# ensureCriticalServices - Verify DNS is deployed and accessible
 #
-# Checks that Pi-hole DNS and step-ca are running and responding to API requests.
+# Checks that Pi-hole DNS is running and responding to API requests.
 # Used as a prerequisite check before deploying VMs or Nomad jobs.
+# Note: CA is now provided by Vault PKI, checked separately.
 #
 # Prerequisites:
-#   - hosts.json must exist with dns-01 and step-ca entries
+#   - hosts.json must exist with dns-01 entry
 #
 # Globals read: KEY_PATH
 # Arguments: None
-# Returns: 0 if both services healthy, 1 if not deployed or unhealthy
+# Returns: 0 if DNS healthy, 1 if not deployed or unhealthy
 function ensureCriticalServices() {
   if [ ! -f "hosts.json" ]; then
     error "hosts.json not found. Deploy critical services first (option 4)."
     return 1
   fi
 
-  local DNS_IP CA_IP
+  local DNS_IP
   DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-  CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
 
   if [ -z "$DNS_IP" ] || [ "$DNS_IP" = "null" ]; then
     error "DNS not deployed. Run option 4 (Deploy critical services) first."
-    return 1
-  fi
-
-  if [ -z "$CA_IP" ] || [ "$CA_IP" = "null" ]; then
-    error "CA not deployed. Run option 4 (Deploy critical services) first."
     return 1
   fi
 
@@ -215,14 +187,7 @@ function ensureCriticalServices() {
     return 1
   fi
 
-  # Verify CA is actually responding (check step-ca health endpoint or roots.pem)
-  if ! curl -s --connect-timeout 5 -k "https://$CA_IP/health" >/dev/null 2>&1 && \
-     ! curl -s --connect-timeout 5 -k "https://$CA_IP/roots.pem" >/dev/null 2>&1; then
-    error "CA server at $CA_IP is not responding."
-    error "Ensure step-ca is running. Deploy critical services first (option 4)."
-    return 1
-  fi
-
-  success "DNS ($DNS_IP) and CA ($CA_IP) are running"
+  success "DNS ($DNS_IP) is running"
+  # Note: CA is now provided by Vault PKI - checked when needed
   return 0
 }

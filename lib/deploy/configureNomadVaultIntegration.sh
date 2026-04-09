@@ -50,6 +50,40 @@ EOF
     return 1
   fi
 
+  # If Vault is on HTTPS, its cert is signed by the internal PKI. Nomad's
+  # Go HTTP client uses the system trust store, so we must install the root
+  # CA on every Nomad VM (analogous to what updateRootCertificates does for
+  # Proxmox nodes).
+  if [[ "$VAULT_ADDR" == https://* ]]; then
+    doing "Installing Vault PKI root CA on Nomad nodes..."
+    local VAULT_IP
+    VAULT_IP=$(echo "$VAULT_ADDR" | sed -E 's#https?://([^:/]+).*#\1#')
+
+    # Fetch root CA from Vault (use -k since the node may not trust it yet)
+    local ROOT_CA_PEM
+    ROOT_CA_PEM=$(curl -skf "${VAULT_ADDR}/v1/pki/ca/pem" 2>/dev/null || echo "")
+
+    if [ -z "$ROOT_CA_PEM" ]; then
+      warn "Could not fetch root CA from Vault - Nomad may not trust Vault's TLS cert"
+    else
+      local CA_TMPFILE
+      CA_TMPFILE=$(mktemp)
+      echo "$ROOT_CA_PEM" > "$CA_TMPFILE"
+
+      for ip in $ALL_NOMAD_IPS; do
+        local hn
+        hn=$(jq -r --arg ip "$ip" '.external[] | select(.ip | startswith($ip)) | .hostname' hosts.json)
+        doing "  Installing root CA on $hn ($ip)..."
+        scpToAdmin "$CA_TMPFILE" "$VM_USER" "$ip" "/tmp/proxmox-lab-root-ca.crt"
+        sshRunAdmin "$VM_USER" "$ip" "sudo cp /tmp/proxmox-lab-root-ca.crt /usr/local/share/ca-certificates/proxmox-lab-root-ca.crt && sudo update-ca-certificates --fresh" 2>/dev/null \
+          && success "  Root CA installed on $hn" \
+          || warn "  Failed to install root CA on $hn"
+      done
+
+      rm -f "$CA_TMPFILE"
+    fi
+  fi
+
   doing "Configuring Vault WIF on Nomad nodes..."
 
   for ip in $ALL_NOMAD_IPS; do

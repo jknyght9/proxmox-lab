@@ -59,7 +59,7 @@ EOF
   ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
   # Test Vault connectivity first
-  if ! curl -sf "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
+  if ! curl -skf "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
     error "Cannot reach Vault at $VAULT_ADDR"
     error "Check vault-credentials.json has the correct address"
     return 1
@@ -89,7 +89,7 @@ EOF
 
     # Store in Vault
     doing "Storing auth key in Vault..."
-    if ! curl -sf -X POST "$VAULT_ADDR/v1/secret/data/tailscale" \
+    if ! curl -skf -X POST "$VAULT_ADDR/v1/secret/data/tailscale" \
       -H "X-Vault-Token: $ROOT_TOKEN" \
       -H "Content-Type: application/json" \
       -d "{\"data\": {\"auth_key\": \"$TS_AUTH_KEY\"}}" > /dev/null; then
@@ -105,14 +105,14 @@ EOF
   doing "Creating Vault policy for Tailscale..."
   local POLICY
   POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/tailscale.hcl")
-  curl -sf -X PUT "$VAULT_ADDR/v1/sys/policies/acl/tailscale" \
+  curl -skf -X PUT "$VAULT_ADDR/v1/sys/policies/acl/tailscale" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"policy\": $(echo "$POLICY" | jq -Rs .)}" > /dev/null
 
   # Create Vault role for Tailscale (JWT auth)
   doing "Creating Vault role for Tailscale..."
-  curl -sf -X POST "$VAULT_ADDR/v1/auth/jwt-nomad/role/tailscale" \
+  curl -skf -X POST "$VAULT_ADDR/v1/auth/jwt-nomad/role/tailscale" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{
@@ -243,7 +243,7 @@ function rotateTailscaleKey() {
   fi
 
   doing "Updating auth key in Vault..."
-  if ! curl -sf -X POST "$VAULT_ADDR/v1/secret/data/tailscale" \
+  if ! curl -skf -X POST "$VAULT_ADDR/v1/secret/data/tailscale" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"data\": {\"auth_key\": \"$TS_AUTH_KEY\"}}" > /dev/null; then

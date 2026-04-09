@@ -24,8 +24,7 @@ http:
       service: nomad
       middlewares:
         - authentik
-      tls:
-        certResolver: step-ca
+      tls: {}
 
     pihole:
       rule: "Host(`pihole.${DNS_POSTFIX}`)"
@@ -34,8 +33,7 @@ http:
       service: pihole
       middlewares:
         - authentik
-      tls:
-        certResolver: step-ca
+      tls: {}
 
   services:
     nomad:

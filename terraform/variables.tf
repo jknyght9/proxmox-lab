@@ -105,29 +105,31 @@ variable "labnet_bootstrap_dns" {
   default     = ""  # Empty = use bootstrap_dns value
 }
 
-variable step-ca_root_password {
-  type = string
-  description = "Step CA container root password"
+# DEPRECATED: step-ca has been replaced by Vault PKI secrets engine
+# These variables are kept for backwards compatibility but are no longer used
+variable "step-ca_root_password" {
+  type        = string
+  description = "DEPRECATED - Step CA container root password (no longer used)"
+  default     = ""
 }
-variable step-ca_eth0_ipv4_cidr {
-  type = string
-  description = "IPv4 address with CIDR notation for Step CA"
+variable "step-ca_eth0_ipv4_cidr" {
+  type        = string
+  description = "DEPRECATED - IPv4 address with CIDR notation for Step CA (no longer used)"
+  default     = ""
 }
-
-# Optional second NIC for step-ca (for ACME validation across networks)
 variable "step-ca_eth1_enabled" {
   type        = bool
-  description = "Enable a second network interface on step-ca for ACME validation"
+  description = "DEPRECATED - Enable a second network interface on step-ca (no longer used)"
   default     = false
 }
 variable "step-ca_eth1_vmbr" {
   type        = string
-  description = "Proxmox bridge for step-ca eth1"
+  description = "DEPRECATED - Proxmox bridge for step-ca eth1 (no longer used)"
   default     = "vmbr0"
 }
 variable "step-ca_eth1_ipv4_cidr" {
   type        = string
-  description = "IPv4 address with CIDR for step-ca eth1"
+  description = "DEPRECATED - IPv4 address with CIDR for step-ca eth1 (no longer used)"
   default     = ""
 }
 

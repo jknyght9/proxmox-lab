@@ -30,9 +30,9 @@ EOF
   local NOMAD_IP
   NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
 
-  # Create storage directory for Traefik
+  # Create storage directories for Traefik
   doing "Preparing Traefik storage directory..."
-  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls"
 
   # Copy Authentik middleware config (for forward auth + static services)
   if [ -f "nomad/config/traefik/authentik.yml" ]; then
@@ -54,22 +54,77 @@ EOF
     success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
   fi
 
-  # Copy CA certificate for ACME trust
-  doing "Copying CA certificate for Traefik..."
-  local CA_IP
-  CA_IP=$(jq -r '.external[] | select(.hostname == "step-ca") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  # Issue a wildcard TLS certificate from Vault PKI for all services
+  # behind Traefik. This replaces ACME entirely — Vault 1.21.x has a
+  # bug where the ACME new-nonce endpoint doesn't return the required
+  # Replay-Nonce header, so we issue certs directly via the PKI API.
+  # Re-running option 5 reissues the cert (1-year TTL).
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local VAULT_ADDR ROOT_TOKEN
+    VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+    ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
-  if [ -n "$CA_IP" ] && [ "$CA_IP" != "null" ]; then
-    # Fetch root CA and copy to GlusterFS
-    if curl -sk "https://$CA_IP/roots.pem" -o /tmp/root_ca.crt 2>/dev/null; then
-      scpToAdmin "/tmp/root_ca.crt" "$VM_USER" "$NOMAD_IP" "/tmp/root_ca.crt"
-      sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/root_ca.crt /srv/gluster/nomad-data/certs/root_ca.crt && sudo chmod 644 /srv/gluster/nomad-data/certs/root_ca.crt"
-      success "CA certificate installed for Traefik"
+    if [ -n "$VAULT_ADDR" ] && [ -n "$ROOT_TOKEN" ]; then
+      doing "Issuing wildcard TLS certificate from Vault PKI (*.${DNS_POSTFIX})..."
+
+      local CERT_PAYLOAD
+      CERT_PAYLOAD=$(jq -n \
+        --arg cn "*.${DNS_POSTFIX}" \
+        --arg alt "${DNS_POSTFIX}" \
+        '{
+          common_name: $cn,
+          alt_names: $alt,
+          ttl: "8760h"
+        }')
+
+      local CERT_RESPONSE
+      CERT_RESPONSE=$(curl -skf -X POST "${VAULT_ADDR}/v1/pki_int/issue/acme-certs" \
+        -H "X-Vault-Token: $ROOT_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "$CERT_PAYLOAD" 2>&1)
+
+      local CERT KEY CHAIN
+      CERT=$(echo "$CERT_RESPONSE" | jq -r '.data.certificate // empty')
+      KEY=$(echo "$CERT_RESPONSE" | jq -r '.data.private_key // empty')
+      CHAIN=$(echo "$CERT_RESPONSE" | jq -r '.data.ca_chain // [] | join("\n")')
+
+      if [ -z "$CERT" ] || [ -z "$KEY" ]; then
+        error "Failed to issue wildcard cert from Vault PKI"
+        warn "Traefik will start without TLS certs"
+      else
+        # Write full chain (leaf + intermediate + root) and key
+        local TMPDIR
+        TMPDIR=$(mktemp -d)
+        printf '%s\n%s\n' "$CERT" "$CHAIN" > "$TMPDIR/cert.pem"
+        printf '%s\n' "$KEY" > "$TMPDIR/key.pem"
+
+        scpToAdmin "$TMPDIR/cert.pem" "$VM_USER" "$NOMAD_IP" "/tmp/traefik-cert.pem"
+        scpToAdmin "$TMPDIR/key.pem" "$VM_USER" "$NOMAD_IP" "/tmp/traefik-key.pem"
+        sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/traefik-cert.pem /srv/gluster/nomad-data/traefik/tls/cert.pem && sudo cp /tmp/traefik-key.pem /srv/gluster/nomad-data/traefik/tls/key.pem && sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem /srv/gluster/nomad-data/traefik/tls/key.pem"
+        rm -rf "$TMPDIR"
+        success "Wildcard TLS certificate installed (valid 1 year)"
+
+        # Generate Traefik dynamic config that sets this as the default cert.
+        # The file provider watches /data/traefik/config/ and picks this up.
+        doing "Deploying TLS configuration for Traefik..."
+        cat > /tmp/traefik-tls.yml <<'TLSYML'
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /data/traefik/tls/cert.pem
+        keyFile: /data/traefik/tls/key.pem
+TLSYML
+        scpToAdmin "/tmp/traefik-tls.yml" "$VM_USER" "$NOMAD_IP" "/tmp/tls.yml"
+        sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/tls.yml /srv/gluster/nomad-data/traefik/config/tls.yml && sudo chmod 644 /srv/gluster/nomad-data/traefik/config/tls.yml"
+        rm -f /tmp/traefik-tls.yml
+        success "TLS configuration deployed"
+      fi
     else
-      warn "Could not fetch CA certificate from $CA_IP"
+      warn "Vault credentials incomplete - skipping TLS cert issuance"
     fi
   else
-    warn "step-ca not found in hosts.json, skipping CA certificate"
+    warn "$VAULT_CREDENTIALS_FILE not found - Traefik will start without TLS certs"
   fi
 
   # Deploy Traefik using the generic Nomad job deployer

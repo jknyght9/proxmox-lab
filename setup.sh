@@ -304,6 +304,7 @@ function showMenu() {
     echo " b2) Configure Authentik AD Sync"
     echo " b3) Configure automated backups (on Nomad)"
     echo " b4) Deploy LDAP Account Manager (on Nomad)"
+    echo " b5) Deploy Vault with CA (PKI + ACME) [migration]"
     echo
     echo "------------------------------------------"
     echo "  Developer Tools"
@@ -327,7 +328,7 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-11, b1-b3, d1-d9]: ")" choice
+    read -rp "$(question "Select an option [0-11, b1-b5, d1-d9]: ")" choice
   else
     read -rp "$(question "Select an option [0-11]: ")" choice
   fi
@@ -350,6 +351,7 @@ while true; do
     b2|B2) if [ "$DEV_MODE" = true ]; then configureAuthentikADSyncOnly; else error "Invalid option: $choice"; fi;;
     b3|B3) if [ "$DEV_MODE" = true ]; then deployBackupOnly; else error "Invalid option: $choice"; fi;;
     b4|B4) if [ "$DEV_MODE" = true ]; then deployLAMOnly; else error "Invalid option: $choice"; fi;;
+    b5|B5) if [ "$DEV_MODE" = true ]; then deployVaultWithCA; else error "Invalid option: $choice"; fi;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;

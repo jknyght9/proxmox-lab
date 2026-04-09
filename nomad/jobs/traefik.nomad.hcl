@@ -27,12 +27,6 @@ job "traefik" {
         destination = "/data"
       }
 
-      env {
-        # Trust the internal CA for ACME requests
-        SSL_CERT_FILE = "/data/certs/root_ca.crt"
-        LEGO_CA_CERTIFICATES = "/data/certs/root_ca.crt"
-      }
-
       config {
         image        = "traefik:v3.6"
         network_mode = "host"
@@ -54,11 +48,8 @@ job "traefik" {
           "--providers.nomad.allowEmptyServices=true",
           "--providers.file.directory=/data/traefik/config",
           "--providers.file.watch=true",
-          "--certificatesresolvers.step-ca.acme.email=admin@${DNS_POSTFIX}",
-          "--certificatesresolvers.step-ca.acme.storage=/data/traefik/acme.json",
-          "--certificatesresolvers.step-ca.acme.caserver=https://ca.${DNS_POSTFIX}/acme/acme/directory",
-          "--certificatesresolvers.step-ca.acme.httpchallenge=true",
-          "--certificatesresolvers.step-ca.acme.httpchallenge.entrypoint=web",
+          # Allow HTTPS backend connections (Vault serves HTTPS with its own PKI cert)
+          "--serversTransport.insecureSkipVerify=true",
         ]
       }
 

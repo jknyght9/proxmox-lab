@@ -46,7 +46,6 @@ job "uptime-kuma" {
           "traefik.http.routers.uptime-kuma.rule=Host(`status.${DNS_POSTFIX}`) || Host(`status`)",
           "traefik.http.routers.uptime-kuma.entrypoints=websecure",
           "traefik.http.routers.uptime-kuma.tls=true",
-          "traefik.http.routers.uptime-kuma.tls.certresolver=step-ca",
           "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001",
         ]
 
