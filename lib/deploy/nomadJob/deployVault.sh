@@ -801,8 +801,11 @@ function issueVaultListenerCert() {
     sudo mkdir -p /srv/gluster/nomad-data/vault-tls
     sudo mv /tmp/vault-tls-cert.pem /srv/gluster/nomad-data/vault-tls/cert.pem
     sudo mv /tmp/vault-tls-key.pem /srv/gluster/nomad-data/vault-tls/key.pem
+    # Vault container runs as uid 100 (vault), not root, so the key
+    # must be readable by non-root. GlusterFS path is only reachable
+    # by host admins, so 644 is acceptable here.
     sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem
-    sudo chmod 600 /srv/gluster/nomad-data/vault-tls/key.pem
+    sudo chmod 644 /srv/gluster/nomad-data/vault-tls/key.pem
 REMOTE
 
   rm -rf "$TMPDIR"
