@@ -66,7 +66,7 @@ EOF
       doing "Creating Vault policy for Traefik..."
       local TRAEFIK_POLICY
       TRAEFIK_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/traefik.hcl")
-      if ! curl -sf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/traefik" \
+      if ! curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/traefik" \
         -H "X-Vault-Token: $ROOT_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"policy\": $(echo "$TRAEFIK_POLICY" | jq -Rs .)}" > /dev/null; then
@@ -98,7 +98,7 @@ EOF
 }
 ROLE_JSON
 )
-      if ! curl -sf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/traefik" \
+      if ! curl -skf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/traefik" \
         -H "X-Vault-Token: $ROOT_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$TRAEFIK_ROLE" > /dev/null; then

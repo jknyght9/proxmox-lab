@@ -188,7 +188,7 @@ REMOTE_SCRIPT
       --arg admin_email "$ADMIN_EMAIL" \
       '{data: {postgres_password: $pg_pass, secret_key: $secret_key, admin_password: $admin_pass, admin_email: $admin_email}}')
 
-    if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
+    if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
       "${VAULT_ADDR}/v1/secret/data/authentik" \
       -H "X-Vault-Token: $ROOT_TOKEN" \
       -H "Content-Type: application/json" \

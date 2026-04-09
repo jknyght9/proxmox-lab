@@ -116,7 +116,7 @@ EOF
   local SAMBA_POLICY
   SAMBA_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/samba-dc.hcl")
 
-  if ! curl -sf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/samba-dc" \
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/samba-dc" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"policy\": $(echo "$SAMBA_POLICY" | jq -Rs .)}" > /dev/null; then
@@ -151,7 +151,7 @@ EOF
 ROLE_JSON
 )
 
-  if ! curl -sf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/samba-dc" \
+  if ! curl -skf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/samba-dc" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$SAMBA_ROLE" > /dev/null; then
@@ -197,7 +197,7 @@ ROLE_JSON
       --arg sync_dn "$SYNC_DN" \
       '{data: {admin_password: $admin_pass, authentik_sync_password: $sync_pass, authentik_sync_dn: $sync_dn}}')
 
-    if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
+    if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
       "${VAULT_ADDR}/v1/secret/data/samba-ad" \
       -H "X-Vault-Token: $ROOT_TOKEN" \
       -H "Content-Type: application/json" \

@@ -184,7 +184,7 @@ EOF
       smb_password: $smb_password
     }}')
 
-  if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
     "${VAULT_ADDR}/v1/secret/data/backup" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
@@ -201,7 +201,7 @@ EOF
   local BACKUP_POLICY
   BACKUP_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/backup.hcl")
 
-  if ! curl -sf --connect-timeout 5 --max-time 10 -X PUT \
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X PUT \
     "${VAULT_ADDR}/v1/sys/policies/acl/backup" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
@@ -238,7 +238,7 @@ EOF
 ROLE_JSON
 )
 
-  if ! curl -sf --connect-timeout 5 --max-time 10 -X POST \
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
     "${VAULT_ADDR}/v1/auth/jwt-nomad/role/backup" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \

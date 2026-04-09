@@ -31,7 +31,7 @@ function unsealVault() {
 
   # Check current seal status
   local HEALTH_RESPONSE
-  HEALTH_RESPONSE=$(curl -sf --connect-timeout 5 --max-time 10 \
+  HEALTH_RESPONSE=$(curl -skf --connect-timeout 5 --max-time 10 \
     "${VAULT_ADDR}/v1/sys/health?uninitcode=200&sealedcode=200" 2>/dev/null)
 
   if [ -z "$HEALTH_RESPONSE" ]; then
@@ -60,7 +60,7 @@ function unsealVault() {
   fi
 
   local UNSEAL_RESPONSE
-  UNSEAL_RESPONSE=$(curl -sf --connect-timeout 5 --max-time 10 -X PUT \
+  UNSEAL_RESPONSE=$(curl -skf --connect-timeout 5 --max-time 10 -X PUT \
     "${VAULT_ADDR}/v1/sys/unseal" \
     -H "Content-Type: application/json" \
     -d "{\"key\": \"$UNSEAL_KEY\"}" 2>&1)
@@ -90,7 +90,7 @@ function isVaultSealed() {
   fi
 
   local HEALTH_RESPONSE
-  HEALTH_RESPONSE=$(curl -sf --connect-timeout 5 --max-time 10 \
+  HEALTH_RESPONSE=$(curl -skf --connect-timeout 5 --max-time 10 \
     "${VAULT_ADDR}/v1/sys/health" 2>/dev/null)
 
   if [ -z "$HEALTH_RESPONSE" ]; then
