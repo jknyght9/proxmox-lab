@@ -30,9 +30,9 @@ EOF
   local NOMAD_IP
   NOMAD_IP=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
 
-  # Create storage directory for Traefik
+  # Create storage directories for Traefik
   doing "Preparing Traefik storage directory..."
-  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/certs"
+  sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls"
 
   # Copy Authentik middleware config (for forward auth + static services)
   if [ -f "nomad/config/traefik/authentik.yml" ]; then
@@ -54,63 +54,77 @@ EOF
     success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
   fi
 
-  # Register Vault policy + jwt-nomad role for Traefik so the job can
-  # render the root CA at runtime via a template stanza (Vault = single
-  # source of truth; no bind-mounted copies drifting on GlusterFS).
+  # Issue a wildcard TLS certificate from Vault PKI for all services
+  # behind Traefik. This replaces ACME entirely — Vault 1.21.x has a
+  # bug where the ACME new-nonce endpoint doesn't return the required
+  # Replay-Nonce header, so we issue certs directly via the PKI API.
+  # Re-running option 5 reissues the cert (1-year TTL).
   if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
     local VAULT_ADDR ROOT_TOKEN
     VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
     ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
     if [ -n "$VAULT_ADDR" ] && [ -n "$ROOT_TOKEN" ]; then
-      doing "Creating Vault policy for Traefik..."
-      local TRAEFIK_POLICY
-      TRAEFIK_POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/traefik.hcl")
-      if ! curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/traefik" \
-        -H "X-Vault-Token: $ROOT_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"policy\": $(echo "$TRAEFIK_POLICY" | jq -Rs .)}" > /dev/null; then
-        warn "Failed to create traefik policy"
-      else
-        success "Created traefik policy"
-      fi
+      doing "Issuing wildcard TLS certificate from Vault PKI (*.${DNS_POSTFIX})..."
 
-      doing "Creating Vault role 'traefik' for WIF..."
-      local TRAEFIK_ROLE
-      TRAEFIK_ROLE=$(cat <<'ROLE_JSON'
-{
-  "role_type": "jwt",
-  "bound_audiences": ["vault.io"],
-  "user_claim": "/nomad_job_id",
-  "user_claim_json_pointer": true,
-  "claim_mappings": {
-    "nomad_namespace": "nomad_namespace",
-    "nomad_job_id": "nomad_job_id",
-    "nomad_task": "nomad_task"
-  },
-  "token_type": "service",
-  "token_policies": ["traefik"],
-  "token_period": "1h",
-  "token_ttl": "1h",
-  "bound_claims": {
-    "nomad_job_id": "traefik"
-  }
-}
-ROLE_JSON
-)
-      if ! curl -skf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/traefik" \
+      local CERT_PAYLOAD
+      CERT_PAYLOAD=$(jq -n \
+        --arg cn "*.${DNS_POSTFIX}" \
+        --arg alt "${DNS_POSTFIX}" \
+        '{
+          common_name: $cn,
+          alt_names: $alt,
+          ttl: "8760h"
+        }')
+
+      local CERT_RESPONSE
+      CERT_RESPONSE=$(curl -skf -X POST "${VAULT_ADDR}/v1/pki_int/issue/acme-certs" \
         -H "X-Vault-Token: $ROOT_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "$TRAEFIK_ROLE" > /dev/null; then
-        warn "Failed to create traefik Vault role"
+        -d "$CERT_PAYLOAD" 2>&1)
+
+      local CERT KEY CHAIN
+      CERT=$(echo "$CERT_RESPONSE" | jq -r '.data.certificate // empty')
+      KEY=$(echo "$CERT_RESPONSE" | jq -r '.data.private_key // empty')
+      CHAIN=$(echo "$CERT_RESPONSE" | jq -r '.data.ca_chain // [] | join("\n")')
+
+      if [ -z "$CERT" ] || [ -z "$KEY" ]; then
+        error "Failed to issue wildcard cert from Vault PKI"
+        warn "Traefik will start without TLS certs"
       else
-        success "Created Vault role 'traefik'"
+        # Write full chain (leaf + intermediate + root) and key
+        local TMPDIR
+        TMPDIR=$(mktemp -d)
+        printf '%s\n%s\n' "$CERT" "$CHAIN" > "$TMPDIR/cert.pem"
+        printf '%s\n' "$KEY" > "$TMPDIR/key.pem"
+
+        scpToAdmin "$TMPDIR/cert.pem" "$VM_USER" "$NOMAD_IP" "/tmp/traefik-cert.pem"
+        scpToAdmin "$TMPDIR/key.pem" "$VM_USER" "$NOMAD_IP" "/tmp/traefik-key.pem"
+        sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/traefik-cert.pem /srv/gluster/nomad-data/traefik/tls/cert.pem && sudo cp /tmp/traefik-key.pem /srv/gluster/nomad-data/traefik/tls/key.pem && sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem /srv/gluster/nomad-data/traefik/tls/key.pem"
+        rm -rf "$TMPDIR"
+        success "Wildcard TLS certificate installed (valid 1 year)"
+
+        # Generate Traefik dynamic config that sets this as the default cert.
+        # The file provider watches /data/traefik/config/ and picks this up.
+        doing "Deploying TLS configuration for Traefik..."
+        cat > /tmp/traefik-tls.yml <<'TLSYML'
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /data/traefik/tls/cert.pem
+        keyFile: /data/traefik/tls/key.pem
+TLSYML
+        scpToAdmin "/tmp/traefik-tls.yml" "$VM_USER" "$NOMAD_IP" "/tmp/tls.yml"
+        sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/tls.yml /srv/gluster/nomad-data/traefik/config/tls.yml && sudo chmod 644 /srv/gluster/nomad-data/traefik/config/tls.yml"
+        rm -f /tmp/traefik-tls.yml
+        success "TLS configuration deployed"
       fi
     else
-      warn "Vault credentials incomplete - skipping Traefik Vault setup"
+      warn "Vault credentials incomplete - skipping TLS cert issuance"
     fi
   else
-    warn "$VAULT_CREDENTIALS_FILE not found - Traefik will not be able to render CA from Vault"
+    warn "$VAULT_CREDENTIALS_FILE not found - Traefik will start without TLS certs"
   fi
 
   # Deploy Traefik using the generic Nomad job deployer

@@ -55,22 +55,9 @@ function deployNomadJob() {
     warn "Could not determine DNS server, using fallback: $DNS_SERVER"
   fi
 
-  # Build the direct Vault ACME URL. Traefik can't bootstrap its own cert
-  # by talking to itself (chicken-and-egg), so ACME must hit Vault
-  # directly. Vault is pinned to nomad01 and listens on HTTPS (cert
-  # issued by its own PKI, trusted by Traefik via the templated root CA),
-  # so we address it by IP to match the listener cert's IP SAN.
-  local VAULT_ACME_URL
-  local NOMAD01_IP
-  NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-  if [ -z "$NOMAD01_IP" ] || [ "$NOMAD01_IP" = "null" ]; then
-    NOMAD01_IP="$NOMAD_IP"
-  fi
-  VAULT_ACME_URL="https://${NOMAD01_IP}:8200/v1/pki_int/acme/directory"
-
   # Render template with environment variables
-  export DNS_POSTFIX DNS_SERVER VAULT_ACME_URL
-  envsubst '${DNS_POSTFIX} ${DNS_SERVER} ${VAULT_ACME_URL}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
+  export DNS_POSTFIX DNS_SERVER
+  envsubst '${DNS_POSTFIX} ${DNS_SERVER}' < "$job_file" > "/tmp/${job_name}-rendered.nomad.hcl"
 
   # Copy to Nomad node
   scpToAdmin "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"

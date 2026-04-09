@@ -95,7 +95,6 @@ EOH
           "traefik.http.routers.vault.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`) || Host(`ca.${DNS_POSTFIX}`) || Host(`ca`)",
           "traefik.http.routers.vault.entrypoints=websecure",
           "traefik.http.routers.vault.tls=true",
-          "traefik.http.routers.vault.tls.certresolver=vault-pki",
           "traefik.http.services.vault.loadbalancer.server.port=8200",
         ]
 
