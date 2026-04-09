@@ -1,3 +1,9 @@
+variable "vault_tls_enabled" {
+  type        = bool
+  default     = false
+  description = "Enable TLS on Vault's API listener using cert issued by its own PKI (bootstrap: false on first deploy, true after initVaultPKI issues the listener cert)"
+}
+
 job "vault" {
   datacenters = ["dc1"]
   type        = "service"
@@ -22,8 +28,8 @@ job "vault" {
 
       env {
         SKIP_CHOWN = "true"
-        VAULT_ADDR = "http://127.0.0.1:8200"
-        # Trust internal CA for OIDC discovery
+        VAULT_ADDR = var.vault_tls_enabled ? "https://127.0.0.1:8200" : "http://127.0.0.1:8200"
+        # Trust internal CA for OIDC discovery and self-TLS verification
         SSL_CERT_FILE = "/certs/root_ca.crt"
       }
 
@@ -35,6 +41,7 @@ job "vault" {
         volumes = [
           "/srv/gluster/nomad-data/vault:/data/vault",
           "/srv/gluster/nomad-data/certs:/certs:ro",
+          "/srv/gluster/nomad-data/vault-tls:/tls:ro",
         ]
       }
 
@@ -48,12 +55,22 @@ storage "file" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:8200"
+  address = "0.0.0.0:8200"
+%{ if var.vault_tls_enabled ~}
+  tls_cert_file = "/tls/cert.pem"
+  tls_key_file  = "/tls/key.pem"
+%{ else ~}
   tls_disable = true
+%{ endif ~}
 }
 
-api_addr = "http://{{ sockaddr "GetPrivateIP" }}:8200"
+%{ if var.vault_tls_enabled ~}
+api_addr     = "https://{{ sockaddr "GetPrivateIP" }}:8200"
+cluster_addr = "https://{{ sockaddr "GetPrivateIP" }}:8201"
+%{ else ~}
+api_addr     = "http://{{ sockaddr "GetPrivateIP" }}:8200"
 cluster_addr = "http://{{ sockaddr "GetPrivateIP" }}:8201"
+%{ endif ~}
 EOH
         destination = "local/vault.hcl"
       }
@@ -83,11 +100,13 @@ EOH
         ]
 
         check {
-          type     = "http"
-          path     = "/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200"
-          port     = "api"
-          interval = "10s"
-          timeout  = "3s"
+          type            = "http"
+          protocol        = var.vault_tls_enabled ? "https" : "http"
+          tls_skip_verify = var.vault_tls_enabled
+          path            = "/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200"
+          port            = "api"
+          interval        = "10s"
+          timeout          = "3s"
         }
       }
     }

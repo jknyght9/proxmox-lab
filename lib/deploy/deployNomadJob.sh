@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 
 # Generic function for deploying Nomad jobs
-# Parameters: job_name, job_file, [storage_path]
+# Parameters: job_name, job_file, [storage_path], [extra_run_args]
+#   extra_run_args: additional args passed to `nomad job run`, e.g. "-var foo=bar"
 function deployNomadJob() {
   local job_name="$1"
   local job_file="$2"
   local storage_path="${3:-}"
+  local extra_run_args="${4:-}"
 
   ensureClusterContext || return 1
 
@@ -53,16 +55,18 @@ function deployNomadJob() {
     warn "Could not determine DNS server, using fallback: $DNS_SERVER"
   fi
 
-  # Build the direct (non-Traefik) Vault ACME URL. Traefik can't bootstrap
-  # its own cert by talking to itself, so ACME must hit Vault on its HTTP
-  # API directly. Vault is pinned to nomad01, so use that IP:8200.
+  # Build the direct Vault ACME URL. Traefik can't bootstrap its own cert
+  # by talking to itself (chicken-and-egg), so ACME must hit Vault
+  # directly. Vault is pinned to nomad01 and listens on HTTPS (cert
+  # issued by its own PKI, trusted by Traefik via the templated root CA),
+  # so we address it by IP to match the listener cert's IP SAN.
   local VAULT_ACME_URL
   local NOMAD01_IP
   NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
   if [ -z "$NOMAD01_IP" ] || [ "$NOMAD01_IP" = "null" ]; then
     NOMAD01_IP="$NOMAD_IP"
   fi
-  VAULT_ACME_URL="http://${NOMAD01_IP}:8200/v1/pki_int/acme/directory"
+  VAULT_ACME_URL="https://${NOMAD01_IP}:8200/v1/pki_int/acme/directory"
 
   # Render template with environment variables
   export DNS_POSTFIX DNS_SERVER VAULT_ACME_URL
@@ -71,8 +75,8 @@ function deployNomadJob() {
   # Copy to Nomad node
   scpToAdmin "/tmp/${job_name}-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/${job_name}.nomad.hcl"
 
-  # Run the job
-  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/${job_name}.nomad.hcl"; then
+  # Run the job (with optional extra args like -var)
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run ${extra_run_args} /tmp/${job_name}.nomad.hcl"; then
     error "Failed to deploy $job_name"
     return 1
   fi
