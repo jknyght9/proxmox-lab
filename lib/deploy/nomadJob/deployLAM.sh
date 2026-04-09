@@ -119,7 +119,7 @@ BOOTSTRAP
   echo "  2. Click 'LAM configuration' (top right)"
   echo "  3. Default password: 'lam'"
   echo "  4. Configure LDAP connection:"
-  echo "     - Server: ldap://${NOMAD01_IP}"
+  echo "     - Server: ldaps://${NOMAD01_IP}"
   echo "     - Base DN: ${BASE_DN}"
   echo "     - Admin DN: CN=Administrator,CN=Users,${BASE_DN}"
   echo "  5. Create a server profile for Samba 4"

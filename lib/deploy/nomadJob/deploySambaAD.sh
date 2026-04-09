@@ -393,6 +393,14 @@ REMOTE_SCRIPT
     fi
   fi
 
+  # Configure LDAPS — issue TLS certs from Vault PKI and enable TLS in Samba.
+  # Certs are written to /opt/samba-dcXX/samba/private/tls/ (bind-mounted into
+  # the container at /var/lib/samba/private/tls/) and smb.conf is patched.
+  configureSambaLDAPS "$NOMAD01_IP" "dc01" "$AD_REALM_LOWER"
+  if [ "$DEPLOY_REPLICA" = "true" ]; then
+    configureSambaLDAPS "$NOMAD02_IP" "dc02" "$AD_REALM_LOWER"
+  fi
+
   # Clean up
   sshRunAdmin "$VM_USER" "$NOMAD01_IP" "rm -f /tmp/samba-dc.nomad.hcl"
   rm -f "/tmp/samba-dc-rendered.nomad.hcl"
@@ -410,9 +418,9 @@ REMOTE_SCRIPT
   info "Samba AD Domain Controller deployed!"
   info "AD Realm: $AD_REALM"
   info "AD Domain (NetBIOS): $AD_DOMAIN"
-  info "Primary DC: samba-dc01 ($NOMAD01_IP:389)"
+  info "Primary DC: samba-dc01 ($NOMAD01_IP:636, LDAPS)"
   if [ "$DEPLOY_REPLICA" = "true" ]; then
-    info "Replica DC: samba-dc02 ($NOMAD02_IP:389)"
+    info "Replica DC: samba-dc02 ($NOMAD02_IP:636, LDAPS)"
   fi
   echo
   info "AD secrets stored in Vault at: secret/data/samba-ad"
@@ -442,6 +450,155 @@ function isSambaADDeployed() {
   status=$(sshRunAdmin "$VM_USER" "$nomad_ip" "nomad job status samba-dc 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
+}
+
+# configureSambaLDAPS - Issue TLS cert and enable LDAPS on a Samba DC
+#
+# Issues a cert from Vault PKI, writes it to the DC's persistent storage
+# at /opt/samba-dcXX/samba/private/tls/, and patches smb.conf to enable TLS.
+# The cert files persist across container restarts since they're on the
+# bind-mounted host filesystem.
+#
+# Arguments:
+#   $1 - DC node IP (e.g., nomad01 IP)
+#   $2 - DC name (dc01 or dc02)
+#   $3 - AD realm lowercase (e.g., iotvf.lab)
+# Returns: 0 on success, 1 on failure
+function configureSambaLDAPS() {
+  local DC_IP="$1"
+  local DC_NAME="$2"
+  local AD_REALM_LOWER="$3"
+
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    warn "Vault credentials not found - skipping LDAPS for $DC_NAME"
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  if [ -z "$VAULT_ADDR" ] || [ -z "$ROOT_TOKEN" ]; then
+    warn "Vault credentials incomplete - skipping LDAPS for $DC_NAME"
+    return 1
+  fi
+
+  local DC_HOSTNAME="samba-${DC_NAME}"
+  local DC_STORAGE="/opt/samba-${DC_NAME}/samba"
+  local TLS_DIR="${DC_STORAGE}/private/tls"
+
+  doing "Issuing LDAPS TLS certificate for $DC_NAME ($DC_IP)..."
+
+  # Load DNS_POSTFIX for SAN generation
+  local DNS_POSTFIX_LOCAL=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX_LOCAL=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+  fi
+
+  local CERT_PAYLOAD
+  CERT_PAYLOAD=$(jq -n \
+    --arg cn "${DC_HOSTNAME}.${AD_REALM_LOWER}" \
+    --arg alt "${DC_HOSTNAME},${DC_HOSTNAME}.${DNS_POSTFIX_LOCAL},localhost" \
+    --arg ip "${DC_IP},127.0.0.1" \
+    '{
+      common_name: $cn,
+      alt_names: $alt,
+      ip_sans: $ip,
+      ttl: "8760h"
+    }')
+
+  local CERT_RESPONSE
+  CERT_RESPONSE=$(curl -skf -X POST "${VAULT_ADDR}/v1/pki_int/issue/acme-certs" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$CERT_PAYLOAD" 2>&1)
+
+  local CERT KEY CHAIN
+  CERT=$(echo "$CERT_RESPONSE" | jq -r '.data.certificate // empty')
+  KEY=$(echo "$CERT_RESPONSE" | jq -r '.data.private_key // empty')
+  CHAIN=$(echo "$CERT_RESPONSE" | jq -r '.data.ca_chain // [] | join("\n")')
+
+  if [ -z "$CERT" ] || [ -z "$KEY" ]; then
+    error "Failed to issue TLS cert for $DC_NAME"
+    return 1
+  fi
+
+  # Fetch root CA separately for the ca.pem file
+  local ROOT_CA
+  ROOT_CA=$(curl -skf "${VAULT_ADDR}/v1/pki/ca/pem" 2>/dev/null || echo "")
+
+  # Write cert files to temp dir
+  local TMPDIR
+  TMPDIR=$(mktemp -d)
+  printf '%s\n%s\n' "$CERT" "$CHAIN" > "$TMPDIR/cert.pem"
+  printf '%s\n' "$KEY" > "$TMPDIR/key.pem"
+  printf '%s\n' "$ROOT_CA" > "$TMPDIR/ca.pem"
+
+  # Upload and install on the DC node
+  doing "Installing TLS certificates on $DC_NAME..."
+  scpToAdmin "$TMPDIR/cert.pem" "$VM_USER" "$DC_IP" "/tmp/samba-tls-cert.pem"
+  scpToAdmin "$TMPDIR/key.pem" "$VM_USER" "$DC_IP" "/tmp/samba-tls-key.pem"
+  scpToAdmin "$TMPDIR/ca.pem" "$VM_USER" "$DC_IP" "/tmp/samba-tls-ca.pem"
+
+  sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
+    set -e
+    sudo mkdir -p "${TLS_DIR}"
+    sudo cp /tmp/samba-tls-cert.pem "${TLS_DIR}/cert.pem"
+    sudo cp /tmp/samba-tls-key.pem "${TLS_DIR}/key.pem"
+    sudo cp /tmp/samba-tls-ca.pem "${TLS_DIR}/ca.pem"
+    sudo chmod 644 "${TLS_DIR}/cert.pem" "${TLS_DIR}/ca.pem"
+    sudo chmod 600 "${TLS_DIR}/key.pem"
+    rm -f /tmp/samba-tls-*.pem
+REMOTE
+
+  rm -rf "$TMPDIR"
+  success "TLS certificates installed for $DC_NAME"
+
+  # Patch smb.conf to enable TLS (idempotent — removes old TLS lines first)
+  doing "Enabling TLS in Samba configuration on $DC_NAME..."
+  sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
+    set -e
+    SMB_CONF="${DC_STORAGE}/private/smb.conf"
+
+    if [ ! -f "\$SMB_CONF" ]; then
+      echo "smb.conf not found at \$SMB_CONF — DC may not be provisioned yet"
+      exit 1
+    fi
+
+    # Remove any existing TLS configuration lines
+    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_CONF"
+
+    # Insert TLS config after [global] section header
+    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_CONF"
+
+    echo "TLS configuration added to smb.conf"
+REMOTE
+
+  success "LDAPS enabled on $DC_NAME"
+
+  # Restart the Samba DC container to pick up TLS config
+  doing "Restarting $DC_NAME to apply TLS..."
+  sshRunAdmin "$VM_USER" "$DC_IP" "nomad job restart -group=${DC_NAME} -yes samba-dc" 2>/dev/null || \
+    warn "Could not restart $DC_NAME via Nomad — restart manually"
+
+  # Verify LDAPS is responding
+  doing "Verifying LDAPS on $DC_NAME ($DC_IP:636)..."
+  local ldaps_ok=false
+  for i in {1..15}; do
+    if sshRunAdmin "$VM_USER" "$DC_IP" "timeout 3 bash -c 'echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1'" 2>/dev/null | grep -q "CONNECTED"; then
+      ldaps_ok=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "$ldaps_ok" = "true" ]; then
+    success "LDAPS is responding on $DC_NAME ($DC_IP:636)"
+  else
+    warn "LDAPS verification failed on $DC_NAME — check container logs"
+  fi
+
+  return 0
 }
 
 # Update DNS records for Active Directory
@@ -722,7 +879,7 @@ DOMAINNAME=${AD_DOMAIN}
 HOSTIP=${NOMAD01_IP}
 DNSFORWARDER=${DNS_FORWARDER}
 JOIN=false
-INSECURELDAP=true
+INSECURELDAP=false
 NOCOMPLEXITY=true
 EOH
         destination = "secrets/samba.env"
@@ -736,7 +893,7 @@ EOH
 
       service {
         name     = "samba-dc01"
-        port     = "ldap"
+        port     = "ldaps"
         provider = "nomad"
 
         tags = [
@@ -840,7 +997,7 @@ DNSFORWARDER=${NOMAD01_IP}
 DCIP=${NOMAD01_IP}
 JOIN=true
 JOINSITE=Default-First-Site-Name
-INSECURELDAP=true
+INSECURELDAP=false
 NOCOMPLEXITY=true
 EOH
         destination = "secrets/samba.env"
@@ -854,7 +1011,7 @@ EOH
 
       service {
         name     = "samba-dc02"
-        port     = "ldap"
+        port     = "ldaps"
         provider = "nomad"
 
         tags = [

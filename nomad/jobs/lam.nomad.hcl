@@ -41,7 +41,7 @@ job "lam" {
         # LAM Configuration
         LDAP_DOMAIN          = "${AD_REALM_LOWER}"
         LDAP_BASE_DN         = "${BASE_DN}"
-        LDAP_SERVER          = "ldap://${NOMAD01_IP}"
+        LDAP_SERVER          = "ldaps://${NOMAD01_IP}"
         LDAP_USER            = "CN=Administrator,CN=Users,${BASE_DN}"
         LAM_LANG             = "en_US"
         LAM_PASSWORD         = "lam"  # Default config password, change after first login
@@ -67,7 +67,6 @@ job "lam" {
           "traefik.http.routers.lam.rule=Host(`lam.${DNS_POSTFIX}`)",
           "traefik.http.routers.lam.entrypoints=websecure",
           "traefik.http.routers.lam.tls=true",
-          "traefik.http.routers.lam.tls.certresolver=step-ca",
           "traefik.http.routers.lam.middlewares=authentik@file",
           "traefik.http.services.lam.loadbalancer.server.port=8380",
         ]

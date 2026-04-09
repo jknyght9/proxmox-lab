@@ -147,8 +147,8 @@ EOF
   echo
   echo "  4. Connection Settings:"
   echo
-  echo "     Server URI: ldap://${NOMAD01_IP}"
-  echo "     Enable StartTLS: unchecked"
+  echo "     Server URI: ldaps://${NOMAD01_IP}"
+  echo "     Enable StartTLS: unchecked (LDAPS uses port 636 natively)"
   echo "     Bind CN: ${SYNC_DN}"
   echo "     Bind Password: ${SYNC_PASSWORD}"
   echo "     Base DN: ${BASE_DN}"
@@ -178,7 +178,7 @@ EOF
 # Generated: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Connection Settings
-Server URI: ldap://${NOMAD01_IP}
+Server URI: ldaps://${NOMAD01_IP}
 Bind DN: ${SYNC_DN}
 Bind Password: ${SYNC_PASSWORD}
 Base DN: ${BASE_DN}

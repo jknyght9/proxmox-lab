@@ -660,7 +660,7 @@ The complete purge (setup.sh option 11) removes all project resources:
 - **DC won't start**: Check GlusterFS mount, ports 88/389/445 availability, and container logs
 - **Replication failing**: Run `samba-tool drs showrepl` inside container to diagnose
 - **Domain join fails**: Verify DNS forwards `ad.<domain>` to Samba DCs, check Pi-hole `/etc/dnsmasq.d/10-ad-forward.conf`
-- **LDAP connection fails**: Test with `ldapsearch -H ldap://nomad01:389 -b "dc=ad,dc=mylab,dc=lan"`
+- **LDAP connection fails**: Test with `ldapsearch -H ldaps://nomad01:636 -b "dc=ad,dc=mylab,dc=lan"` (add `-Z` for StartTLS on port 389 if LDAPS unavailable)
 
 ### Uptime Kuma Issues
 - **Not accessible via Traefik**: Check Traefik routers: `curl http://nomad01:8081/api/http/routers | jq . | grep uptime`
