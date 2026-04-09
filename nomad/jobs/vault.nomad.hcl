@@ -98,9 +98,6 @@ EOH
           "traefik.http.services.vault.loadbalancer.server.port=8200",
           # Vault listens on HTTPS — tell Traefik to use HTTPS for the backend
           "traefik.http.services.vault.loadbalancer.server.scheme=https",
-          # Skip TLS verify on the backend (Vault's cert is from its own PKI)
-          "traefik.http.serversTransports.vault-transport.insecureSkipVerify=true",
-          "traefik.http.services.vault.loadbalancer.serversTransport=vault-transport@nomad-default",
         ]
 
         check {

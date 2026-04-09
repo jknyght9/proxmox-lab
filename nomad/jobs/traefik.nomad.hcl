@@ -48,6 +48,8 @@ job "traefik" {
           "--providers.nomad.allowEmptyServices=true",
           "--providers.file.directory=/data/traefik/config",
           "--providers.file.watch=true",
+          # Allow HTTPS backend connections (Vault serves HTTPS with its own PKI cert)
+          "--serversTransport.insecureSkipVerify=true",
         ]
       }
 
