@@ -554,38 +554,47 @@ REMOTE
   rm -rf "$TMPDIR"
   success "TLS certificates installed for $DC_NAME"
 
-  # Patch smb.conf to enable TLS (idempotent — removes old TLS lines first)
+  # Patch smb.conf inside the running container (smb.conf lives at
+  # /etc/samba/smb.conf inside the container, NOT in the bind-mounted
+  # /var/lib/samba volume). Use docker exec to modify it in-place.
   doing "Enabling TLS in Samba configuration on $DC_NAME..."
-  sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
-    set -e
-    SMB_CONF="${DC_STORAGE}/private/smb.conf"
 
-    if [ ! -f "\$SMB_CONF" ]; then
-      echo "smb.conf not found at \$SMB_CONF — DC may not be provisioned yet"
-      exit 1
-    fi
+  # Find the container ID for this DC's allocation
+  local CONTAINER_ID
+  CONTAINER_ID=$(sshRunAdmin "$VM_USER" "$DC_IP" "docker ps -q --filter 'name=samba-dc' | head -1" 2>/dev/null)
+
+  if [ -z "$CONTAINER_ID" ]; then
+    error "Could not find running Samba DC container on $DC_IP"
+    return 1
+  fi
+
+  sshRunAdmin "$VM_USER" "$DC_IP" "docker exec $CONTAINER_ID bash -c '
+    SMB_CONF=/etc/samba/smb.conf
+
+    # Fix key permissions (container runs as root, key needs to be readable)
+    chmod 644 /var/lib/samba/private/tls/key.pem
 
     # Remove any existing TLS configuration lines
-    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_CONF"
+    sed -i \"/^\\s*tls enabled/d; /^\\s*tls certfile/d; /^\\s*tls keyfile/d; /^\\s*tls cafile/d\" \"\$SMB_CONF\"
 
     # Insert TLS config after [global] section header
-    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_CONF"
+    sed -i \"/^\\[global\\]/a\\\\\\ttls enabled  = yes\\n\\ttls certfile = /var/lib/samba/private/tls/cert.pem\\n\\ttls keyfile  = /var/lib/samba/private/tls/key.pem\\n\\ttls cafile   = /var/lib/samba/private/tls/ca.pem\" \"\$SMB_CONF\"
 
-    echo "TLS configuration added to smb.conf"
-REMOTE
+    echo \"TLS configuration added to smb.conf\"
+
+    # Reload Samba to pick up TLS config without full restart
+    samba-tool testparm --suppress-prompt 2>/dev/null | head -3
+    kill -HUP \$(cat /run/samba/samba.pid 2>/dev/null || pidof samba) 2>/dev/null || true
+  '" || { error "Failed to configure TLS on $DC_NAME"; return 1; }
 
   success "LDAPS enabled on $DC_NAME"
 
-  # Restart the Samba DC container to pick up TLS config
-  doing "Restarting $DC_NAME to apply TLS..."
-  sshRunAdmin "$VM_USER" "$DC_IP" "nomad job restart -group=${DC_NAME} -yes samba-dc" 2>/dev/null || \
-    warn "Could not restart $DC_NAME via Nomad — restart manually"
-
   # Verify LDAPS is responding
   doing "Verifying LDAPS on $DC_NAME ($DC_IP:636)..."
+  sleep 3
   local ldaps_ok=false
   for i in {1..15}; do
-    if sshRunAdmin "$VM_USER" "$DC_IP" "timeout 3 bash -c 'echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1'" 2>/dev/null | grep -q "CONNECTED"; then
+    if sshRunAdmin "$VM_USER" "$DC_IP" "echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1" 2>/dev/null | grep -q "depth"; then
       ldaps_ok=true
       break
     fi
@@ -595,7 +604,14 @@ REMOTE
   if [ "$ldaps_ok" = "true" ]; then
     success "LDAPS is responding on $DC_NAME ($DC_IP:636)"
   else
-    warn "LDAPS verification failed on $DC_NAME — check container logs"
+    warn "LDAPS verification timed out — trying samba restart..."
+    sshRunAdmin "$VM_USER" "$DC_IP" "docker exec $CONTAINER_ID bash -c 'samba -D 2>/dev/null || true'" 2>/dev/null
+    sleep 5
+    if sshRunAdmin "$VM_USER" "$DC_IP" "echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1" 2>/dev/null | grep -q "depth"; then
+      success "LDAPS is responding on $DC_NAME after restart ($DC_IP:636)"
+    else
+      warn "LDAPS verification failed on $DC_NAME — check container logs"
+    fi
   fi
 
   return 0
