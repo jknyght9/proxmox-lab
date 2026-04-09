@@ -57,3 +57,7 @@ variable "network_bridge" {
   description = "Proxmox network bridge for Packer VMs (must be reachable from Docker)"
   default     = "vmbr0"
 }
+variable "vault_addr" {
+  type        = string
+  description = "Vault address for fetching PKI root CA (e.g., https://10.1.50.114:8200). The VM fetches the cert directly during build."
+}

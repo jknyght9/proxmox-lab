@@ -24,3 +24,7 @@ network_bridge = "vmbr0"
 # For single-node, "local" or "local-lvm" is fine
 template_storage = "local"
 template_storage_type = "lvm"  # Options: nfs, rbd, lvm, cephfs, dir
+
+# Vault address for PKI root CA (used during Packer builds)
+# The VM being built fetches the cert directly from this endpoint
+vault_addr = "https://10.1.50.114:8200"
