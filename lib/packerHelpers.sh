@@ -116,6 +116,20 @@ function updatePackerFromClusterInfo() {
   fi
   info "  network_bridge = \"$NETWORK_BRIDGE_VAL\""
 
+  # Set vault_addr from vault-credentials.json (for PKI root CA during builds)
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local VAULT_ADDR_VAL
+    VAULT_ADDR_VAL=$(jq -r '.vault_address // ""' "$VAULT_CREDENTIALS_FILE")
+    if [ -n "$VAULT_ADDR_VAL" ] && [ "$VAULT_ADDR_VAL" != "null" ]; then
+      if grep -q "^vault_addr" "$PACKER_FILE"; then
+        sed_inplace "s|^vault_addr[[:space:]]*=.*|vault_addr = \"$VAULT_ADDR_VAL\"|" "$PACKER_FILE"
+      else
+        echo "vault_addr = \"$VAULT_ADDR_VAL\"" >> "$PACKER_FILE"
+      fi
+      info "  vault_addr = \"$VAULT_ADDR_VAL\""
+    fi
+  fi
+
   # Load and apply packer passwords from crypto/service-passwords.json
   # Note: ssh_password must match template_password since that's what the base template uses
   local PASSWORDS_FILE="$CRYPTO_DIR/service-passwords.json"
