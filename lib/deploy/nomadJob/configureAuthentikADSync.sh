@@ -72,7 +72,7 @@ EOF
   doing "Retrieving AD credentials from Vault..."
 
   local AD_SECRETS
-  AD_SECRETS=$(curl -s --connect-timeout 5 --max-time 10 \
+  AD_SECRETS=$(curl -sk --connect-timeout 5 --max-time 10 \
     "${VAULT_ADDR}/v1/secret/data/samba-ad" \
     -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
 
