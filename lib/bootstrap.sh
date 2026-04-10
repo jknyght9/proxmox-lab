@@ -258,12 +258,31 @@ function discoverStorage() {
     return 0
   fi
 
-  # Filter storage pools that can hold VM images
+  # Show all storage pools with their content types
+  info "  Available storage pools:"
+  echo "$STORAGE_JSON" | jq -r '.[] | "    \(.storage) (\(.type)) \(if .shared == 1 then "[shared]" else "[local]" end) content: \(.content)"'
+
+  # Filter storage pools that can hold VM disk images
   local IMAGE_STORAGE
   IMAGE_STORAGE=$(echo "$STORAGE_JSON" | jq '[.[] | select(.content | contains("images"))]')
 
-  info "  Available storage pools:"
-  echo "$IMAGE_STORAGE" | jq -r '.[] | "    \(.storage) (\(.type)) \(if .shared == 1 then "[shared]" else "[local]" end)"'
+  # Identify storage that supports snippets (needed for cloud-init)
+  local SNIPPET_STORAGE
+  SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("snippets"))] | .[].storage' | head -1)
+  if [ -n "$SNIPPET_STORAGE" ]; then
+    info "  Snippet storage: $SNIPPET_STORAGE"
+  else
+    warn "  No storage with 'snippets' content found — cloud-init snippets may need manual setup"
+  fi
+
+  # Identify storage that supports LXC templates (vztmpl)
+  local VZTMPL_STORAGE
+  VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("vztmpl"))] | .[].storage' | head -1)
+  if [ -n "$VZTMPL_STORAGE" ]; then
+    info "  LXC template storage: $VZTMPL_STORAGE"
+  else
+    warn "  No storage with 'vztmpl' content found — LXC template downloads may fail"
+  fi
 
   # Apply user overrides if specified
   if [ -n "$STORAGE_TEMPLATES_OVERRIDE" ]; then
@@ -310,15 +329,21 @@ function discoverStorage() {
   fi
 
   # Save storage config to cluster-info.json
+  SNIPPET_STORAGE="${SNIPPET_STORAGE:-local}"
+  VZTMPL_STORAGE="${VZTMPL_STORAGE:-local}"
+
   local tmp; tmp=$(mktemp)
   jq --arg ts "$TEMPLATE_STORAGE" --arg tt "$TEMPLATE_STORAGE_TYPE" \
     --arg rs "$RUNTIME_STORAGE" --arg ls "$LXC_STORAGE" \
+    --arg ss "$SNIPPET_STORAGE" --arg vs "$VZTMPL_STORAGE" \
     --argjson shared "$([ "$IS_CLUSTER" = "true" ] && echo "true" || echo "false")" \
     '.storage = {
       templates: $ts,
       templates_type: $tt,
       runtime: $rs,
       lxc: $ls,
+      snippets: $ss,
+      vztmpl: $vs,
       is_shared: $shared
     }' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
 
@@ -423,7 +448,7 @@ function createAPIToken() {
     pveum role remove "$ROLE" 2>/dev/null || true
 
     # Create role with required privileges
-    pveum roleadd "$ROLE" -privs "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.Monitor,VM.PowerMgmt,VM.Snapshot"
+    pveum roleadd "$ROLE" -privs "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot"
 
     # Create user
     pveum user add "$USER" --enable 1
@@ -647,14 +672,14 @@ function downloadLXCTemplates() {
     # Check if template already exists
     local EXISTS
     EXISTS=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-      "pveam list local 2>/dev/null | grep -c 'debian-12-standard' || echo 0" 2>/dev/null)
+      "pveam list ${VZTMPL_STORAGE:-local} 2>/dev/null | grep -c 'debian-12-standard' || echo 0" 2>/dev/null)
 
     if [ "$EXISTS" -gt 0 ]; then
       info "    Debian 12 template already present on $NODE_NAME"
     else
       info "    Downloading $LXC_TEMPLATE to $NODE_NAME..."
       sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-        "pveam update && pveam download local $LXC_TEMPLATE" 2>/dev/null
+        "pveam update && pveam download ${VZTMPL_STORAGE:-local} $LXC_TEMPLATE" 2>/dev/null
 
       if [ $? -eq 0 ]; then
         info "    Template downloaded successfully on $NODE_NAME"
@@ -666,7 +691,7 @@ function downloadLXCTemplates() {
           "pveam available --section system 2>/dev/null | grep 'debian-12-standard' | awk '{print \$2}' | tail -1" 2>/dev/null)
         if [ -n "$LATEST" ]; then
           sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-            "pveam download local $LATEST" 2>/dev/null
+            "pveam download ${VZTMPL_STORAGE:-local} $LATEST" 2>/dev/null
           info "    Downloaded $LATEST on $NODE_NAME"
         else
           warn "    No Debian 12 template found in repository for $NODE_NAME"
