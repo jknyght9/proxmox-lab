@@ -30,10 +30,6 @@ variable "root_password" {
   sensitive   = true
 }
 
-variable "proxmox_api_url" {
-  type        = string
-  description = "Proxmox API URL for extracting host"
-}
 
 variable "vmid_start" {
   type        = number

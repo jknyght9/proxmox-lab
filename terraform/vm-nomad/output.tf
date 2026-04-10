@@ -1,25 +1,22 @@
 output "nomad" {
   sensitive = true
   value = {
-    for k, vm in proxmox_vm_qemu.nomad :
+    for k, vm in proxmox_virtual_environment_vm.nomad :
     k => {
       name     = vm.name
-      vmid     = vm.vmid
-      agent    = vm.agent
-      ip       = vm.default_ipv4_address
-      sship    = vm.ssh_host
-      sshport  = vm.ssh_port
+      vmid     = vm.vm_id
+      ip       = try(vm.ipv4_addresses[1][0], "pending")
       hostname = vm.name
-      target   = vm.target_node
+      target   = vm.node_name
     }
   }
 }
 
 output "nomad-hosts" {
   value = {
-    for name, details in proxmox_vm_qemu.nomad : name => {
+    for name, details in proxmox_virtual_environment_vm.nomad : name => {
       hostname = details.name
-      ip       = details.default_ipv4_address
+      ip       = try(details.ipv4_addresses[1][0], "pending")
     }
   }
 }

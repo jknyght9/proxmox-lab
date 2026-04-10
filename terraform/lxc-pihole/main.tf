@@ -1,8 +1,6 @@
 locals {
-  proxmox_api_host = regex("^https?://([^:/]+)", var.proxmox_api_url)[0]
-
-  # Default SSH host (fallback)
-  default_ssh_host = var.proxmox_ssh_host != "" ? var.proxmox_ssh_host : local.proxmox_api_host
+  # Default SSH host for provisioners
+  default_ssh_host = var.proxmox_ssh_host
 
   # Create a map from hostname to node config for for_each
   nodes_map = { for idx, node in var.nodes : node.hostname => merge(node, {
@@ -22,48 +20,59 @@ locals {
   unbound_conf = file("${path.module}/files/unbound.conf")
 }
 
-resource "proxmox_lxc" "dns" {
+resource "proxmox_virtual_environment_container" "dns" {
   for_each = local.nodes_map
 
-  target_node     = each.value.target_node
-  vmid            = each.value.vmid
-  hostname        = each.value.hostname
-  ostemplate      = var.ostemplate
-  password        = var.root_password
-  ssh_public_keys = file(var.ssh_admin_public_key_file)  # Admin key for container access
+  node_name   = each.value.target_node
+  vm_id       = each.value.vmid
+  tags        = ["terraform", "lxc", "dns", var.cluster_name]
   # HA with keepalived requires NET_ADMIN capability, which needs privileged mode
-  unprivileged    = !var.enable_ha_vip
-  # Use bootstrap DNS for initial provisioning (avoids inheriting Tailscale/host DNS)
-  nameserver      = var.bootstrap_dns
+  unprivileged = !var.enable_ha_vip
+  start_on_boot = true
+  started       = true
 
-  cores  = var.cores
-  memory = var.memory
-  swap   = var.memory
-  start  = true
-  onboot = true
-
-  rootfs {
-    storage = var.storage
-    size    = var.disk_size
+  operating_system {
+    template_file_id = var.ostemplate
+    type             = "debian"
   }
 
-  network {
-    name   = "eth0"
-    bridge = var.network_bridge
-    ip     = each.value.ip
-    gw     = each.value.gw
-  }
-
-  # Nesting only needed for unprivileged containers
-  # Privileged containers with feature flags require root@pam (not API tokens)
-  dynamic "features" {
-    for_each = var.enable_ha_vip ? [] : [1]
-    content {
-      nesting = true
+  initialization {
+    hostname = each.value.hostname
+    dns {
+      servers = [var.bootstrap_dns]
+    }
+    user_account {
+      password = var.root_password
+      keys     = [trimspace(file(var.ssh_admin_public_key_file))]
     }
   }
 
-  tags = "terraform,lxc,dns,${var.cluster_name}"
+  cpu {
+    cores = var.cores
+  }
+
+  memory {
+    dedicated = var.memory
+    swap      = var.memory
+  }
+
+  disk {
+    datastore_id = var.storage
+    size         = tonumber(replace(var.disk_size, "G", ""))
+  }
+
+  network_interface {
+    name   = "eth0"
+    bridge = var.network_bridge
+    ipv4 {
+      address = each.value.ip
+      gateway = each.value.gw
+    }
+  }
+
+  features {
+    nesting = true
+  }
 }
 
 # Enable nesting feature for privileged containers (required for Pi-hole FTL)
@@ -71,10 +80,10 @@ resource "proxmox_lxc" "dns" {
 # so we add it after creation via pct set on the Proxmox host
 resource "null_resource" "enable_nesting" {
   for_each   = var.enable_ha_vip ? local.nodes_map : {}
-  depends_on = [proxmox_lxc.dns]
+  depends_on = [proxmox_virtual_environment_container.dns]
 
   triggers = {
-    vmid = proxmox_lxc.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
   }
 
   connection {
@@ -86,9 +95,9 @@ resource "null_resource" "enable_nesting" {
 
   provisioner "remote-exec" {
     inline = [
-      "echo '[+] Enabling nesting feature for container ${proxmox_lxc.dns[each.key].vmid}...'",
-      "pct set ${proxmox_lxc.dns[each.key].vmid} -features nesting=1",
-      "pct reboot ${proxmox_lxc.dns[each.key].vmid}",
+      "echo '[+] Enabling nesting feature for container ${proxmox_virtual_environment_container.dns[each.key].vmid}...'",
+      "pct set ${proxmox_virtual_environment_container.dns[each.key].vmid} -features nesting=1",
+      "pct reboot ${proxmox_virtual_environment_container.dns[each.key].vmid}",
       "sleep 5",
       "echo '[+] Nesting enabled and container rebooted'"
     ]
@@ -98,10 +107,10 @@ resource "null_resource" "enable_nesting" {
 # Direct SSH provisioning (only for non-SDN networks)
 resource "null_resource" "direct_provision" {
   for_each   = var.is_sdn_network ? {} : local.nodes_map
-  depends_on = [proxmox_lxc.dns, null_resource.enable_nesting]
+  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
 
   triggers = {
-    vmid = proxmox_lxc.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
   }
 
   connection {
@@ -363,28 +372,28 @@ resource "null_resource" "configure_local_dns" {
 # SDN provisioning via pct exec (only for SDN networks)
 resource "null_resource" "sdn_provision" {
   for_each   = var.is_sdn_network ? local.nodes_map : {}
-  depends_on = [proxmox_lxc.dns, null_resource.enable_nesting]
+  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
 
   triggers = {
-    vmid = proxmox_lxc.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       # Wait for container to be fully started and running
-      echo "[+] Waiting for container ${proxmox_lxc.dns[each.key].vmid} to be running..."
+      echo "[+] Waiting for container ${proxmox_virtual_environment_container.dns[each.key].vmid} to be running..."
       for i in $(seq 1 30); do
         STATUS=$(ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-          "pct status ${proxmox_lxc.dns[each.key].vmid} 2>/dev/null | grep -oE 'running|stopped'" || echo "unknown")
+          "pct status ${proxmox_virtual_environment_container.dns[each.key].vmid} 2>/dev/null | grep -oE 'running|stopped'" || echo "unknown")
         if [ "$STATUS" = "running" ]; then
-          echo "[+] Container ${proxmox_lxc.dns[each.key].vmid} is running"
+          echo "[+] Container ${proxmox_virtual_environment_container.dns[each.key].vmid} is running"
           break
         fi
         echo "  Waiting... (attempt $i/30, status: $STATUS)"
         if [ "$STATUS" = "stopped" ]; then
-          echo "[+] Starting container ${proxmox_lxc.dns[each.key].vmid}..."
+          echo "[+] Starting container ${proxmox_virtual_environment_container.dns[each.key].vmid}..."
           ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-            "pct start ${proxmox_lxc.dns[each.key].vmid}" || true
+            "pct start ${proxmox_virtual_environment_container.dns[each.key].vmid}" || true
         fi
         sleep 5
       done
@@ -397,7 +406,7 @@ UNBOUNDCONF
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/unbound-${each.key}.conf root@${each.value.ssh_host}:/tmp/unbound-${each.key}.conf
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${each.value.ssh_host} \
-        "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/unbound-${each.key}.conf /tmp/pi-hole-unbound.conf"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/unbound-${each.key}.conf /tmp/pi-hole-unbound.conf"
 
       # Create install script on Proxmox host
       cat > /tmp/install-pihole-${each.key}.sh <<'INSTALLSCRIPT'
@@ -470,7 +479,7 @@ INSTALLSCRIPT
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/install-pihole-${each.key}.sh root@${each.value.ssh_host}:/tmp/install-pihole-${each.key}.sh
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=300 root@${each.value.ssh_host} \
-        "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/install-pihole-${each.key}.sh /tmp/install-pihole.sh && pct exec ${proxmox_lxc.dns[each.key].vmid} -- bash /tmp/install-pihole.sh"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/install-pihole-${each.key}.sh /tmp/install-pihole.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vmid} -- bash /tmp/install-pihole.sh"
 
       echo "[OK] Pi-hole installed on ${each.key}"
     EOT
@@ -654,7 +663,7 @@ resource "null_resource" "keepalived_setup" {
   depends_on = [null_resource.direct_provision, null_resource.nebula_sync_setup]
 
   triggers = {
-    vmid           = proxmox_lxc.dns[each.key].vmid
+    vmid           = proxmox_virtual_environment_container.dns[each.key].vmid
     ha_vip_address = var.ha_vip_address
   }
 
@@ -775,7 +784,7 @@ resource "null_resource" "sdn_keepalived_setup" {
   depends_on = [null_resource.sdn_provision, null_resource.sdn_nebula_sync_setup]
 
   triggers = {
-    vmid           = proxmox_lxc.dns[each.key].vmid
+    vmid           = proxmox_virtual_environment_container.dns[each.key].vmid
     ha_vip_address = var.ha_vip_address
   }
 
@@ -875,7 +884,7 @@ KEEPSCRIPT
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/keepalived-${each.key}.sh root@${each.value.ssh_host}:/tmp/keepalived-${each.key}.sh
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-        "pct push ${proxmox_lxc.dns[each.key].vmid} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_lxc.dns[each.key].vmid} -- bash /tmp/keepalived-setup.sh"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vmid} -- bash /tmp/keepalived-setup.sh"
     EOT
   }
 }

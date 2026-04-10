@@ -2,10 +2,10 @@ output "dns-hosts" {
   description = "Map of DNS hosts with their details"
   value = {
     for hostname, node in local.nodes_map : hostname => {
-      hostname    = proxmox_lxc.dns[hostname].hostname
-      ip          = proxmox_lxc.dns[hostname].network[0].ip
-      vmid        = proxmox_lxc.dns[hostname].vmid
-      target_node = proxmox_lxc.dns[hostname].target_node
+      hostname    = node.hostname
+      ip          = node.ip
+      vmid        = node.vmid
+      target_node = node.target_node
     }
   }
 }
