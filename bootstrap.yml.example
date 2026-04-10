@@ -1,0 +1,30 @@
+# Proxmox Lab Bootstrap Configuration
+#
+# Minimal input required to bootstrap the lab. Everything else (cluster
+# topology, storage pools, network bridges) is auto-discovered from
+# Proxmox. Copy this file to bootstrap.yml and fill in your values.
+#
+# Usage:
+#   cp bootstrap.yml.example bootstrap.yml
+#   # Edit bootstrap.yml with your values
+#   ./setup.sh
+
+proxmox:
+  ip: "192.168.1.100"          # IP of any Proxmox node (cluster auto-detected)
+  password: "changeme"          # Root password (used once to create API token)
+
+network:
+  cidr: "192.168.1.0/24"       # Network CIDR for VMs and containers
+  gateway: "192.168.1.1"       # Default gateway
+  # bridge: "vmbr0"            # Optional: override auto-detected bridge
+
+dns_suffix: "mylab.lan"        # Domain suffix for all services
+
+# Optional: override auto-detected storage pools
+# If omitted, bootstrap discovers available pools and picks the best option:
+#   - Clusters: prefers shared storage (NFS, Ceph, GlusterFS)
+#   - Standalone: uses local-lvm
+#   - LXC containers: always local-lvm (file-level storage not supported)
+# storage:
+#   templates: "nfs-templates"  # Storage for Packer templates (VM images)
+#   runtime: "local-lvm"        # Storage for running VMs and LXC containers
