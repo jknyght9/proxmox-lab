@@ -12,9 +12,13 @@
 #
 # Dependencies: jq, sshpass (for initial password-based SSH)
 
-BOOTSTRAP_FILE="${SCRIPT_DIR}/bootstrap.yml"
-CLUSTER_INFO_FILE="${SCRIPT_DIR}/cluster-info.json"
-CREDENTIALS_FILE="${CRYPTO_DIR}/proxmox-credentials.json"
+# These are set lazily (not at source time) because CRYPTO_DIR and
+# SCRIPT_DIR may not be defined yet when this file is sourced.
+_bootstrap_init_vars() {
+  BOOTSTRAP_FILE="${SCRIPT_DIR}/bootstrap.yml"
+  CLUSTER_INFO_FILE="${SCRIPT_DIR}/cluster-info.json"
+  CREDENTIALS_FILE="${CRYPTO_DIR}/proxmox-credentials.json"
+}
 
 # =============================================================================
 # YAML Parsing (minimal — bootstrap.yml is flat enough for grep/sed)
@@ -641,6 +645,8 @@ configuration for Terraform and Packer.
 #############################################################################
 
 EOF
+
+  _bootstrap_init_vars
 
   readBootstrapConfig || return 1
   discoverCluster || return 1
