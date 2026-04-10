@@ -162,7 +162,7 @@ EOF
   echo
   echo "     User object filter: (&(objectClass=user)(!(objectClass=computer)))"
   echo "     Group object filter: (objectClass=group)"
-  echo "     User group membership field: memberOf"
+  echo "     User group membership field: member"
   echo "     Object uniqueness field: objectSid"
   echo "     Sync users: checked"
   echo "     Sync groups: checked"
