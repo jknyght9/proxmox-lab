@@ -583,10 +583,25 @@ REMOTE
     fi
 
     # Remove any existing TLS lines (idempotent)
-    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_CONF"
+    sudo grep -v '^\s*tls enabled\|^\s*tls certfile\|^\s*tls keyfile\|^\s*tls cafile' "\$SMB_CONF" > /tmp/smb.conf.tmp
+    sudo cp /tmp/smb.conf.tmp "\$SMB_CONF"
+    rm -f /tmp/smb.conf.tmp
 
-    # Insert TLS config after [global]
-    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_CONF"
+    # Insert TLS config block after [global] using a temp file (avoids
+    # sed tab-escaping issues in heredocs)
+    sudo python3 -c "
+import sys
+lines = open(sys.argv[1]).readlines()
+out = []
+for line in lines:
+    out.append(line)
+    if line.strip() == '[global]':
+        out.append('        tls enabled  = yes\n')
+        out.append('        tls certfile = /var/lib/samba/private/tls/cert.pem\n')
+        out.append('        tls keyfile  = /var/lib/samba/private/tls/key.pem\n')
+        out.append('        tls cafile   = /var/lib/samba/private/tls/ca.pem\n')
+open(sys.argv[1], 'w').writelines(out)
+" "\$SMB_CONF"
 
     echo "TLS configuration written to smb.conf"
 REMOTE
