@@ -437,18 +437,16 @@ function createAPIToken() {
   # Run on the primary node via SSH
   local TOKEN_OUTPUT
   TOKEN_OUTPUT=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$PROXMOX_IP" bash <<'REMOTE_SCRIPT'
-    set -e
-
     USER="hashicorp@pam"
     ROLE="HashicorpBuild"
     TOKEN_NAME="hashicorp-token"
 
-    # Clean up existing user/role if present
+    # Clean up existing user/role/acl if present
     pveum user delete "$USER" 2>/dev/null || true
-    pveum role remove "$ROLE" 2>/dev/null || true
+    pveum role delete "$ROLE" 2>/dev/null || true
 
     # Create role with required privileges
-    pveum roleadd "$ROLE" -privs "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot"
+    pveum role add "$ROLE" -privs "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot"
 
     # Create user
     pveum user add "$USER" --enable 1
