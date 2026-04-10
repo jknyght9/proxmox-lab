@@ -63,6 +63,7 @@ job "samba-dc" {
         volumes = [
           "/opt/samba-dc01/samba:/var/lib/samba",
           "/opt/samba-dc01/krb5:/etc/krb5",
+          "/opt/samba-dc01/smb.conf:/etc/samba/smb.conf",
         ]
       }
 
@@ -90,7 +91,7 @@ EOH
 
       service {
         name     = "samba-dc01"
-        port     = "ldap"
+        port     = "ldaps"
         provider = "nomad"
 
         tags = [
@@ -174,6 +175,7 @@ EOH
         volumes = [
           "/opt/samba-dc02/samba:/var/lib/samba",
           "/opt/samba-dc02/krb5:/etc/krb5",
+          "/opt/samba-dc02/smb.conf:/etc/samba/smb.conf",
         ]
       }
 
@@ -203,7 +205,7 @@ EOH
 
       service {
         name     = "samba-dc02"
-        port     = "ldap"
+        port     = "ldaps"
         provider = "nomad"
 
         tags = [
