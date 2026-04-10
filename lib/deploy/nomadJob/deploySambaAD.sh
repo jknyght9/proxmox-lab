@@ -554,64 +554,66 @@ REMOTE
   rm -rf "$TMPDIR"
   success "TLS certificates installed for $DC_NAME"
 
-  # Patch smb.conf inside the running container (smb.conf lives at
-  # /etc/samba/smb.conf inside the container, NOT in the bind-mounted
-  # /var/lib/samba volume). Use docker exec to modify it in-place.
-  doing "Enabling TLS in Samba configuration on $DC_NAME..."
+  # Patch smb.conf.bak on the host volume directly — no docker exec needed.
+  # The entrypoint restores smb.conf.bak to /etc/samba/smb.conf on container
+  # start, so writing TLS config here and restarting picks it up cleanly.
+  doing "Adding TLS configuration to $DC_NAME smb.conf..."
 
-  # Find the container ID for this DC's allocation
-  local CONTAINER_ID
-  CONTAINER_ID=$(sshRunAdmin "$VM_USER" "$DC_IP" "docker ps -q --filter 'name=samba-dc' | head -1" 2>/dev/null)
+  local SMB_BAK="${DC_STORAGE}/smb.conf.bak"
 
-  if [ -z "$CONTAINER_ID" ]; then
-    error "Could not find running Samba DC container on $DC_IP"
+  sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
+    set -e
+
+    # Fix key permissions (Samba runs as root inside container)
+    sudo chmod 644 "${TLS_DIR}/key.pem"
+
+    SMB_BAK="${SMB_BAK}"
+
+    if [ ! -f "\$SMB_BAK" ]; then
+      echo "smb.conf.bak not found — DC may still be starting"
+      exit 1
+    fi
+
+    # Remove any existing TLS lines (idempotent)
+    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_BAK"
+
+    # Insert TLS config after [global]
+    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_BAK"
+
+    echo "TLS configuration written to smb.conf.bak"
+REMOTE
+
+  if [ $? -ne 0 ]; then
+    error "Failed to configure TLS on $DC_NAME"
     return 1
   fi
 
-  sshRunAdmin "$VM_USER" "$DC_IP" "docker exec $CONTAINER_ID bash -c '
-    SMB_CONF=/etc/samba/smb.conf
+  success "TLS configuration written for $DC_NAME"
 
-    # Fix key permissions (container runs as root, key needs to be readable)
-    chmod 644 /var/lib/samba/private/tls/key.pem
+  # Restart the container so the entrypoint restores smb.conf.bak
+  # (which now includes TLS) to /etc/samba/smb.conf
+  doing "Restarting $DC_NAME to apply TLS configuration..."
+  sshRunAdmin "$VM_USER" "$DC_IP" "nomad job restart -group=${DC_NAME} -yes samba-dc" 2>/dev/null || \
+    warn "Could not restart $DC_NAME via Nomad"
 
-    # Remove any existing TLS configuration lines
-    sed -i \"/^\\s*tls enabled/d; /^\\s*tls certfile/d; /^\\s*tls keyfile/d; /^\\s*tls cafile/d\" \"\$SMB_CONF\"
-
-    # Insert TLS config after [global] section header
-    sed -i \"/^\\[global\\]/a\\\\\\ttls enabled  = yes\\n\\ttls certfile = /var/lib/samba/private/tls/cert.pem\\n\\ttls keyfile  = /var/lib/samba/private/tls/key.pem\\n\\ttls cafile   = /var/lib/samba/private/tls/ca.pem\" \"\$SMB_CONF\"
-
-    echo \"TLS configuration added to smb.conf\"
-
-    # Reload Samba to pick up TLS config without full restart
-    samba-tool testparm --suppress-prompt 2>/dev/null | head -3
-    kill -HUP \$(cat /run/samba/samba.pid 2>/dev/null || pidof samba) 2>/dev/null || true
-  '" || { error "Failed to configure TLS on $DC_NAME"; return 1; }
-
-  success "LDAPS enabled on $DC_NAME"
-
-  # Verify LDAPS is responding
+  # Verify LDAPS is responding with our Vault-issued cert
   doing "Verifying LDAPS on $DC_NAME ($DC_IP:636)..."
-  sleep 3
   local ldaps_ok=false
-  for i in {1..15}; do
-    if sshRunAdmin "$VM_USER" "$DC_IP" "echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1" 2>/dev/null | grep -q "depth"; then
+  for i in {1..30}; do
+    local cert_issuer
+    cert_issuer=$(sshRunAdmin "$VM_USER" "$DC_IP" "echo | openssl s_client -connect $DC_IP:636 2>/dev/null | grep 'issuer='" 2>/dev/null || echo "")
+    if echo "$cert_issuer" | grep -q "Proxmox Lab"; then
       ldaps_ok=true
       break
     fi
-    sleep 2
+    sleep 3
   done
 
   if [ "$ldaps_ok" = "true" ]; then
-    success "LDAPS is responding on $DC_NAME ($DC_IP:636)"
+    success "LDAPS is responding on $DC_NAME with Vault-issued cert ($DC_IP:636)"
   else
-    warn "LDAPS verification timed out — trying samba restart..."
-    sshRunAdmin "$VM_USER" "$DC_IP" "docker exec $CONTAINER_ID bash -c 'samba -D 2>/dev/null || true'" 2>/dev/null
-    sleep 5
-    if sshRunAdmin "$VM_USER" "$DC_IP" "echo | openssl s_client -connect $DC_IP:636 -quiet 2>/dev/null | head -1" 2>/dev/null | grep -q "depth"; then
-      success "LDAPS is responding on $DC_NAME after restart ($DC_IP:636)"
-    else
-      warn "LDAPS verification failed on $DC_NAME — check container logs"
-    fi
+    warn "LDAPS verification timed out on $DC_NAME — cert may be auto-generated. Check with:"
+    warn "  openssl s_client -connect $DC_IP:636 2>&1 | grep issuer"
   fi
 
   return 0
