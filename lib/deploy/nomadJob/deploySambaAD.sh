@@ -225,6 +225,8 @@ ROLE_JSON
 
     # Create required directories on local filesystem (supports ACLs)
     sudo mkdir -p "$DC01_DIR"/{samba,krb5}
+    # Create empty smb.conf so Docker bind-mounts it as a file, not a directory
+    sudo touch "$DC01_DIR/smb.conf"
     sudo chmod -R 755 "$DC01_DIR"
 
     echo "DC01 local storage directories prepared at $DC01_DIR"
@@ -249,6 +251,8 @@ REMOTE_SCRIPT
 
       # Create required directories on local filesystem (supports ACLs)
       sudo mkdir -p "$DC02_DIR"/{samba,krb5}
+      # Create empty smb.conf so Docker bind-mounts it as a file, not a directory
+      sudo touch "$DC02_DIR/smb.conf"
       sudo chmod -R 755 "$DC02_DIR"
 
       echo "DC02 local storage directories prepared at $DC02_DIR"
@@ -554,12 +558,12 @@ REMOTE
   rm -rf "$TMPDIR"
   success "TLS certificates installed for $DC_NAME"
 
-  # Patch smb.conf.bak on the host volume directly — no docker exec needed.
-  # The entrypoint restores smb.conf.bak to /etc/samba/smb.conf on container
-  # start, so writing TLS config here and restarting picks it up cleanly.
+  # Write TLS config directly to the host-mounted smb.conf. Since we
+  # bind-mount /opt/samba-dcXX/smb.conf:/etc/samba/smb.conf, changes
+  # here persist across container restarts with no backup/restore needed.
   doing "Adding TLS configuration to $DC_NAME smb.conf..."
 
-  local SMB_BAK="${DC_STORAGE}/smb.conf.bak"
+  local SMB_CONF="/opt/samba-${DC_NAME}/smb.conf"
 
   sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
     set -e
@@ -567,20 +571,24 @@ REMOTE
     # Fix key permissions (Samba runs as root inside container)
     sudo chmod 644 "${TLS_DIR}/key.pem"
 
-    SMB_BAK="${SMB_BAK}"
+    SMB_CONF="${SMB_CONF}"
 
-    if [ ! -f "\$SMB_BAK" ]; then
-      echo "smb.conf.bak not found — DC may still be starting"
-      exit 1
+    if [ ! -f "\$SMB_CONF" ]; then
+      echo "smb.conf not found at \$SMB_CONF — DC may still be starting. Waiting..."
+      for i in \$(seq 1 30); do
+        [ -f "\$SMB_CONF" ] && break
+        sleep 2
+      done
+      [ -f "\$SMB_CONF" ] || { echo "smb.conf still not found"; exit 1; }
     fi
 
     # Remove any existing TLS lines (idempotent)
-    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_BAK"
+    sudo sed -i '/^\s*tls enabled/d; /^\s*tls certfile/d; /^\s*tls keyfile/d; /^\s*tls cafile/d' "\$SMB_CONF"
 
     # Insert TLS config after [global]
-    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_BAK"
+    sudo sed -i '/^\[global\]/a\\ttls enabled  = yes\n\ttls certfile = /var/lib/samba/private/tls/cert.pem\n\ttls keyfile  = /var/lib/samba/private/tls/key.pem\n\ttls cafile   = /var/lib/samba/private/tls/ca.pem' "\$SMB_CONF"
 
-    echo "TLS configuration written to smb.conf.bak"
+    echo "TLS configuration written to smb.conf"
 REMOTE
 
   if [ $? -ne 0 ]; then
@@ -590,8 +598,7 @@ REMOTE
 
   success "TLS configuration written for $DC_NAME"
 
-  # Restart the container so the entrypoint restores smb.conf.bak
-  # (which now includes TLS) to /etc/samba/smb.conf
+  # Restart the container to pick up the TLS config from the bind-mounted smb.conf
   doing "Restarting $DC_NAME to apply TLS configuration..."
   sshRunAdmin "$VM_USER" "$DC_IP" "nomad job restart -group=${DC_NAME} -yes samba-dc" 2>/dev/null || \
     warn "Could not restart $DC_NAME via Nomad"
@@ -884,6 +891,7 @@ job "samba-dc" {
         volumes = [
           "/opt/samba-dc01/samba:/var/lib/samba",
           "/opt/samba-dc01/krb5:/etc/krb5",
+          "/opt/samba-dc01/smb.conf:/etc/samba/smb.conf",
         ]
       }
 
@@ -1000,6 +1008,7 @@ EOF_JOB_START
         volumes = [
           "/opt/samba-dc02/samba:/var/lib/samba",
           "/opt/samba-dc02/krb5:/etc/krb5",
+          "/opt/samba-dc02/smb.conf:/etc/samba/smb.conf",
         ]
       }
 
