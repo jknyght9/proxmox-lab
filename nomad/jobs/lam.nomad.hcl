@@ -46,6 +46,8 @@ job "lam" {
         LAM_LANG             = "en_US"
         LAM_PASSWORD         = "lam"  # Default config password, change after first login
         LAM_CONFIGURATION_DATABASE = "files"
+        # Trust internal Vault PKI CA for LDAPS connections
+        LDAPTLS_REQCERT      = "allow"
       }
 
       resources {
