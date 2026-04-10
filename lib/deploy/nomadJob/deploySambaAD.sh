@@ -568,8 +568,8 @@ REMOTE
   sshScriptAdmin "$VM_USER" "$DC_IP" <<REMOTE
     set -e
 
-    # Fix key permissions (Samba runs as root inside container)
-    sudo chmod 644 "${TLS_DIR}/key.pem"
+    # Samba requires key.pem to be 0600 (enforces CVE-2013-4476 check)
+    sudo chmod 600 "${TLS_DIR}/key.pem"
 
     SMB_CONF="${SMB_CONF}"
 
