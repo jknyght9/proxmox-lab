@@ -572,6 +572,60 @@ EOF
 }
 
 # =============================================================================
+# LXC Template Download
+# =============================================================================
+
+# Download required LXC templates to each Proxmox node.
+# The lxc-pihole Terraform module needs a Debian 12 standard template.
+#
+# Globals read: PROXMOX_PASS, CLUSTER_NODES[], CLUSTER_NODE_IPS[]
+function downloadLXCTemplates() {
+  doing "Downloading LXC templates to Proxmox nodes..."
+
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local LXC_TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
+
+  for i in "${!CLUSTER_NODE_IPS[@]}"; do
+    local NODE_IP="${CLUSTER_NODE_IPS[$i]}"
+    local NODE_NAME="${CLUSTER_NODES[$i]}"
+
+    info "  Checking LXC templates on $NODE_NAME ($NODE_IP)..."
+
+    # Check if template already exists
+    local EXISTS
+    EXISTS=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
+      "pveam list local 2>/dev/null | grep -c 'debian-12-standard' || echo 0" 2>/dev/null)
+
+    if [ "$EXISTS" -gt 0 ]; then
+      info "    Debian 12 template already present on $NODE_NAME"
+    else
+      info "    Downloading $LXC_TEMPLATE to $NODE_NAME..."
+      sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
+        "pveam update && pveam download local $LXC_TEMPLATE" 2>/dev/null
+
+      if [ $? -eq 0 ]; then
+        info "    Template downloaded successfully on $NODE_NAME"
+      else
+        warn "    Failed to download template on $NODE_NAME — trying latest available..."
+        # Fall back to downloading whatever debian-12-standard is available
+        local LATEST
+        LATEST=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
+          "pveam available --section system 2>/dev/null | grep 'debian-12-standard' | awk '{print \$2}' | tail -1" 2>/dev/null)
+        if [ -n "$LATEST" ]; then
+          sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
+            "pveam download local $LATEST" 2>/dev/null
+          info "    Downloaded $LATEST on $NODE_NAME"
+        else
+          warn "    No Debian 12 template found in repository for $NODE_NAME"
+        fi
+      fi
+    fi
+  done
+
+  success "LXC template check complete"
+}
+
+# =============================================================================
 # Main Bootstrap Flow
 # =============================================================================
 
@@ -593,6 +647,7 @@ EOF
   discoverStorage || return 1
   discoverNetworkBridges || return 1
   createAPIToken || return 1
+  downloadLXCTemplates || return 1
   generateTfvarsFromBootstrap || return 1
   generatePackerVarsFromBootstrap || return 1
 

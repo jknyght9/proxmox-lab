@@ -46,6 +46,7 @@ source "$SCRIPT_DIR/lib/packerHelpers.sh"
 source "$SCRIPT_DIR/lib/terraformHelpers.sh"
 source "$SCRIPT_DIR/lib/updateDNSRecords.sh"
 source "$SCRIPT_DIR/lib/util.sh"
+source "$SCRIPT_DIR/lib/bootstrap.sh"
 source "$SCRIPT_DIR/lib/constants.sh"
 
 PROXMOX_HOST="${1:-}"
@@ -96,56 +97,13 @@ function runEverything() {
   checkRequirements
   generateSSHKeys
   generateServicePasswords
-  checkProxmox
-  installSSHKeys
 
-  # Check if we have existing cluster info
-  if [ -f "$CLUSTER_INFO_FILE" ] && jq -e '.network' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
-    read -rp "$(question "Found existing cluster-info.json. Use it? [Y/n]: ")" USE_EXISTING
-    USE_EXISTING=${USE_EXISTING:-Y}
-    if [[ "$USE_EXISTING" =~ ^[Yy]$ ]]; then
-      loadClusterInfo
-    else
-      detectAndSaveCluster
-      # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
-      distributeSSHKeys
-      configureNetworking
-    fi
-  else
-    # Fresh setup - detect cluster and configure
-    detectAndSaveCluster
-    # Distribute SSH keys before configureNetworking (which needs to SSH to all nodes)
-    distributeSSHKeys
-    configureNetworking
-  fi
+  # Bootstrap: read bootstrap.yml, discover cluster, create API token,
+  # generate terraform.tfvars and packer.auto.pkrvars.hcl
+  runBootstrap
 
-  # Select storage and network bridge (updates cluster-info.json)
-  selectSharedStorage
-  selectNetworkBridge
-
-  # Save storage/bridge selection to cluster-info.json
-  local tmp_file=$(mktemp)
-  jq --arg storage "$TEMPLATE_STORAGE" \
-     --arg storage_type "${TEMPLATE_STORAGE_TYPE:-lvm}" \
-     --argjson shared "$USE_SHARED_STORAGE" \
-     --arg bridge "$NETWORK_BRIDGE" \
-     '. + {
-       storage: { selected: $storage, type: $storage_type, is_shared: $shared },
-       network: (.network + { selected_bridge: $bridge })
-     }' "$CLUSTER_INFO_FILE" > "$tmp_file" && mv "$tmp_file" "$CLUSTER_INFO_FILE"
-
-  # Check/fix API credentials before setup (removes stale user if credentials missing locally)
-  ensureProxmoxCredentials
-
-  # Run Proxmox setup on all nodes (creates API token and captures credentials)
-  runProxmoxSetupOnAll
-
-  # Update terraform.tfvars and packer.auto.pkrvars.hcl with cluster config and API credentials
-  updateTerraformFromClusterInfo
-  updatePackerFromClusterInfo
-
-  # Optional post-install script
-  proxmoxPostInstall
+  # Distribute SSH keys to all discovered nodes
+  distributeSSHKeys
 
   # Deploy services (LXC, Packer, VMs)
   deployAllServices
