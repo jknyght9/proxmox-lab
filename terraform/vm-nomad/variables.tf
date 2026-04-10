@@ -2,8 +2,9 @@ variable "dns_postfix" {
   type = string
 }
 
-variable "proxmox_api_url" {
-  type = string
+variable "proxmox_endpoint" {
+  type        = string
+  description = "Proxmox API endpoint URL"
 }
 
 variable "proxmox_bridge" {

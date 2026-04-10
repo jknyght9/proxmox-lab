@@ -1,17 +1,19 @@
 terraform {
   required_providers {
     proxmox = {
-      source = "telmate/proxmox"
-      #version = "2.9.14"
-      version = "3.0.2-rc04"
+      source  = "bpg/proxmox"
+      version = "~> 0.78"
     }
   }
 }
 
-# Token authentication (default - configured by setup.sh)
 provider "proxmox" {
-  pm_api_url          = var.proxmox_api_url
-  pm_api_token_id     = var.proxmox_api_token_id
-  pm_api_token_secret = var.proxmox_api_token
-  pm_tls_insecure     = true
+  endpoint  = var.proxmox_endpoint
+  api_token = var.proxmox_api_token
+  insecure  = true
+
+  ssh {
+    agent    = true
+    username = var.proxmox_ssh_username
+  }
 }
