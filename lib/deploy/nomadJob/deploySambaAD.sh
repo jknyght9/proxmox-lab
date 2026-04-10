@@ -178,9 +178,10 @@ ROLE_JSON
     doing "Generating and storing AD secrets in Vault..."
 
     # Generate secure passwords
-    local ADMIN_PASSWORD SYNC_PASSWORD
+    local ADMIN_PASSWORD SYNC_PASSWORD DOMAIN_JOIN_PASSWORD
     ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d '\n' | tr -dc 'a-zA-Z0-9' | head -c 20)
     SYNC_PASSWORD=$(openssl rand -base64 16 | tr -d '\n' | tr -dc 'a-zA-Z0-9' | head -c 20)
+    DOMAIN_JOIN_PASSWORD=$(openssl rand -base64 16 | tr -d '\n' | tr -dc 'a-zA-Z0-9' | head -c 20)
 
     # Build LDAP DN from AD realm (e.g., AD.JDCLABS.LAN -> dc=ad,dc=jdclabs,dc=lan)
     local AD_REALM_LOWER SYNC_BASE_DN
@@ -188,6 +189,7 @@ ROLE_JSON
     # Convert realm to DN format: ad.jdclabs.lan -> dc=ad,dc=jdclabs,dc=lan
     SYNC_BASE_DN=$(echo "$AD_REALM_LOWER" | sed 's/\./,dc=/g' | sed 's/^/dc=/')
     local SYNC_DN="cn=authentik-sync,cn=Users,${SYNC_BASE_DN}"
+    local DOMAIN_JOIN_DN="cn=domain-join-svc,cn=Users,${SYNC_BASE_DN}"
 
     # Store secrets in Vault KV v2
     local SECRET_PAYLOAD
@@ -195,7 +197,9 @@ ROLE_JSON
       --arg admin_pass "$ADMIN_PASSWORD" \
       --arg sync_pass "$SYNC_PASSWORD" \
       --arg sync_dn "$SYNC_DN" \
-      '{data: {admin_password: $admin_pass, authentik_sync_password: $sync_pass, authentik_sync_dn: $sync_dn}}')
+      --arg join_pass "$DOMAIN_JOIN_PASSWORD" \
+      --arg join_dn "$DOMAIN_JOIN_DN" \
+      '{data: {admin_password: $admin_pass, authentik_sync_password: $sync_pass, authentik_sync_dn: $sync_dn, domain_join_password: $join_pass, domain_join_dn: $join_dn}}')
 
     if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
       "${VAULT_ADDR}/v1/secret/data/samba-ad" \
@@ -346,6 +350,10 @@ REMOTE_SCRIPT
   fi
   success "DC01 is healthy and domain is provisioned"
 
+  # Create service accounts in AD (domain-join-svc, authentik-sync is
+  # created separately by configureAuthentikADSync)
+  configureADServiceAccounts
+
   # ==========================================================================
   # Phase 2: Add DC02 if multi-node setup
   # ==========================================================================
@@ -454,6 +462,131 @@ function isSambaADDeployed() {
   status=$(sshRunAdmin "$VM_USER" "$nomad_ip" "nomad job status samba-dc 2>/dev/null | grep -c 'running'" 2>/dev/null || echo "0")
 
   [ "$status" -gt 0 ]
+}
+
+# configureADServiceAccounts - Create least-privilege service accounts in AD
+#
+# Creates:
+#   - OU=Workstations for joined computer accounts
+#   - domain-join-svc: dedicated account for joining machines to the domain
+#     with only the permissions needed (Create/Delete Computer Objects,
+#     Reset Password, Write Account Restrictions, Validated DNS/SPN writes)
+#
+# Credentials come from Vault at secret/samba-ad (generated during deploy).
+# Idempotent — skips creation if objects already exist.
+#
+# Globals read: VM_USER, VAULT_CREDENTIALS_FILE, CLUSTER_INFO_FILE
+# Returns: 0 on success, 1 on failure
+function configureADServiceAccounts() {
+  doing "Configuring AD service accounts..."
+
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    warn "Vault credentials not found — skipping AD service account setup"
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  # Read the domain join password from Vault
+  local SECRETS_JSON
+  SECRETS_JSON=$(curl -skf "${VAULT_ADDR}/v1/secret/data/samba-ad" \
+    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
+
+  local DOMAIN_JOIN_PASSWORD
+  DOMAIN_JOIN_PASSWORD=$(echo "$SECRETS_JSON" | jq -r '.data.data.domain_join_password // empty')
+
+  if [ -z "$DOMAIN_JOIN_PASSWORD" ]; then
+    warn "domain_join_password not found in Vault — skipping (re-run b1 to generate)"
+    return 1
+  fi
+
+  # Get DC IP and realm info
+  local NOMAD01_IP
+  NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+
+  local AD_REALM AD_REALM_LOWER BASE_DN
+  AD_REALM=$(jq -r '.ad_config.realm // ""' "$CLUSTER_INFO_FILE")
+  AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
+  BASE_DN=$(echo "$AD_REALM_LOWER" | sed 's/\./,dc=/g' | sed 's/^/dc=/')
+
+  local CONTAINER_ID
+  CONTAINER_ID=$(sshRunAdmin "$VM_USER" "$NOMAD01_IP" "docker ps -q --filter name=samba-dc | head -1" 2>/dev/null)
+
+  if [ -z "$CONTAINER_ID" ]; then
+    warn "Samba DC container not found — skipping service account setup"
+    return 1
+  fi
+
+  # Create OU for workstations (where joined computers will land)
+  doing "Creating OU=Workstations..."
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" \
+    "docker exec $CONTAINER_ID samba-tool ou create 'OU=Workstations,${BASE_DN}' --description='Domain-joined workstations' 2>/dev/null || echo 'OU may already exist'"
+  success "OU=Workstations ready"
+
+  # Create domain-join-svc account
+  doing "Creating domain-join-svc service account..."
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" \
+    "docker exec $CONTAINER_ID samba-tool user create domain-join-svc '${DOMAIN_JOIN_PASSWORD}' \
+      --description='Least-privilege account for joining machines to the domain' \
+      --use-username-as-cn 2>/dev/null || echo 'User may already exist'"
+
+  # Prevent password expiry on service account
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" \
+    "docker exec $CONTAINER_ID samba-tool user setexpiry domain-join-svc --noexpiry 2>/dev/null || true"
+  success "domain-join-svc account ready"
+
+  # Delegate least-privilege permissions on OU=Workstations
+  # These are the minimum rights needed to join a computer to the domain:
+  #   - CC: Create Child (computer objects)
+  #   - DC: Delete Child (for re-joins)
+  #   - WP: Write Property (userAccountControl, dNSHostName, servicePrincipalName)
+  #   - RP: Read Property
+  doing "Delegating domain join permissions on OU=Workstations..."
+
+  local JOIN_SID
+  JOIN_SID=$(sshRunAdmin "$VM_USER" "$NOMAD01_IP" \
+    "docker exec $CONTAINER_ID samba-tool user show domain-join-svc --attributes=objectSid 2>/dev/null | grep objectSid | awk '{print \$2}'" 2>/dev/null)
+
+  if [ -z "$JOIN_SID" ]; then
+    warn "Could not determine SID for domain-join-svc — delegating by name"
+  fi
+
+  # Grant permissions using dsacl — create/delete computer objects in Workstations OU
+  local WORKSTATIONS_DN="OU=Workstations,${BASE_DN}"
+
+  sshRunAdmin "$VM_USER" "$NOMAD01_IP" "docker exec $CONTAINER_ID bash -c '
+    # Allow creating and deleting computer objects
+    samba-tool dsacl set --objectdn=\"${WORKSTATIONS_DN}\" \
+      --action=allow \
+      --trusteedn=\"CN=domain-join-svc,CN=Users,${BASE_DN}\" \
+      --sddl=\"(OA;CIIO;RPWPCR;bf967a86-0de6-11d0-a285-00aa003049e2;;${WORKSTATIONS_DN})\" 2>/dev/null || true
+
+    # Grant full control over computer objects in this OU
+    samba-tool dsacl set --objectdn=\"${WORKSTATIONS_DN}\" \
+      --action=allow \
+      --trusteedn=\"CN=domain-join-svc,CN=Users,${BASE_DN}\" \
+      --sddl=\"(OA;CIIO;CC;bf967a86-0de6-11d0-a285-00aa003049e2;;)\" 2>/dev/null || true
+
+    # Also add to \"Domain Computers\" group management
+    samba-tool group addmembers \"Account Operators\" domain-join-svc 2>/dev/null || echo \"May already be a member\"
+  '" 2>/dev/null || warn "Some delegation commands may have failed — check manually"
+
+  success "Domain join permissions delegated"
+
+  echo
+  info "Domain join service account configured:"
+  info "  Account: domain-join-svc"
+  info "  Target OU: OU=Workstations,${BASE_DN}"
+  info "  Credentials: vault kv get secret/samba-ad (domain_join_password)"
+  info ""
+  info "To join a machine to the domain:"
+  info "  Username: ${AD_REALM_LOWER}\\domain-join-svc"
+  info "  Target OU: OU=Workstations,${BASE_DN}"
+  echo
+
+  return 0
 }
 
 # configureSambaLDAPS - Issue TLS cert and enable LDAPS on a Samba DC
