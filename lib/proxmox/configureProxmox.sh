@@ -83,17 +83,22 @@ EOF
     return 1
   fi
 
-  # Step 4: Update terraform.tfvars
-  doing "Updating terraform.tfvars with new credentials..."
-  updateTerraformFromClusterInfo
-  success "terraform.tfvars updated"
+  # Step 4: Regenerate terraform.tfvars and packer.auto.pkrvars.hcl
+  # by re-running the full bootstrap flow (idempotent — skips token creation
+  # since we just recreated it above).
+  doing "Regenerating config files via bootstrap..."
+  runBootstrap || {
+    error "Bootstrap regeneration failed"
+    return 1
+  }
 
   cat <<EOF
 
 Proxmox API credentials have been reset successfully.
 
 New credentials saved to: $CREDS_FILE
-Terraform configuration updated in: terraform/terraform.tfvars
+Terraform configuration: terraform/terraform.tfvars
+Packer configuration:    packer/packer.auto.pkrvars.hcl
 
 EOF
 }

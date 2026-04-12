@@ -60,9 +60,7 @@ EOF
   # Remove existing template if present
   removeTemplateIfExists 9002 "nomad-template"
 
-  # Update Packer config with storage settings
-  updatePackerStorageConfig
-
+  # (packer.auto.pkrvars.hcl storage settings already written by bootstrap)
   doing "Building Nomad Packer template..."
   docker compose build packer >/dev/null 2>&1
   docker compose run --rm -it packer init .

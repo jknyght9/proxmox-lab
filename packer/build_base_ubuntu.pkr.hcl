@@ -57,11 +57,12 @@ build {
   # Upload image to Proxmox node
   provisioner "shell-local" {
     environment_vars = [
-      "PROXMOX_HOST=${regex("https?://([^:/]+)", var.proxmox_url)[0]}",
+      "PROXMOX_URL=${var.proxmox_url}",
       "SSH_KEY=${var.ssh_enterprise_key_file}"
     ]
     inline = [
       "echo '[+] Uploading cloud image to Proxmox node...'",
+      "PROXMOX_HOST=$(echo \"$PROXMOX_URL\" | sed -E 's|^https?://||; s|[:/].*$||')",
       "scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i $SSH_KEY /tmp/noble-server-cloudimg-amd64.img root@$PROXMOX_HOST:/tmp/noble-server-cloudimg-amd64.img"
     ]
   }
@@ -69,13 +70,14 @@ build {
   # Create the template on Proxmox via SSH + qm commands
   provisioner "shell-local" {
     environment_vars = [
-      "PROXMOX_HOST=${regex("https?://([^:/]+)", var.proxmox_url)[0]}",
+      "PROXMOX_URL=${var.proxmox_url}",
       "SSH_KEY=${var.ssh_enterprise_key_file}"
     ]
     inline = [
       <<-SCRIPT
       set -euo pipefail
 
+      PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
 
       echo "[+] Creating base Ubuntu template on Proxmox..."
@@ -158,7 +160,7 @@ build {
   # Inject SSH public key via cloud-init (separate step — needs local file read)
   provisioner "shell-local" {
     environment_vars = [
-      "PROXMOX_HOST=${regex("https?://([^:/]+)", var.proxmox_url)[0]}",
+      "PROXMOX_URL=${var.proxmox_url}",
       "VMID=${var.base_template_vmid}",
       "SSH_KEY=${var.ssh_enterprise_key_file}",
       "SSH_PUBKEY=${var.ssh_public_key_file}"
@@ -167,6 +169,7 @@ build {
       <<-SCRIPT
       set -euo pipefail
 
+      PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
 
       if [ -f "$SSH_PUBKEY" ]; then

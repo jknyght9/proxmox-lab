@@ -10,26 +10,30 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
 
 ### Initial Setup
 ```bash
-# Full automated deployment (generates SSH keys, configures Proxmox, deploys all infrastructure)
-./setup.sh <PROXMOX_IP> <PROXMOX_PASSWORD>
+# 1. Copy and edit bootstrap.yml (Proxmox IP, password, network, DNS)
+cp bootstrap.yml.example bootstrap.yml
+$EDITOR bootstrap.yml
 
-# Or run the interactive menu
+# 2. Run the interactive menu
 ./setup.sh
+
+# 3. Select option 1 — reads bootstrap.yml, discovers the cluster,
+#    creates API credentials, generates terraform.tfvars +
+#    packer.auto.pkrvars.hcl, and deploys the full stack.
 ```
 
 ### Setup Menu Options
 ```
- 1) New installation              - Full setup with SSH key generation
- 2) New installation (skip SSH)  - Full setup using existing keys
- 3) Deploy all services          - DNS, CA, Nomad, Kasm
- 4) Deploy critical services     - DNS and CA only
- 5) Deploy Traefik               - Nomad job for load balancing
- 6) Deploy Vault                 - Nomad job for secrets management
- 7) Deploy Authentik             - Nomad job for SSO/identity provider
- 8) Deploy Uptime Kuma           - Nomad job for service health monitoring
- 9) Rollback (Terraform)         - Terraform destroy for services
-10) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-11) Purge entire deployment      - Reset nodes to pre-install state
+ 1) New installation             - Reads bootstrap.yml, discovers cluster, full deploy
+ 2) Deploy all services          - DNS, CA, Nomad, Kasm
+ 3) Deploy critical services     - DNS and CA only
+ 4) Deploy Traefik               - Nomad job for load balancing
+ 5) Deploy Vault                 - Nomad job for secrets management
+ 6) Deploy Authentik             - Nomad job for SSO/identity provider
+ 7) Deploy Uptime Kuma           - Nomad job for service health monitoring
+ 8) Rollback (Terraform)         - Terraform destroy for services
+ 9) Purge (Emergency)            - Direct VM/LXC destruction via SSH
+10) Purge entire deployment      - Reset nodes to pre-install state
 ```
 
 ### Beta Features (--dev flag required)
@@ -37,7 +41,8 @@ Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home
 b1) Deploy Samba AD              - Nomad job for Active Directory DCs
 b2) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
 b3) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
-b4) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
+b4) Deploy LDAP Account Manager  - Nomad job for LAM web UI
+b5) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
 ```
 
 ### Developer Menu (--dev flag)
@@ -45,15 +50,17 @@ b4) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
 ./setup.sh --dev
 ```
 ```
-d1) Build DNS records            - Update Pi-hole with host records
-d2) Regenerate CA                - Recreate step-ca certificates
-d3) Update root certificates     - Push CA cert to Proxmox nodes
-d4) Configure networking         - Update network/HA settings only
-d5) Reset labnet egress          - Fix DHCP/routing issues
-d6) Reset Proxmox API credentials - Purge and recreate hashicorp@pam user/token
-d7) Deploy Nomad only            - Requires critical services
-d8) Deploy Kasm only             - Requires critical services + docker template
+d1) Build DNS records             - Update Pi-hole with host records
+d2) Regenerate CA                 - Recreate CA certificates
+d3) Update root certificates      - Push CA cert to Proxmox nodes
+d4) Reset Proxmox API credentials - Purge and recreate hashicorp@pam user/token (re-runs bootstrap)
+d5) Deploy Nomad only             - Requires critical services
+d6) Deploy Kasm only              - Requires critical services + docker template
+d7) Deploy Tailscale Subnet Router - System job on all Nomad nodes
 ```
+
+**Note:** To change network/HA/DNS settings, edit `bootstrap.yml` and re-run option 1
+(no separate "configure networking" dev option — bootstrap.yml is the single source of truth).
 
 ### Docker Compose Services
 ```bash
@@ -71,8 +78,9 @@ docker compose run terraform <command>
 ```bash
 docker compose run packer init .
 docker compose run packer validate .
-docker compose run packer build build_docker.pkr.hcl   # Base Docker template
-docker compose run packer build build_nomad.pkr.hcl    # Nomad server template
+docker compose run packer build -only='base-ubuntu.*' .   # Base Ubuntu cloud image (VMID 9999)
+docker compose run packer build -only='ubuntu-docker.*' .  # Docker template (VMID 9001)
+docker compose run packer build -only='ubuntu-nomad.*' .   # Nomad template (VMID 9002)
 ```
 
 ### Terraform (from project root)
@@ -116,8 +124,9 @@ Modules called from `main.tf`:
 - **archive/** - Archived/deprecated modules
 
 ### Packer Templates (packer/)
-- **build_docker.pkr.hcl** - Base template: Ubuntu + Docker + GlusterFS + acme.sh (VMID 9001)
-- **build_nomad.pkr.hcl** - Nomad template: Docker base + Nomad + Consul (VMID 9002)
+- **build_base_ubuntu.pkr.hcl** - Base Ubuntu 24.04 cloud image template (VMID 9999) — downloads cloud image, imports via qm, converts to template
+- **build_docker.pkr.hcl** - Docker template: clones 9999 + Docker + GlusterFS + acme.sh (VMID 9001)
+- **build_nomad.pkr.hcl** - Nomad template: clones 9999 + Nomad + Consul (VMID 9002)
 - **sources_linux_docker.pkr.hcl** - Docker VM source configuration
 - **sources_linux_nomad.pkr.hcl** - Nomad VM source configuration
 - **dev/** - Development templates (Windows, Kasm)
@@ -269,28 +278,28 @@ When a multi-homed system is detected, the setup script creates policy-based rou
 
 ## Configuration Files
 
-### Required Configuration (copy from examples)
+### Bootstrap Configuration (user-provided)
 ```bash
-cp packer/packer.auto.pkrvars.hcl.example packer/packer.auto.pkrvars.hcl
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+cp bootstrap.yml.example bootstrap.yml
+# Edit: Proxmox IP, root password, network CIDR/gateway, DNS suffix
 ```
+`bootstrap.yml` is the **single source of truth** for initial setup. Running option 1
+auto-discovers the cluster and generates all downstream config.
 
-### Runtime Configuration (auto-generated)
+### Auto-Generated (by bootstrap)
+- `terraform/terraform.tfvars` - All Terraform variables (bpg/proxmox provider, network, storage, DNS)
+- `packer/packer.auto.pkrvars.hcl` - All Packer variables (API creds, storage, network bridge)
 - `cluster-info.json` - Cluster topology, network config, storage settings
+- `crypto/proxmox-credentials.json` - Proxmox API token (hashicorp@pam)
+
+### Runtime State (generated during deploy)
 - `hosts.json` - Deployed host IPs for DNS record generation
 - `crypto/vault-credentials.json` - Vault unseal key, root token, and Nomad integration token
+- `crypto/service-passwords.json` - Auto-generated service passwords
 
-### Key Variables
-- `dns_postfix` - Domain suffix (e.g., "mylab.lan")
-- `proxmox_api_url` - Proxmox API endpoint
-- `proxmox_target_node` - Target Proxmox node name
-- `proxmox_node_ips` - Map of cluster node names to IPs
-- `pihole_admin_password` - Pi-hole web admin password
-- `template_storage` - Shared storage for templates (required for clusters)
-- `bootstrap_dns` - DNS server for initial provisioning (default: gateway IP, see below)
-- SSH keys:
-  - `crypto/labenterpriseadmin` and `.pub` - Proxmox node administration
-  - `crypto/labadmin` and `.pub` - VM/container administration (injected via cloud-init)
+### SSH Keys (generated by option 1)
+- `crypto/labenterpriseadmin` / `.pub` - Proxmox node administration only
+- `crypto/labadmin` / `.pub` - VM/container administration (injected via cloud-init)
 
 ### Bootstrap DNS
 The `bootstrap_dns` variable specifies which DNS server containers use during initial provisioning (package installation) before internal Pi-hole DNS is ready.
@@ -298,8 +307,8 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 **Why it matters**: Some networks block external DNS servers (1.1.1.1, 8.8.8.8, 9.9.9.9) and only allow DNS queries through the gateway. Without proper bootstrap DNS, container provisioning fails during `apt-get update`.
 
 **Configuration**:
-- Auto-populated from external gateway in `cluster-info.json`
-- Set in `terraform/terraform.tfvars`: `bootstrap_dns = "192.168.1.1"`
+- Auto-populated from the network gateway in `bootstrap.yml`
+- Written to `terraform/terraform.tfvars` as `bootstrap_dns`
 - After provisioning completes, containers switch to internal Pi-hole DNS
 
 ## Dependencies
@@ -344,7 +353,7 @@ This ensures:
 ### Traefik Configuration
 - **Type**: `system` job (runs on all Nomad nodes for HA) or `service` (single instance if HA disabled)
 - **Nomad Provider**: Discovers services via `http://127.0.0.1:4646`
-- **TLS Certs**: Wildcard cert (`*.<domain>`) issued directly from Vault PKI at deploy time (no ACME — Vault 1.21.x has a nonce bug). Re-run option 5 to reissue (1-year TTL).
+- **TLS Certs**: Wildcard cert (`*.<domain>`) issued directly from Vault PKI at deploy time (no ACME — Vault 1.21.x has a nonce bug). Re-run option 4 to reissue (1-year TTL).
 - **Cert Location**: `/srv/gluster/nomad-data/traefik/tls/cert.pem` + `key.pem`, configured as default cert via `tls.yml` in the file provider
 - **No certResolver tags**: All Nomad jobs use `tls=true` only; the default wildcard cert handles everything
 - **Host Matching**: Routers accept both FQDN and short name: `Host(\`vault.jdclabs.lan\`) || Host(\`vault\`)`
@@ -385,7 +394,7 @@ nomad_traefik_ha_vrrp_password  = "secure-pass"
 **How it's deployed:**
 1. **Packer** - Installs keepalived in nomad-template image
 2. **Terraform/cloud-init** - Configures keepalived with VIP/VRRP settings
-3. **Traefik deployment** (option 7) - Starts keepalived after Traefik is running
+3. **Traefik deployment** (option 4) - Starts keepalived after Traefik is running
 
 **Verification**:
 ```bash
@@ -618,7 +627,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 
 ### Traefik Issues
 - **404 errors**: Check Traefik API for routers: `curl http://nomad01:8081/api/http/routers | jq .`
-- **TLS cert missing/expired**: Re-run option 5 to reissue wildcard cert from Vault PKI. Cert lives at `/srv/gluster/nomad-data/traefik/tls/`
+- **TLS cert missing/expired**: Re-run option 4 to reissue wildcard cert from Vault PKI. Cert lives at `/srv/gluster/nomad-data/traefik/tls/`
 - **Service not discovered**: Verify service registered in Nomad: `nomad service list`
 
 ### Traefik HA Issues
@@ -631,7 +640,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 
 ### DNS Issues
 - **FQDN not resolving but short name works**: Add hosts file entry or configure router to accept both names
-- **Service DNS missing**: Run setup.sh option 10 to rebuild DNS records
+- **Service DNS missing**: Run setup.sh --dev and select d1 to rebuild DNS records
 - **Container provisioning fails during apt-get**: Network may block external DNS. Set `bootstrap_dns` to your gateway IP in terraform.tfvars
 
 ### Labnet SDN Issues
@@ -644,7 +653,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
 
 ### Purge/Rollback
-The complete purge (setup.sh option 11) removes all project resources:
+The complete purge (setup.sh option 10) removes all project resources:
 1. VMs, LXC containers, Packer templates
 2. Cloud-init snippets
 3. Vault PKI root CA from Proxmox and Nomad VM trust stores

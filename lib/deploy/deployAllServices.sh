@@ -199,8 +199,8 @@ EOF
   fi  # End of DNS_ALREADY_DEPLOYED=false block
 
   # Storage selection for multi-node clusters
+  # (packer.auto.pkrvars.hcl storage settings already written by bootstrap)
   ensureSharedStorage || return 1
-  updatePackerStorageConfig
 
   # Check if templates already exist
   local TEMPLATES_EXIST=false

@@ -52,10 +52,8 @@ EOF
       return 1
     fi
 
-    # Update Packer config with storage settings
-    updatePackerStorageConfig
-
     # Build docker template only
+    # (Storage/API config already written to packer.auto.pkrvars.hcl by bootstrap)
     doing "Building docker-template with Packer..."
     docker compose build packer >/dev/null 2>&1
     docker compose run --rm -it packer init .
