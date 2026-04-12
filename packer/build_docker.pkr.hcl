@@ -12,14 +12,19 @@ build {
   }
 
   # Fetch root CA directly from Vault PKI (unauthenticated endpoint).
-  # The VM pulls the cert during build — no local files or mounts needed.
+  # Skipped when vault_addr is empty (Vault not yet deployed).
   provisioner "shell" {
     inline = [
-      "echo '[+] Installing internal certificate authority from Vault PKI'",
-      "curl -sk ${var.vault_addr}/v1/pki/ca/pem -o /tmp/proxmox-lab-root-ca.crt",
-      "sudo install -m 0644 /tmp/proxmox-lab-root-ca.crt /usr/local/share/ca-certificates/proxmox-lab-root-ca.crt",
-      "sudo update-ca-certificates --fresh",
-      "rm /tmp/proxmox-lab-root-ca.crt"
+      "VAULT_ADDR='${var.vault_addr}'",
+      "if [ -n \"$VAULT_ADDR\" ]; then",
+      "  echo '[+] Installing internal certificate authority from Vault PKI'",
+      "  curl -sk $VAULT_ADDR/v1/pki/ca/pem -o /tmp/proxmox-lab-root-ca.crt",
+      "  sudo install -m 0644 /tmp/proxmox-lab-root-ca.crt /usr/local/share/ca-certificates/proxmox-lab-root-ca.crt",
+      "  sudo update-ca-certificates --fresh",
+      "  rm /tmp/proxmox-lab-root-ca.crt",
+      "else",
+      "  echo '[!] vault_addr not set — skipping root CA install (Vault not deployed yet)'",
+      "fi"
     ]
   }
 
