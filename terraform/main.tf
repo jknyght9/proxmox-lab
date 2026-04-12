@@ -25,6 +25,8 @@ module "nomad" {
   node_ip_map      = local.node_ip_map
   vm_storage       = var.vm_storage
   template_node    = var.proxmox_target_node
+  network_gateway  = var.network_gateway_address
+  network_cidr_bits = split("/", var.dns_main_nodes[0].ip)[1]
 
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file

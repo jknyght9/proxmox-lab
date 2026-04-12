@@ -73,10 +73,22 @@ variable "vm_storage" {
   default     = "local-lvm"
 }
 
+variable "network_gateway" {
+  type        = string
+  description = "Gateway IP for Nomad VMs (from bootstrap network.gateway)"
+}
+
+variable "network_cidr_bits" {
+  type        = string
+  description = "CIDR prefix length (e.g., 24)"
+  default     = "24"
+}
+
 variable "vm_configs" {
   type = map(object({
     vm_id          = number
     name           = string
+    ip             = string
     cores          = number
     memory         = number
     disk_size      = string
@@ -85,9 +97,9 @@ variable "vm_configs" {
     target_storage = string
   }))
   default = {
-    "nomad01" = { vm_id = 905, name = "nomad01", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
-    "nomad02" = { vm_id = 906, name = "nomad02", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve02", target_storage = "ceph-pool-01" }
-    "nomad03" = { vm_id = 907, name = "nomad03", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
+    "nomad01" = { vm_id = 905, name = "nomad01", ip = "10.1.50.114", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
+    "nomad02" = { vm_id = 906, name = "nomad02", ip = "10.1.50.115", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve02", target_storage = "ceph-pool-01" }
+    "nomad03" = { vm_id = 907, name = "nomad03", ip = "10.1.50.116", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
   }
 }
 

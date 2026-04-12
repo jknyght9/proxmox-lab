@@ -1,18 +1,15 @@
 locals {
   proxmox_api_host = regex("^https?://([^:/]+)", var.proxmox_endpoint)[0]
-  nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.name}.${var.dns_postfix}\""])
+  # Use IPs for retry_join — DNS names aren't available at boot time
+  nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.ip}\""])
   sorted_vm_keys   = sort(keys(var.vm_configs))
 
   # GlusterFS configuration
   gluster_brick  = "/data/gluster/${var.gluster_volume_name}"
   gluster_volume = var.gluster_volume_name
 
-  # Extract VM IPs after creation (from guest agent via ipv4_addresses)
-  # ipv4_addresses is a list of lists (one per NIC); we want the first non-loopback IP on the first NIC
-  vm_ips = {
-    for k, v in proxmox_virtual_environment_vm.nomad :
-    k => [for ip in flatten(v.ipv4_addresses) : ip if !startswith(ip, "127.") && !startswith(ip, "172.17.")][0]
-  }
+  # Static IPs — known from vm_configs, no guest agent discovery needed
+  vm_ips = { for k, v in var.vm_configs : k => v.ip }
   master_key  = local.sorted_vm_keys[0]
   master_ip   = local.vm_ips[local.master_key]
   all_ips     = [for k in local.sorted_vm_keys : local.vm_ips[k]]
@@ -112,8 +109,13 @@ resource "proxmox_virtual_environment_vm" "nomad" {
     }
     ip_config {
       ipv4 {
-        address = "dhcp"
+        address = "${each.value.ip}/${var.network_cidr_bits}"
+        gateway = var.network_gateway
       }
+    }
+    dns {
+      servers = [var.dns_primary_ip != "" ? var.dns_primary_ip : var.network_gateway]
+      domain  = var.dns_postfix
     }
     user_data_file_id = "local:snippets/${each.value.name}-user-data.yml"
   }
