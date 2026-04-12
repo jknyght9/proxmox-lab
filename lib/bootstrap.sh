@@ -266,13 +266,20 @@ function discoverStorage() {
   local IMAGE_STORAGE
   IMAGE_STORAGE=$(echo "$STORAGE_JSON" | jq '[.[] | select(.content | contains("images"))]')
 
-  # Identify storage that supports snippets (needed for cloud-init)
+  # Identify storage that supports snippets (needed for cloud-init cicustom)
+  # Prefer shared snippet storage for clusters so templates work on any node
   local SNIPPET_STORAGE
-  SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("snippets"))] | .[].storage' | head -1)
+  if [ "$IS_CLUSTER" = "true" ]; then
+    SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("snippets")) and .shared == 1)] | first | .storage // empty')
+  fi
+  if [ -z "$SNIPPET_STORAGE" ]; then
+    SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("snippets"))] | first | .storage // empty')
+  fi
   if [ -n "$SNIPPET_STORAGE" ]; then
-    info "  Snippet storage: $SNIPPET_STORAGE"
+    info "  Snippet storage: $SNIPPET_STORAGE$([ "$IS_CLUSTER" = "true" ] && echo " (shared)" || echo "")"
   else
-    warn "  No storage with 'snippets' content found — cloud-init snippets may need manual setup"
+    SNIPPET_STORAGE="local"
+    warn "  No storage with 'snippets' content found — falling back to 'local'"
   fi
 
   # Identify storage that supports LXC templates (vztmpl)
@@ -635,9 +642,10 @@ template_storage      = "${TEMPLATE_STORAGE}"
 template_storage_type = "${TEMPLATE_STORAGE_TYPE}"
 
 # Network
-network_bridge    = "${NETWORK_BRIDGE}"
-network_gateway   = "${NETWORK_GATEWAY}"
-network_cidr_mask = "$(echo "$NETWORK_CIDR" | grep -oE '[0-9]+$')"
+network_bridge = "${NETWORK_BRIDGE}"
+
+# Cloud-init snippet storage (shared — for qemu-guest-agent install)
+snippet_storage = "${SNIPPET_STORAGE}"
 
 # Template credentials
 root_password = "${ROOT_PASS}"

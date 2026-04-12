@@ -17,9 +17,11 @@ dns_postfix = "mylab.lan"
 
 # Network bridge for Packer VMs (must be reachable from Docker)
 # Use the bridge on the same network as your Docker host
-network_bridge    = "vmbr0"
-network_gateway   = "192.168.1.1"   # Gateway for temp static IP during base template build
-network_cidr_mask = "24"             # CIDR mask bits
+network_bridge  = "vmbr0"
+
+# Shared storage with 'snippets' content type (for cloud-init vendor data)
+# Must be accessible from all cluster nodes. Auto-detected by bootstrap.
+snippet_storage = "local"
 
 # Storage for Packer templates
 # For multi-node clusters, use shared storage (nfs, ceph, etc.)

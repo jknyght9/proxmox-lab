@@ -6,17 +6,20 @@
 # Uses a null source with shell-local provisioners since qm importdisk
 # has no REST API equivalent.
 #
+# Cloud-init vendor data installs qemu-guest-agent on first boot so the
+# Packer proxmox-clone builder can discover the VM's IP via the guest agent.
+#
 # Usage:
-#   docker compose run packer init .
-#   docker compose run packer build build_base_ubuntu.pkr.hcl
+#   docker compose run packer build -only='base-ubuntu.*' .
 #
 # Prerequisites:
 #   - SSH access to Proxmox node via /crypto/labenterpriseadmin key
 #   - API token created (for future Packer builds that clone this template)
+#   - Shared storage with 'snippets' content type (for cloud-init vendor data)
 # =============================================================================
 
 // Variables are defined in variables.pkr.hcl:
-//   ssh_enterprise_key_file, network_gateway, network_cidr_mask,
+//   ssh_enterprise_key_file, snippet_storage,
 //   base_ubuntu_vmid, ubuntu_image_url
 
 source "null" "ubuntu-base" {
@@ -26,6 +29,53 @@ source "null" "ubuntu-base" {
 build {
   name    = "base-ubuntu"
   sources = ["source.null.ubuntu-base"]
+
+  # Upload cloud-init vendor snippet to shared storage.
+  # This installs qemu-guest-agent on first boot of any clone.
+  provisioner "shell-local" {
+    environment_vars = [
+      "PROXMOX_URL=${var.proxmox_url}",
+      "SSH_KEY=${var.ssh_enterprise_key_file}",
+      "SNIPPET_STORAGE=${var.snippet_storage}"
+    ]
+    inline = [
+      <<-SCRIPT
+      set -euo pipefail
+
+      PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
+
+      echo "[+] Uploading cloud-init vendor snippet to $SNIPPET_STORAGE..."
+
+      # Get the filesystem path for the snippet storage
+      SNIPPET_PATH=$(ssh $SSH_OPTS root@$PROXMOX_HOST \
+        "pvesm path $SNIPPET_STORAGE:snippets/cloud-init-agent.yaml 2>/dev/null | sed 's|/cloud-init-agent.yaml$||'" 2>/dev/null || echo "")
+
+      if [ -z "$SNIPPET_PATH" ]; then
+        # Fallback: common snippet paths
+        SNIPPET_PATH=$(ssh $SSH_OPTS root@$PROXMOX_HOST \
+          "cat /etc/pve/storage.cfg | awk '/^[a-z]+ *: *'$SNIPPET_STORAGE'/{found=1} found && /path/{print \$2; exit}'")
+        SNIPPET_PATH="$SNIPPET_PATH/snippets"
+      fi
+
+      echo "    Snippet path: $SNIPPET_PATH"
+
+      ssh $SSH_OPTS root@$PROXMOX_HOST "mkdir -p '$SNIPPET_PATH' && cat > '$SNIPPET_PATH/cloud-init-agent.yaml'" <<'CLOUD_INIT'
+#cloud-config
+# Enable password auth so Packer can SSH before pubkey is fully provisioned
+# (guest agent starts before cloud-init finishes writing authorized_keys)
+ssh_pwauth: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable qemu-guest-agent
+  - systemctl start qemu-guest-agent
+CLOUD_INIT
+
+      echo "[+] Cloud-init vendor snippet uploaded"
+      SCRIPT
+    ]
+  }
 
   # Download Ubuntu 24.04 cloud image locally
   provisioner "shell-local" {
@@ -74,6 +124,7 @@ build {
         "${var.network_bridge}" \
         "${var.ssh_username}" \
         "${var.ssh_password}" \
+        "${var.snippet_storage}" \
         <<'REMOTE_SCRIPT'
       set -euo pipefail
 
@@ -83,6 +134,7 @@ build {
       BRIDGE="$4"
       SSH_USER="$5"
       SSH_PASS="$6"
+      SNIPPET_STORE="$7"
       IMAGE="/tmp/noble-server-cloudimg-amd64.img"
 
       echo "[+] Checking for existing VM $VMID..."
@@ -134,16 +186,22 @@ build {
         --serial0 socket \
         --vga serial0
 
+      echo "[+] Attaching cloud-init vendor data (installs qemu-guest-agent on boot)..."
+      qm set "$VMID" --cicustom "vendor=$SNIPPET_STORE:snippets/cloud-init-agent.yaml"
+
       echo "[+] Cleaning up image..."
       rm -f "$IMAGE"
 
-      echo "[+] VM $VMID configured (not yet templated — agent install pending)"
+      echo "[+] Converting to template..."
+      qm template "$VMID"
+
+      echo "[+] Base Ubuntu template $VMID created successfully"
       REMOTE_SCRIPT
       SCRIPT
     ]
   }
 
-  # Inject SSH public key via cloud-init (before first boot)
+  # Inject SSH public key via cloud-init
   provisioner "shell-local" {
     environment_vars = [
       "PROXMOX_URL=${var.proxmox_url}",
@@ -166,79 +224,6 @@ build {
       else
         echo "[!] SSH public key not found at $SSH_PUBKEY - skipping cloud-init SSH key"
       fi
-      SCRIPT
-    ]
-  }
-
-  # Boot VM with a temporary static IP, install qemu-guest-agent
-  # (required by Packer proxmox-clone builder to discover VM IP),
-  # then revert to DHCP and convert to template.
-  #
-  # We use a .254 address on the Proxmox host's bridge subnet to avoid
-  # conflicts with DHCP ranges or allocated services.
-  provisioner "shell-local" {
-    environment_vars = [
-      "PROXMOX_URL=${var.proxmox_url}",
-      "VMID=${var.base_ubuntu_vmid}",
-      "SSH_KEY=${var.ssh_enterprise_key_file}",
-      "SSH_USER=${var.ssh_username}",
-      "SSH_PASS=${var.ssh_password}",
-      "NETWORK_GW=${var.network_gateway}",
-      "NETWORK_CIDR=${var.network_cidr_mask}"
-    ]
-    inline = [
-      <<-SCRIPT
-      set -euo pipefail
-
-      PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
-      PVE_SSH="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
-
-      if [ -z "$NETWORK_GW" ]; then
-        echo "[!] network_gateway not set — skipping guest agent install"
-        echo "[!] WARNING: Packer proxmox-clone builds may timeout waiting for SSH."
-        ssh $PVE_SSH root@$PROXMOX_HOST "qm template $VMID"
-        exit 0
-      fi
-
-      # Derive temp IP from gateway (replace last octet with .254)
-      TEMP_IP=$(echo "$NETWORK_GW" | sed 's/\.[0-9]*$/.254/')
-      echo "[+] Temp IP: $TEMP_IP/$NETWORK_CIDR, Gateway: $NETWORK_GW"
-
-      # Set temporary static IP and boot
-      echo "[+] Setting temporary static IP and starting VM..."
-      ssh $PVE_SSH root@$PROXMOX_HOST \
-        "qm set $VMID --ipconfig0 ip=$TEMP_IP/$NETWORK_CIDR,gw=$NETWORK_GW && qm start $VMID"
-
-      # Wait for SSH to become available (cloud-init takes ~30-60s)
-      # SSH directly from container — Docker Desktop NATs outbound to the VM subnet
-      VM_SSH="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -i /crypto/labadmin"
-      echo "[+] Waiting for SSH on $TEMP_IP..."
-      for i in $(seq 1 40); do
-        if ssh $VM_SSH $SSH_USER@$TEMP_IP 'echo OK' 2>/dev/null | grep -q OK; then
-          echo "    SSH available on $TEMP_IP"
-          break
-        fi
-        printf "    Waiting... (%d/40)\r" "$i"
-        sleep 5
-      done
-
-      echo "[+] Waiting for cloud-init (timeout 120s)..."
-      ssh $VM_SSH $SSH_USER@$TEMP_IP 'timeout 120 cloud-init status --wait' 2>/dev/null || true
-
-      echo "[+] Installing qemu-guest-agent..."
-      ssh $VM_SSH $SSH_USER@$TEMP_IP \
-        'sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-guest-agent && sudo systemctl enable qemu-guest-agent && sudo systemctl start qemu-guest-agent && echo AGENT_OK'
-
-      # Revert to DHCP and clean up
-      echo "[+] Reverting cloud-init to DHCP..."
-      ssh $PVE_SSH root@$PROXMOX_HOST "qm shutdown $VMID --timeout 30 2>/dev/null || qm stop $VMID"
-      sleep 5
-      ssh $PVE_SSH root@$PROXMOX_HOST "qm set $VMID --ipconfig0 ip=dhcp"
-
-      echo "[+] Converting to template..."
-      ssh $PVE_SSH root@$PROXMOX_HOST "qm template $VMID"
-
-      echo "[+] Base Ubuntu template $VMID created successfully (with guest agent)"
       SCRIPT
     ]
   }

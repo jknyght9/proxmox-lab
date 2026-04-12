@@ -69,16 +69,12 @@ variable "ssh_enterprise_key_file" {
   default     = "/crypto/labenterpriseadmin"
 }
 
-# Network config for base template agent installation (temp static IP)
-variable "network_gateway" {
+# Cloud-init snippet storage (shared storage with 'snippets' content type)
+# Used by base template builders to upload the qemu-guest-agent snippet
+variable "snippet_storage" {
   type        = string
-  description = "Network gateway for temporary static IP during base template agent install"
-  default     = ""
-}
-variable "network_cidr_mask" {
-  type        = string
-  description = "CIDR mask bits (e.g., 24)"
-  default     = "24"
+  description = "Proxmox storage ID with 'snippets' content type (e.g., nfs-syno-templates)"
+  default     = "local"
 }
 
 # Base template VMIDs and image URLs
