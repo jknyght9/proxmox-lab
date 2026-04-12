@@ -226,14 +226,30 @@ Building VM templates with Packer. DNS and CA are now available.
 EOF
     pressAnyKey
 
-    # Check for existing templates and remove them
+    doing "Preparing Packer..."
+    docker compose build packer >/dev/null 2>&1
+    docker compose run --rm -it packer init .
+
+    # Step 1: Build base cloud image templates (9997-9999)
+    # These must complete before docker/nomad which clone from them.
+    if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config $VMID_BASE_TEMPLATE" &>/dev/null; then
+      doing "Building base VM templates (cloud images + guest agent)..."
+      if ! docker compose run --rm -it packer build -only='base-*.*' .; then
+        error "Base template build failed"
+        return 1
+      fi
+      success "Base templates built"
+    else
+      info "Base template $VMID_BASE_TEMPLATE already exists — skipping"
+    fi
+
+    # Step 2: Build docker + nomad templates (clone from base)
     removeTemplateIfExists 9001 "docker-template"
     removeTemplateIfExists 9002 "nomad-template"
 
-    doing "Building Packer templates..."
-    docker compose build packer >/dev/null 2>&1
-    docker compose run --rm -it packer init .
-    if ! docker compose run --rm -it packer build .; then
+    doing "Building Docker and Nomad templates..."
+    if ! docker compose run --rm -it packer build \
+        -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .; then
       error "Phase 2 failed: Packer build was not successful"
       DEPLOY_PHASE=2
       read -rp "$(question "Do you want to rollback? [Y/n]: ")" DO_ROLLBACK

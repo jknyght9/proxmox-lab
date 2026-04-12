@@ -61,3 +61,48 @@ variable "vault_addr" {
   type        = string
   description = "Vault address for fetching PKI root CA (e.g., https://10.1.50.114:8200). The VM fetches the cert directly during build."
 }
+
+# SSH key for Proxmox node administration (used by base template builders)
+variable "ssh_enterprise_key_file" {
+  type        = string
+  description = "Path to enterprise private key for Proxmox node SSH"
+  default     = "/crypto/labenterpriseadmin"
+}
+
+# Network config for base template agent installation (temp static IP)
+variable "network_gateway" {
+  type        = string
+  description = "Network gateway for temporary static IP during base template agent install"
+  default     = ""
+}
+variable "network_cidr_mask" {
+  type        = string
+  description = "CIDR mask bits (e.g., 24)"
+  default     = "24"
+}
+
+# Base template VMIDs and image URLs
+variable "base_ubuntu_vmid" {
+  type    = number
+  default = 9999
+}
+variable "ubuntu_image_url" {
+  type    = string
+  default = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+}
+variable "base_fedora_vmid" {
+  type    = number
+  default = 9998
+}
+variable "fedora_image_url" {
+  type    = string
+  default = "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"
+}
+variable "base_debian_vmid" {
+  type    = number
+  default = 9997
+}
+variable "debian_image_url" {
+  type    = string
+  default = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2"
+}

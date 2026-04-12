@@ -327,9 +327,11 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 | 910-912 | Main DNS cluster (dns-01, dns-02, dns-03) |
 | 920-922 | Labnet DNS cluster (labnet-dns-01, labnet-dns-02, labnet-dns-03) |
 | 930 | Kasm Workspaces |
-| 9001 | Docker template (Packer) |
-| 9002 | Nomad template (Packer) |
-| 9999 | Ubuntu base template |
+| 9001 | Docker template (Packer, clones 9999) |
+| 9002 | Nomad template (Packer, clones 9999) |
+| 9997 | Debian 12 base template (Packer) |
+| 9998 | Fedora Cloud 42 base template (Packer) |
+| 9999 | Ubuntu 24.04 base template (Packer) |
 
 ## Cloud-init Templates
 
