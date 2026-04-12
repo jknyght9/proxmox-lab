@@ -46,8 +46,8 @@ module "dns-main" {
   nodes          = local.effective_dns_main_nodes
   network_bridge = var.network_interface_bridge
   storage        = var.lxc_storage
-  admin_password = var.pihole_admin_password
-  root_password  = var.pihole_root_password
+  admin_password = data.vault_generic_secret.pihole.data["admin_password"]
+  root_password  = data.vault_generic_secret.pihole.data["root_password"]
   vmid_start     = 910
   is_sdn_network = false
   proxmox_ssh_host = local.proxmox_api_host

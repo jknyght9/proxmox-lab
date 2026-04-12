@@ -584,6 +584,10 @@ $(echo -e "$NODE_IPS_HCL")}
 # DNS main cluster nodes
 dns_main_nodes = [
 $(echo -e "$DNS_NODES_HCL")]
+
+# Vault (populated after Vault is deployed — leave empty for initial bootstrap)
+vault_address = ""
+vault_token   = ""
 EOF
 
   success "terraform.tfvars generated"

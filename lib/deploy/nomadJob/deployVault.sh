@@ -79,7 +79,7 @@ REMOTE_SCRIPT
   fi
 
   # Deploy Vault using the generic Nomad job deployer
-  if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "$VAULT_DIR" "-var vault_tls_enabled=${VAULT_TLS_VAR}"; then
+  if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "$VAULT_DIR" "-var vault_tls_enabled=${VAULT_TLS_VAR} -var dns_postfix=${DNS_POSTFIX}"; then
     return 1
   fi
 
@@ -291,7 +291,7 @@ function deployVaultWithCA() {
 
     if [ "$cur_proto" != "https" ]; then
       info "Listener cert present but Vault is running without TLS - redeploying with TLS enabled..."
-      if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "" "-var vault_tls_enabled=true"; then
+      if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "" "-var vault_tls_enabled=true -var dns_postfix=${DNS_POSTFIX}"; then
         error "Failed to redeploy Vault with TLS enabled"
         return 1
       fi

@@ -4,6 +4,11 @@ variable "vault_tls_enabled" {
   description = "Enable TLS on Vault's API listener using cert issued by its own PKI (bootstrap: false on first deploy, true after initVaultPKI issues the listener cert)"
 }
 
+variable "dns_postfix" {
+  type        = string
+  description = "Domain suffix for service DNS (e.g., jdclabs.lan)"
+}
+
 job "vault" {
   datacenters = ["dc1"]
   type        = "service"
@@ -88,11 +93,11 @@ EOH
         tags = [
           "traefik.enable=true",
           # HTTP router for ACME challenges and short name
-          "traefik.http.routers.vault-http.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`) || Host(`ca.${DNS_POSTFIX}`) || Host(`ca`)",
+          "traefik.http.routers.vault-http.rule=Host(`vault.${var.dns_postfix}`) || Host(`vault`) || Host(`ca.${var.dns_postfix}`) || Host(`ca`)",
           "traefik.http.routers.vault-http.entrypoints=web",
           # HTTPS router with TLS (Vault uses native OIDC, not forward auth)
           # Also accepts ca.<domain> for backwards compatibility with ACME clients
-          "traefik.http.routers.vault.rule=Host(`vault.${DNS_POSTFIX}`) || Host(`vault`) || Host(`ca.${DNS_POSTFIX}`) || Host(`ca`)",
+          "traefik.http.routers.vault.rule=Host(`vault.${var.dns_postfix}`) || Host(`vault`) || Host(`ca.${var.dns_postfix}`) || Host(`ca`)",
           "traefik.http.routers.vault.entrypoints=websecure",
           "traefik.http.routers.vault.tls=true",
           "traefik.http.services.vault.loadbalancer.server.port=8200",

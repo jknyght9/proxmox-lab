@@ -214,5 +214,85 @@ function syncSecretsToVault() {
     warn "  Failed to write secret/services/ssh-keys"
   fi
 
+  # Cluster configuration — used by Nomad jobs (samba-dc, lam) via Vault templates
+  doing "Writing cluster config to Vault KV..."
+
+  local CLUSTER_PAYLOAD
+  local DNS_POSTFIX_VAL=""
+  local DNS_SERVER_VAL=""
+  local NETWORK_CIDR_VAL=""
+  local GATEWAY_VAL=""
+
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    DNS_POSTFIX_VAL=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+    NETWORK_CIDR_VAL=$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE")
+    GATEWAY_VAL=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE")
+  fi
+  # Fall back to global var if cluster-info.json doesn't have it
+  DNS_POSTFIX_VAL="${DNS_POSTFIX_VAL:-${DNS_POSTFIX:-}}"
+
+  # DNS server: use HA VIP if enabled, otherwise first DNS node IP
+  if [ -f "$CLUSTER_INFO_FILE" ] && jq -e '.network.external.ha_enabled == true' "$CLUSTER_INFO_FILE" >/dev/null 2>&1; then
+    DNS_SERVER_VAL=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE")
+  fi
+  if [ -z "$DNS_SERVER_VAL" ] && [ -f "hosts.json" ]; then
+    DNS_SERVER_VAL=$(jq -r '.external[0].ip // ""' hosts.json | sed 's|/.*||')
+  fi
+
+  # AD-related values (populated if Samba AD is configured, empty otherwise)
+  local AD_REALM="" AD_DOMAIN="" AD_REALM_LOWER="" BASE_DN="" DNS_FORWARDER=""
+  if [ -n "$DNS_POSTFIX_VAL" ]; then
+    AD_REALM="AD.$(echo "$DNS_POSTFIX_VAL" | tr '[:lower:]' '[:upper:]')"
+    AD_DOMAIN="AD"
+    AD_REALM_LOWER="ad.${DNS_POSTFIX_VAL}"
+    BASE_DN="DC=ad,$(echo "$DNS_POSTFIX_VAL" | sed 's/\./,DC=/g' | sed 's/^/DC=/')"
+    DNS_FORWARDER="${DNS_SERVER_VAL:-${GATEWAY_VAL}}"
+  fi
+
+  CLUSTER_PAYLOAD=$(jq -n \
+    --arg dns_postfix "$DNS_POSTFIX_VAL" \
+    --arg dns_server "$DNS_SERVER_VAL" \
+    --arg network_cidr "$NETWORK_CIDR_VAL" \
+    --arg gateway "$GATEWAY_VAL" \
+    --arg ad_realm "$AD_REALM" \
+    --arg ad_domain "$AD_DOMAIN" \
+    --arg ad_realm_lower "$AD_REALM_LOWER" \
+    --arg base_dn "$BASE_DN" \
+    --arg dns_forwarder "$DNS_FORWARDER" \
+    '{data: {dns_postfix: $dns_postfix, dns_server: $dns_server, network_cidr: $network_cidr, gateway: $gateway, ad_realm: $ad_realm, ad_domain: $ad_domain, ad_realm_lower: $ad_realm_lower, base_dn: $base_dn, dns_forwarder: $dns_forwarder}}')
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/config/cluster" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$CLUSTER_PAYLOAD" > /dev/null; then
+    success "  secret/config/cluster"
+  else
+    warn "  Failed to write secret/config/cluster"
+  fi
+
+  # Nomad node IPs — used by samba-dc and lam jobs via Vault templates
+  local NOMAD_NODES_PAYLOAD="{\"data\":{"
+  local node_idx=1
+  if [ -f "hosts.json" ]; then
+    while IFS= read -r line; do
+      local hostname ip
+      hostname=$(echo "$line" | jq -r '.hostname')
+      ip=$(echo "$line" | jq -r '.ip')
+      [ $node_idx -gt 1 ] && NOMAD_NODES_PAYLOAD+=","
+      NOMAD_NODES_PAYLOAD+="\"${hostname}_ip\":\"${ip}\""
+      node_idx=$((node_idx + 1))
+    done < <(jq -c '.external[] | select(.hostname | startswith("nomad"))' hosts.json 2>/dev/null)
+  fi
+  NOMAD_NODES_PAYLOAD+="}}"
+
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/config/nomad-nodes" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$NOMAD_NODES_PAYLOAD" > /dev/null; then
+    success "  secret/config/nomad-nodes"
+  else
+    warn "  Failed to write secret/config/nomad-nodes"
+  fi
+
   success "Secrets synced to Vault"
 }
