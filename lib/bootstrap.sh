@@ -522,8 +522,9 @@ function generateTfvarsFromBootstrap() {
 
   # Calculate DNS IPs from network CIDR
   # Convention: .3 = VIP, .4-.6 = DNS nodes, .7+ = services
-  local BASE_IP
+  local BASE_IP CIDR_MASK
   BASE_IP=$(echo "$NETWORK_CIDR" | cut -d/ -f1 | sed 's/\.[0-9]*$//')
+  CIDR_MASK=$(echo "$NETWORK_CIDR" | grep -oE '/[0-9]+$')
   local DNS_PRIMARY="${BASE_IP}.4"
 
   # Build node IP map
@@ -537,7 +538,7 @@ function generateTfvarsFromBootstrap() {
   local dns_octet=4
   for i in "${!CLUSTER_NODES[@]}"; do
     local dns_ip="${BASE_IP}.${dns_octet}"
-    DNS_NODES_HCL+="  {\n    hostname = \"dns-$(printf '%02d' $((i+1)))\"\n    ip       = \"${dns_ip}\"\n    target   = \"${CLUSTER_NODES[$i]}\"\n  },\n"
+    DNS_NODES_HCL+="  {\n    hostname    = \"dns-$(printf '%02d' $((i+1)))\"\n    target_node = \"${CLUSTER_NODES[$i]}\"\n    ip          = \"${dns_ip}/${CIDR_MASK}\"\n    gw          = \"${NETWORK_GATEWAY}\"\n  },\n"
     dns_octet=$((dns_octet + 1))
   done
 
@@ -634,7 +635,9 @@ template_storage      = "${TEMPLATE_STORAGE}"
 template_storage_type = "${TEMPLATE_STORAGE_TYPE}"
 
 # Network
-network_bridge = "${NETWORK_BRIDGE}"
+network_bridge    = "${NETWORK_BRIDGE}"
+network_gateway   = "${NETWORK_GATEWAY}"
+network_cidr_mask = "$(echo "$NETWORK_CIDR" | grep -oE '[0-9]+$')"
 
 # Template credentials
 root_password = "${ROOT_PASS}"

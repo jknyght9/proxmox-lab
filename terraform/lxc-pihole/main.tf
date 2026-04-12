@@ -41,6 +41,12 @@ resource "proxmox_virtual_environment_container" "dns" {
     dns {
       servers = [var.bootstrap_dns]
     }
+    ip_config {
+      ipv4 {
+        address = each.value.ip
+        gateway = each.value.gw
+      }
+    }
     user_account {
       password = var.root_password
       keys     = [trimspace(file(var.ssh_admin_public_key_file))]
@@ -64,10 +70,6 @@ resource "proxmox_virtual_environment_container" "dns" {
   network_interface {
     name   = "eth0"
     bridge = var.network_bridge
-    ipv4 {
-      address = each.value.ip
-      gateway = each.value.gw
-    }
   }
 
   features {
