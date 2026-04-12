@@ -585,7 +585,8 @@ $(echo -e "$NODE_IPS_HCL")}
 dns_main_nodes = [
 $(echo -e "$DNS_NODES_HCL")]
 
-# Vault (populated after Vault is deployed — leave empty for initial bootstrap)
+# Vault — credentials written to terraform/vault.auto.tfvars after Vault deploys
+# (empty defaults here so terraform validate works before Vault exists)
 vault_address = ""
 vault_token   = ""
 EOF

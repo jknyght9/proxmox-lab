@@ -364,6 +364,25 @@ function deployVaultWithCA() {
   # so Vault becomes the single source of truth for all credentials.
   syncSecretsToVault || warn "Failed to sync secrets to Vault — run manually later"
 
+  # Write Vault credentials to a separate auto-loaded tfvars file.
+  # Terraform auto-loads *.auto.tfvars — keeps Vault config separate from
+  # the bootstrap-generated terraform.tfvars.
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local VAULT_ADDR_VAL VAULT_TOKEN_VAL
+    VAULT_ADDR_VAL=$(jq -r '.vault_address // ""' "$VAULT_CREDENTIALS_FILE")
+    VAULT_TOKEN_VAL=$(jq -r '.root_token // ""' "$VAULT_CREDENTIALS_FILE")
+    if [ -n "$VAULT_ADDR_VAL" ] && [ -n "$VAULT_TOKEN_VAL" ]; then
+      doing "Writing terraform/vault.auto.tfvars..."
+      cat > "$SCRIPT_DIR/terraform/vault.auto.tfvars" <<VEOF
+# Auto-generated after Vault deployment — do not edit manually
+vault_address = "${VAULT_ADDR_VAL}"
+vault_token   = "${VAULT_TOKEN_VAL}"
+VEOF
+      chmod 600 "$SCRIPT_DIR/terraform/vault.auto.tfvars"
+      success "terraform/vault.auto.tfvars written"
+    fi
+  fi
+
   success "Vault + PKI/ACME deployment complete!"
 }
 
