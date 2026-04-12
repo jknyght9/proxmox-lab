@@ -62,8 +62,9 @@ storage "file" {
 listener "tcp" {
   address = "0.0.0.0:8200"
 %{ if var.vault_tls_enabled ~}
-  tls_cert_file = "/tls/cert.pem"
-  tls_key_file  = "/tls/key.pem"
+  tls_cert_file   = "/tls/cert.pem"
+  tls_key_file    = "/tls/key.pem"
+  tls_min_version = "tls12"
 %{ else ~}
   tls_disable = true
 %{ endif ~}

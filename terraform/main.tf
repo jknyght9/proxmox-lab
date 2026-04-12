@@ -18,15 +18,17 @@ module "nomad" {
 
   source = "./vm-nomad"
 
-  dns_postfix     = var.dns_postfix
-  dns_primary_ip  = var.dns_primary_ipv4
+  dns_postfix      = var.dns_postfix
+  dns_primary_ip   = var.dns_primary_ipv4
   proxmox_endpoint = var.proxmox_endpoint
-  proxmox_bridge  = var.network_interface_bridge
-  node_ip_map     = local.node_ip_map
-  vm_storage      = var.vm_storage
+  proxmox_bridge   = var.network_interface_bridge
+  node_ip_map      = local.node_ip_map
+  vm_storage       = var.vm_storage
+  template_node    = var.proxmox_target_node
 
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
 
   # Traefik HA Configuration (keepalived VIP)
   traefik_ha_enabled        = var.nomad_traefik_ha_enabled
@@ -46,8 +48,8 @@ module "dns-main" {
   nodes          = local.effective_dns_main_nodes
   network_bridge = var.network_interface_bridge
   storage        = var.lxc_storage
-  admin_password = data.vault_generic_secret.pihole.data["admin_password"]
-  root_password  = data.vault_generic_secret.pihole.data["root_password"]
+  admin_password = local.vault_configured ? data.vault_generic_secret.pihole[0].data["admin_password"] : "vault-not-configured"
+  root_password  = local.vault_configured ? data.vault_generic_secret.pihole[0].data["root_password"] : "vault-not-configured"
   vmid_start     = 910
   is_sdn_network = false
   proxmox_ssh_host = local.proxmox_api_host

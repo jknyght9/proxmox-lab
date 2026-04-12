@@ -119,10 +119,9 @@ function runEverything() {
   distributeSSHKeys
 
   # Deploy services (LXC, Packer, VMs)
+  # GlusterFS + Nomad cluster formation is now handled by Terraform
+  # provisioners in terraform/vm-nomad/main.tf (no separate bash step)
   deployAllServices
-
-  # Setup Nomad cluster
-  setupNomadCluster
 
   displayDeploymentSummary
 }

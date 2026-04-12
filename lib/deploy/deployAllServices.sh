@@ -304,8 +304,8 @@ EOF
   # Update DNS records with actual IPs
   updateDNSRecords
 
-  # Configure Nomad cluster (GlusterFS + cluster formation)
-  setupNomadCluster
+  # GlusterFS + Nomad cluster formation now handled by Terraform provisioners
+  # in terraform/vm-nomad/main.tf (no separate bash step needed)
 
   displayDeploymentSummary
 
