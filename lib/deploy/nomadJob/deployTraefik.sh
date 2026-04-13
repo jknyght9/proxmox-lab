@@ -127,6 +127,17 @@ TLSYML
     warn "$VAULT_CREDENTIALS_FILE not found - Traefik will start without TLS certs"
   fi
 
+  # Determine DNS server IP (VIP if HA enabled, otherwise dns-01)
+  local DNS_SERVER
+  DNS_SERVER=$(jq -r '.network.external.ha_vip // ""' "$CLUSTER_INFO_FILE" 2>/dev/null | cut -d'/' -f1)
+  if [ -z "$DNS_SERVER" ] || [ "$DNS_SERVER" = "null" ]; then
+    DNS_SERVER=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  fi
+  if [ -z "$DNS_SERVER" ] || [ "$DNS_SERVER" = "null" ]; then
+    DNS_SERVER="$NOMAD_IP"
+    warn "Could not determine DNS server, using Nomad IP: $DNS_SERVER"
+  fi
+
   # Deploy Traefik using the generic Nomad job deployer
   if ! deployNomadJob "traefik" "nomad/jobs/traefik.nomad.hcl" "/srv/gluster/nomad-data/traefik" "-var dns_server=${DNS_SERVER}"; then
     return 1
