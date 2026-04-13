@@ -131,24 +131,11 @@ runcmd:
 %{ if dns_primary_ip != "" ~}
   - |
     # Configure systemd-resolved to use Pi-hole as DNS
+    # Network config (static IP, gateway, DNS) is handled by Proxmox cloud-init
+    # via initialization.ip_config and initialization.dns in Terraform
     bash -lc '
       resolvectl dns eth0 ${dns_primary_ip}
       resolvectl domain eth0 ${dns_postfix}
-      # Make DNS config persistent via netplan
-      mkdir -p /etc/netplan
-      cat > /etc/netplan/99-dns-override.yaml <<EOF
-    network:
-      version: 2
-      ethernets:
-        eth0:
-          dhcp4: true
-          dhcp4-overrides:
-            use-dns: false
-          nameservers:
-            addresses: [${dns_primary_ip}]
-            search: [${dns_postfix}]
-    EOF
-      netplan apply 2>/dev/null || true
     '
 %{ endif ~}
   - |
