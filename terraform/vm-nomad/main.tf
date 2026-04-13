@@ -225,9 +225,33 @@ resource "null_resource" "gluster_mount" {
   }
 }
 
-# Step 4: Restart Nomad and wait for cluster to form
-resource "null_resource" "nomad_cluster_health" {
+# Step 4: Restart Nomad on each node (separate connections — no nested SSH)
+resource "null_resource" "nomad_restart" {
+  for_each   = var.vm_configs
   depends_on = [null_resource.gluster_mount]
+
+  triggers = {
+    gluster_mount = null_resource.gluster_mount[each.key].id
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '[+] Restarting Nomad on ${each.value.name}...'",
+      "sudo systemctl restart nomad",
+    ]
+  }
+}
+
+# Step 5: Wait for Nomad cluster to form (all servers joined)
+resource "null_resource" "nomad_cluster_health" {
+  depends_on = [null_resource.nomad_restart]
 
   connection {
     type        = "ssh"
@@ -237,13 +261,7 @@ resource "null_resource" "nomad_cluster_health" {
   }
 
   provisioner "remote-exec" {
-    inline = flatten([
-      # Restart Nomad on all nodes (GlusterFS mount is now available)
-      [for ip in local.all_ips :
-        "ssh -o StrictHostKeyChecking=no ${ip} 'sudo systemctl restart nomad'"
-      ],
-
-      # Wait for all servers to join
+    inline = [
       <<-EOT
       echo '[+] Waiting for Nomad cluster to form...'
       for i in $(seq 1 30); do
@@ -260,6 +278,6 @@ resource "null_resource" "nomad_cluster_health" {
       nomad server members
       exit 1
       EOT
-    ])
+    ]
   }
 }
