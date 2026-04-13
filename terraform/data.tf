@@ -1,31 +1,31 @@
 # =============================================================================
-# Vault Data Sources
+# Vault Data Sources (KV v2)
 # =============================================================================
 #
-# Secrets are stored in Vault KV v2 at secret/services/* and secret/config/*.
+# Secrets stored in Vault KV v2 at secret/services/* and secret/config/*.
 # Written by syncSecretsToVault() in lib/credentials.sh during Vault setup.
 #
-# These data sources are conditional on vault_address being set — during
-# initial bootstrap (before Vault exists), they have count = 0 and make
-# no API calls.
-#
-# KV v2 note: the API path includes /data/ but the logical path does not.
+# Conditional on vault_address being set — during initial bootstrap
+# (before Vault exists), count = 0 and no API calls are made.
 
 locals {
   vault_configured = var.vault_address != ""
 }
 
-data "vault_generic_secret" "pihole" {
+data "vault_kv_secret_v2" "pihole" {
   count = local.vault_configured ? 1 : 0
-  path  = "secret/data/services/pihole"
+  mount = "secret"
+  name  = "services/pihole"
 }
 
-data "vault_generic_secret" "cluster_config" {
+data "vault_kv_secret_v2" "cluster_config" {
   count = local.vault_configured ? 1 : 0
-  path  = "secret/data/config/cluster"
+  mount = "secret"
+  name  = "config/cluster"
 }
 
-data "vault_generic_secret" "nomad_nodes" {
+data "vault_kv_secret_v2" "nomad_nodes" {
   count = local.vault_configured ? 1 : 0
-  path  = "secret/data/config/nomad-nodes"
+  mount = "secret"
+  name  = "config/nomad-nodes"
 }

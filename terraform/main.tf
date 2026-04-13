@@ -50,8 +50,8 @@ module "dns-main" {
   nodes          = local.effective_dns_main_nodes
   network_bridge = var.network_interface_bridge
   storage        = var.lxc_storage
-  admin_password = local.vault_configured ? data.vault_generic_secret.pihole[0].data["admin_password"] : "vault-not-configured"
-  root_password  = local.vault_configured ? data.vault_generic_secret.pihole[0].data["root_password"] : "vault-not-configured"
+  admin_password = local.vault_configured ? data.vault_kv_secret_v2.pihole[0].data["admin_password"] : "vault-not-configured"
+  root_password  = local.vault_configured ? data.vault_kv_secret_v2.pihole[0].data["root_password"] : "vault-not-configured"
   vmid_start     = 910
   is_sdn_network = false
   proxmox_ssh_host = local.proxmox_api_host
