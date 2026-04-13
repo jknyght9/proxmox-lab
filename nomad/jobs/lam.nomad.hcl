@@ -2,6 +2,12 @@
 #
 # Provides a web UI for managing Samba AD users, groups, and attributes.
 # Protected by Authentik forward auth - only authenticated admins can access.
+# AD config read from Vault KV at secret/config/cluster and secret/config/nomad-nodes.
+
+variable "dns_postfix" {
+  type        = string
+  description = "Domain suffix for service DNS"
+}
 
 job "lam" {
   datacenters = ["dc1"]
@@ -16,6 +22,12 @@ job "lam" {
       value     = "nomad01"
     }
 
+    # Vault integration — read AD config from KV
+    vault {
+      role        = "lam"
+      change_mode = "restart"
+    }
+
     network {
       port "http" {
         static = 8380
@@ -28,7 +40,6 @@ job "lam" {
 
       config {
         image       = "ghcr.io/ldapaccountmanager/lam:stable"
-        dns_servers = ["${DNS_SERVER}"]
         ports       = ["http"]
 
         volumes = [
@@ -37,17 +48,27 @@ job "lam" {
         ]
       }
 
-      env {
-        # LAM Configuration
-        LDAP_DOMAIN          = "${AD_REALM_LOWER}"
-        LDAP_BASE_DN         = "${BASE_DN}"
-        LDAP_SERVER          = "ldaps://${NOMAD01_IP}"
-        LDAP_USER            = "CN=Administrator,CN=Users,${BASE_DN}"
-        LAM_LANG             = "en_US"
-        LAM_PASSWORD         = "lam"  # Default config password, change after first login
-        LAM_CONFIGURATION_DATABASE = "files"
-        # Trust internal Vault PKI CA for LDAPS connections
-        LDAPTLS_REQCERT      = "allow"
+      # AD config injected from Vault KV via template
+      template {
+        data = <<EOH
+{{ with secret "secret/data/config/cluster" }}
+LDAP_DOMAIN={{ .Data.data.ad_realm_lower }}
+LDAP_BASE_DN={{ .Data.data.base_dn }}
+LDAP_USER=CN=Administrator,CN=Users,{{ .Data.data.base_dn }}
+{{ end }}
+{{ with secret "secret/data/config/nomad-nodes" }}
+LDAP_SERVER=ldaps://{{ .Data.data.nomad01_ip }}
+{{ end }}
+{{ with secret "secret/data/config/cluster" }}
+DNS_SERVER={{ .Data.data.dns_server }}
+{{ end }}
+LAM_LANG=en_US
+LAM_PASSWORD=lam
+LAM_CONFIGURATION_DATABASE=files
+LDAPTLS_REQCERT=allow
+EOH
+        destination = "secrets/lam.env"
+        env         = true
       }
 
       resources {
@@ -62,11 +83,9 @@ job "lam" {
 
         tags = [
           "traefik.enable=true",
-          # HTTP router
-          "traefik.http.routers.lam-http.rule=Host(`lam.${DNS_POSTFIX}`)",
+          "traefik.http.routers.lam-http.rule=Host(`lam.${var.dns_postfix}`)",
           "traefik.http.routers.lam-http.entrypoints=web",
-          # HTTPS router with Authentik forward auth
-          "traefik.http.routers.lam.rule=Host(`lam.${DNS_POSTFIX}`)",
+          "traefik.http.routers.lam.rule=Host(`lam.${var.dns_postfix}`)",
           "traefik.http.routers.lam.entrypoints=websecure",
           "traefik.http.routers.lam.tls=true",
           "traefik.http.routers.lam.middlewares=authentik@file",

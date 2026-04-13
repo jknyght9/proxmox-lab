@@ -1,12 +1,24 @@
+variable "backup_cron" {
+  type    = string
+  default = "0 2 * * *"
+}
+variable "backup_timezone" {
+  type    = string
+  default = "UTC"
+}
+variable "backup_retention_days" {
+  type    = string
+  default = "7"
+}
+
 job "backup" {
   datacenters = ["dc1"]
   type        = "batch"
 
-  # Run daily at 2 AM (configurable via deployment script)
   periodic {
-    cron             = "${BACKUP_CRON:-0 2 * * *}"
+    cron             = var.backup_cron
     prohibit_overlap = true
-    time_zone        = "${BACKUP_TIMEZONE:-UTC}"
+    time_zone        = var.backup_timezone
   }
 
   group "backup" {
@@ -184,6 +196,6 @@ EOH
 
   # Metadata for configurable values
   meta {
-    retention_days = "${BACKUP_RETENTION_DAYS:-7}"
+    retention_days = "${var.backup_retention_days}"
   }
 }

@@ -284,7 +284,7 @@ REMOTE_SCRIPT
   local AD_REALM_LOWER
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
 
-  # Export variables for envsubst
+  # These vars are still used by configureADServiceAccounts and DNS forwarding setup
   export AD_REALM AD_DOMAIN DNS_FORWARDER AD_REALM_LOWER DNS_POSTFIX NOMAD01_IP NOMAD02_IP
 
   # Check if we're deploying single DC or dual DC setup
@@ -301,26 +301,16 @@ REMOTE_SCRIPT
   fi
 
   # ==========================================================================
-  # Phase 1: Deploy DC01 only (provisions the domain)
+  # Phase 1: Deploy DC01 (provisions the domain)
   # ==========================================================================
-  doing "Phase 1: Deploying DC01 (primary domain controller)..."
+  # The job file uses Vault KV templates for AD config — no envsubst needed.
+  # DC02 group has a constraint on nomad02; if single-node, it stays pending.
+  doing "Phase 1: Deploying Samba AD domain controllers..."
 
-  # Generate DC01-only job file
-  generateSambaDCJob "false" > "/tmp/samba-dc-rendered.nomad.hcl"
+  scpToAdmin "nomad/jobs/samba-dc.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
-  # Apply variable substitution
-  envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP}' \
-    < "/tmp/samba-dc-rendered.nomad.hcl" \
-    > "/tmp/samba-dc-final.nomad.hcl"
-  mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
-
-  # Copy to Nomad node
-  scpToAdmin "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
-
-  # Deploy DC01 only
   if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
-    error "Failed to deploy DC01"
-    rm -f "/tmp/samba-dc-rendered.nomad.hcl"
+    error "Failed to deploy Samba AD"
     return 1
   fi
 
@@ -358,28 +348,7 @@ REMOTE_SCRIPT
   # Phase 2: Add DC02 if multi-node setup
   # ==========================================================================
   if [ "$DEPLOY_REPLICA" = "true" ]; then
-    doing "Phase 2: Adding DC02 (replica domain controller)..."
-
-    # Generate full job with both DCs
-    generateSambaDCJob "true" > "/tmp/samba-dc-rendered.nomad.hcl"
-
-    # Apply variable substitution
-    envsubst '${AD_REALM} ${AD_DOMAIN} ${DNS_FORWARDER} ${AD_REALM_LOWER} ${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP}' \
-      < "/tmp/samba-dc-rendered.nomad.hcl" \
-      > "/tmp/samba-dc-final.nomad.hcl"
-    mv "/tmp/samba-dc-final.nomad.hcl" "/tmp/samba-dc-rendered.nomad.hcl"
-
-    # Copy updated job to Nomad node
-    scpToAdmin "/tmp/samba-dc-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
-
-    # Deploy updated job (adds DC02)
-    if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
-      error "Failed to deploy DC02"
-      rm -f "/tmp/samba-dc-rendered.nomad.hcl"
-      return 1
-    fi
-
-    # Wait for DC02 to become healthy
+    # DC02 was included in the initial job run — wait for it to join
     doing "Waiting for DC02 to join domain and become healthy..."
 
     local DC02_HEALTHY=false

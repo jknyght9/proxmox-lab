@@ -72,10 +72,14 @@ job "samba-dc" {
 {{ with secret "secret/data/samba-ad" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-DOMAIN=${AD_REALM}
-DOMAINNAME=${AD_DOMAIN}
-HOSTIP=${NOMAD01_IP}
-DNSFORWARDER=${DNS_FORWARDER}
+{{ with secret "secret/data/config/cluster" }}
+DOMAIN={{ .Data.data.ad_realm }}
+DOMAINNAME={{ .Data.data.ad_domain }}
+DNSFORWARDER={{ .Data.data.dns_forwarder }}
+{{ end }}
+{{ with secret "secret/data/config/nomad-nodes" }}
+HOSTIP={{ .Data.data.nomad01_ip }}
+{{ end }}
 JOIN=false
 INSECURELDAP=true
 NOCOMPLEXITY=true
@@ -96,7 +100,7 @@ EOH
 
         tags = [
           "dc=primary",
-          "realm=${AD_REALM}",
+{{ with secret "secret/data/config/cluster" }}          "realm={{ .Data.data.ad_realm }}",{{ end }}
         ]
 
         check {
@@ -184,11 +188,15 @@ EOH
 {{ with secret "secret/data/samba-ad" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-DOMAIN=${AD_REALM}
-DOMAINNAME=${AD_DOMAIN}
-HOSTIP=${NOMAD02_IP}
-DNSFORWARDER=${NOMAD01_IP}
-DCIP=${NOMAD01_IP}
+{{ with secret "secret/data/config/cluster" }}
+DOMAIN={{ .Data.data.ad_realm }}
+DOMAINNAME={{ .Data.data.ad_domain }}
+{{ end }}
+{{ with secret "secret/data/config/nomad-nodes" }}
+HOSTIP={{ .Data.data.nomad02_ip }}
+DNSFORWARDER={{ .Data.data.nomad01_ip }}
+DCIP={{ .Data.data.nomad01_ip }}
+{{ end }}
 JOIN=true
 JOINSITE=Default-First-Site-Name
 INSECURELDAP=true
@@ -210,7 +218,7 @@ EOH
 
         tags = [
           "dc=replica",
-          "realm=${AD_REALM}",
+{{ with secret "secret/data/config/cluster" }}          "realm={{ .Data.data.ad_realm }}",{{ end }}
         ]
 
         check {

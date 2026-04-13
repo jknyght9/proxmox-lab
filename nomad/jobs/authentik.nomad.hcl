@@ -1,3 +1,8 @@
+variable "dns_postfix" {
+  type        = string
+  description = "Domain suffix for service DNS"
+}
+
 job "authentik" {
   datacenters = ["dc1"]
   type        = "service"
@@ -92,7 +97,7 @@ AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
 AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
 {{ end }}
-AUTHENTIK_HOST=https://auth.${DNS_POSTFIX}
+AUTHENTIK_HOST=https://auth.${var.dns_postfix}
 AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432
@@ -123,10 +128,10 @@ EOH
         tags = [
           "traefik.enable=true",
           # HTTP router for ACME challenges and short name
-          "traefik.http.routers.authentik-http.rule=Host(`auth.${DNS_POSTFIX}`) || Host(`auth`)",
+          "traefik.http.routers.authentik-http.rule=Host(`auth.${var.dns_postfix}`) || Host(`auth`)",
           "traefik.http.routers.authentik-http.entrypoints=web",
           # HTTPS router with TLS - accepts both FQDN and short name
-          "traefik.http.routers.authentik.rule=Host(`auth.${DNS_POSTFIX}`) || Host(`auth`)",
+          "traefik.http.routers.authentik.rule=Host(`auth.${var.dns_postfix}`) || Host(`auth`)",
           "traefik.http.routers.authentik.entrypoints=websecure",
           "traefik.http.routers.authentik.tls=true",
           "traefik.http.services.authentik.loadbalancer.server.port=9000",
@@ -164,7 +169,7 @@ AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
 AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
 {{ end }}
-AUTHENTIK_HOST=https://auth.${DNS_POSTFIX}
+AUTHENTIK_HOST=https://auth.${var.dns_postfix}
 AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
 AUTHENTIK_POSTGRESQL__HOST=127.0.0.1
 AUTHENTIK_POSTGRESQL__PORT=5432

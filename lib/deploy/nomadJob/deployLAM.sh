@@ -84,22 +84,14 @@ EOF
     fi
 BOOTSTRAP
 
-  # Export variables for envsubst
-  export DNS_POSTFIX DNS_SERVER AD_REALM_LOWER BASE_DN NOMAD01_IP
-
-  # Render and deploy the job
+  # Deploy LAM — AD config comes from Vault KV templates, dns_postfix via -var
   doing "Deploying LAM..."
-  envsubst '${DNS_POSTFIX} ${DNS_SERVER} ${AD_REALM_LOWER} ${BASE_DN} ${NOMAD01_IP}' \
-    < "nomad/jobs/lam.nomad.hcl" > "/tmp/lam-rendered.nomad.hcl"
+  scpToAdmin "nomad/jobs/lam.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/lam.nomad.hcl"
 
-  scpToAdmin "/tmp/lam-rendered.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/lam.nomad.hcl"
-
-  if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/lam.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run -var dns_postfix=${DNS_POSTFIX} /tmp/lam.nomad.hcl"; then
     error "Failed to deploy LAM"
     return 1
   fi
-
-  rm -f "/tmp/lam-rendered.nomad.hcl"
 
   # Wait for deployment
   doing "Waiting for LAM to start..."

@@ -289,22 +289,17 @@ ROLE_JSON
     fi
   fi
 
-  # Render job template with configuration
-  export BACKUP_CRON BACKUP_TIMEZONE BACKUP_RETENTION_DAYS="$RETENTION_DAYS"
-  envsubst '${BACKUP_CRON} ${BACKUP_TIMEZONE} ${BACKUP_RETENTION_DAYS}' \
-    < "nomad/jobs/backup.nomad.hcl" > "/tmp/backup-rendered.nomad.hcl"
+  # Copy job file and run with HCL2 variables
+  scpToAdmin "nomad/jobs/backup.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/backup.nomad.hcl"
 
-  # Copy to Nomad node
-  scpToAdmin "/tmp/backup-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/backup.nomad.hcl"
-
-  # Run the job
-  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/backup.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run \
+    -var backup_cron='${BACKUP_CRON}' \
+    -var backup_timezone='${BACKUP_TIMEZONE}' \
+    -var backup_retention_days='${RETENTION_DAYS}' \
+    /tmp/backup.nomad.hcl"; then
     error "Failed to deploy backup job"
     return 1
   fi
-
-  # Clean up
-  rm -f "/tmp/backup-rendered.nomad.hcl"
   sshRunAdmin "$VM_USER" "$NOMAD_IP" "rm -f /tmp/backup.nomad.hcl"
 
   # Show job status
