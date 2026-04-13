@@ -29,3 +29,9 @@ data "vault_kv_secret_v2" "nomad_nodes" {
   mount = "secret"
   name  = "config/nomad-nodes"
 }
+
+data "vault_kv_secret_v2" "kasm" {
+  count = local.vault_configured ? 1 : 0
+  mount = "secret"
+  name  = "services/kasm"
+}

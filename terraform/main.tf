@@ -70,6 +70,30 @@ module "dns-main" {
   ha_vrrp_password  = var.dns_ha_vrrp_password
 }
 
+# =============================================================================
+# Kasm Workspaces (cloned from Docker template)
+# =============================================================================
+
+module "kasm" {
+  depends_on = [module.dns-main]
+
+  source = "./vm-kasm"
+
+  dns_postfix        = var.dns_postfix
+  dns_primary_ip     = var.dns_primary_ipv4
+  proxmox_endpoint   = var.proxmox_endpoint
+  proxmox_bridge     = var.network_interface_bridge
+  node_ip_map        = local.node_ip_map
+  vm_storage         = var.vm_storage
+  template_node      = var.proxmox_target_node
+  network_gateway    = var.network_gateway_address
+  network_cidr_bits  = split("/", var.dns_main_nodes[0].ip)[1]
+  kasm_admin_password = local.vault_configured ? data.vault_kv_secret_v2.kasm[0].data["admin_password"] : "vault-not-configured"
+
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+}
+
 # NOTE: Labnet SDN DNS cluster has been moved to feature/labnet-sdn branch.
 # It will be re-integrated once the SDN implementation is stabilized.
 
