@@ -128,7 +128,7 @@ TLSYML
   fi
 
   # Deploy Traefik using the generic Nomad job deployer
-  if ! deployNomadJob "traefik" "nomad/jobs/traefik.nomad.hcl" "/srv/gluster/nomad-data/traefik"; then
+  if ! deployNomadJob "traefik" "nomad/jobs/traefik.nomad.hcl" "/srv/gluster/nomad-data/traefik" "-var dns_server=${DNS_SERVER}"; then
     return 1
   fi
 

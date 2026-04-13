@@ -1,3 +1,8 @@
+variable "dns_postfix" {
+  type        = string
+  description = "Domain suffix for service DNS"
+}
+
 job "uptime-kuma" {
   datacenters = ["dc1"]
   type        = "service"
@@ -40,10 +45,10 @@ job "uptime-kuma" {
         tags = [
           "traefik.enable=true",
           # HTTP router for ACME challenges and short name
-          "traefik.http.routers.uptime-kuma-http.rule=Host(`status.${DNS_POSTFIX}`) || Host(`status`)",
+          "traefik.http.routers.uptime-kuma-http.rule=Host(`status.${var.dns_postfix}`) || Host(`status`)",
           "traefik.http.routers.uptime-kuma-http.entrypoints=web",
           # HTTPS router with TLS - accepts both FQDN and short name
-          "traefik.http.routers.uptime-kuma.rule=Host(`status.${DNS_POSTFIX}`) || Host(`status`)",
+          "traefik.http.routers.uptime-kuma.rule=Host(`status.${var.dns_postfix}`) || Host(`status`)",
           "traefik.http.routers.uptime-kuma.entrypoints=websecure",
           "traefik.http.routers.uptime-kuma.tls=true",
           "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001",
