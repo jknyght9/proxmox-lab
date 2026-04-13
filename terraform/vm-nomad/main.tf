@@ -13,6 +13,14 @@ locals {
   master_key  = local.sorted_vm_keys[0]
   master_ip   = local.vm_ips[local.master_key]
   all_ips     = [for k in local.sorted_vm_keys : local.vm_ips[k]]
+
+  # Rendered Traefik authentik middleware config
+  traefik_authentik_yml = templatefile("${path.module}/templates/traefik-authentik.yml.tpl", {
+    dns_postfix = var.dns_postfix
+    nomad01_ip  = local.vm_ips[local.sorted_vm_keys[0]]
+    nomad_ips   = local.all_ips
+    dns01_ip    = var.dns_primary_ip
+  })
   peer_ips    = [for k in local.sorted_vm_keys : local.vm_ips[k] if k != local.master_key]
 }
 
@@ -225,7 +233,44 @@ resource "null_resource" "gluster_mount" {
   }
 }
 
-# Step 4: Restart Nomad on each node (separate connections — no nested SSH)
+# Step 4: Deploy Traefik middleware config to GlusterFS (replaces envsubst in deployTraefik.sh)
+resource "null_resource" "traefik_config" {
+  depends_on = [null_resource.gluster_mount]
+
+  triggers = {
+    config_hash = sha256(local.traefik_authentik_yml)
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.master_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p ${var.gluster_mount_path}/traefik/config",
+      "sudo mkdir -p ${var.gluster_mount_path}/traefik/tls",
+    ]
+  }
+
+  provisioner "file" {
+    content     = local.traefik_authentik_yml
+    destination = "/tmp/authentik.yml"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo cp /tmp/authentik.yml ${var.gluster_mount_path}/traefik/config/authentik.yml",
+      "sudo chmod 644 ${var.gluster_mount_path}/traefik/config/authentik.yml",
+      "rm /tmp/authentik.yml",
+      "echo '[+] Traefik authentik middleware config deployed'",
+    ]
+  }
+}
+
+# Step 5: Restart Nomad on each node (separate connections — no nested SSH)
 resource "null_resource" "nomad_restart" {
   for_each   = var.vm_configs
   depends_on = [null_resource.gluster_mount]

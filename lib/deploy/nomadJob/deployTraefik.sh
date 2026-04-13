@@ -34,25 +34,9 @@ EOF
   doing "Preparing Traefik storage directory..."
   sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo mkdir -p /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls && sudo chmod 755 /srv/gluster/nomad-data/traefik /srv/gluster/nomad-data/traefik/config /srv/gluster/nomad-data/traefik/tls"
 
-  # Copy Authentik middleware config (for forward auth + static services)
-  if [ -f "nomad/config/traefik/authentik.yml" ]; then
-    doing "Deploying Authentik forward auth middleware config..."
-    # Get Nomad node IPs
-    local NOMAD01_IP NOMAD02_IP NOMAD03_IP DNS01_IP
-    NOMAD01_IP=$(jq -r '.external[] | select(.hostname == "nomad01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-    NOMAD02_IP=$(jq -r '.external[] | select(.hostname == "nomad02") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-    NOMAD03_IP=$(jq -r '.external[] | select(.hostname == "nomad03") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-    DNS01_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
-    # Default to nomad01 if others don't exist
-    [ -z "$NOMAD02_IP" ] || [ "$NOMAD02_IP" = "null" ] && NOMAD02_IP="$NOMAD01_IP"
-    [ -z "$NOMAD03_IP" ] || [ "$NOMAD03_IP" = "null" ] && NOMAD03_IP="$NOMAD01_IP"
-    export DNS_POSTFIX NOMAD01_IP NOMAD02_IP NOMAD03_IP DNS01_IP
-    envsubst '${DNS_POSTFIX} ${NOMAD01_IP} ${NOMAD02_IP} ${NOMAD03_IP} ${DNS01_IP}' < "nomad/config/traefik/authentik.yml" > "/tmp/authentik-middleware.yml"
-    scpToAdmin "/tmp/authentik-middleware.yml" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.yml"
-    sshRunAdmin "$VM_USER" "$NOMAD_IP" "sudo cp /tmp/authentik.yml /srv/gluster/nomad-data/traefik/config/authentik.yml && sudo chmod 644 /srv/gluster/nomad-data/traefik/config/authentik.yml"
-    rm -f "/tmp/authentik-middleware.yml"
-    success "Authentik middleware config deployed (forward auth → $NOMAD01_IP:9000)"
-  fi
+  # Authentik middleware config is now deployed by Terraform (vm-nomad module)
+  # via templatefile() to GlusterFS during initial cluster setup.
+  # Re-running Traefik deployment will use the existing config on disk.
 
   # Issue a wildcard TLS certificate from Vault PKI for all services
   # behind Traefik. This replaces ACME entirely — Vault 1.21.x has a

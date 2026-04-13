@@ -65,6 +65,23 @@ write_files:
         client_auto_join = false
       }
 
+  # Vault WIF skeleton — address is a placeholder until Vault is deployed.
+  # configureNomadVaultIntegration updates the address and restarts Nomad.
+  - path: /etc/nomad.d/vault.hcl
+    permissions: '0644'
+    content: |
+      vault {
+        enabled = true
+        address = "https://127.0.0.1:8200"
+
+        default_identity {
+          aud  = ["vault.io"]
+          env  = false
+          file = true
+          ttl  = "1h"
+        }
+      }
+
 %{ if traefik_ha_enabled ~}
   - path: /usr/local/bin/check-traefik-health.sh
     permissions: '0755'
