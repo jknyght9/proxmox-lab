@@ -137,7 +137,7 @@ EOF
   local AD_STATUS
   AD_STATUS=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
     "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call activedirectory.config | python3 -c \"import sys,json; print(json.load(sys.stdin).get('enable', False))\"" 2>/dev/null || echo "False")
+    "sudo midclt call activedirectory.config 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get(\"enable\", False))' 2>/dev/null" 2>/dev/null) || AD_STATUS="False"
 
   if [ "$AD_STATUS" = "True" ]; then
     info "TrueNAS is already joined to an AD domain"
@@ -160,28 +160,34 @@ EOF
 
   if [ -n "$DNS_IP" ]; then
     doing "Configuring TrueNAS DNS to use Pi-hole ($DNS_IP)..."
-    ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
+    # TrueNAS SCALE network.configuration.update expects JSON with the update payload
+    if ! ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
       "${TRUENAS_USER}@${TRUENAS_IP}" \
-      "sudo midclt call network.configuration.update '{\"nameserver1\": \"${DNS_IP}\"}'" > /dev/null 2>&1 || \
-      warn "Could not update DNS — you may need to set DNS manually in TrueNAS UI"
+      "sudo midclt call network.configuration.update '{\"nameserver1\": \"${DNS_IP}\"}'" > /dev/null 2>&1; then
+      warn "Could not update DNS via midclt."
+      warn "Set DNS manually: TrueNAS UI → Network → Global Configuration → Nameserver 1 → ${DNS_IP}"
+      question "Continue with AD join? DNS must resolve $AD_REALM_LOWER first. (Y/n): "
+      read -r CONTINUE_JOIN
+      if [[ "$CONTINUE_JOIN" =~ ^[nN] ]]; then
+        info "Set DNS in TrueNAS UI, then re-run this option."
+        return 1
+      fi
+    else
+      success "TrueNAS DNS configured to use Pi-hole"
+    fi
   fi
 
   # Join AD domain using domain-join-svc account
-  local JOIN_PAYLOAD
-  JOIN_PAYLOAD=$(jq -n \
-    --arg domain "$AD_REALM_LOWER" \
-    --arg bindname "domain-join-svc" \
-    --arg bindpw "$DOMAIN_JOIN_PASSWORD" \
-    '{domainname: $domain, bindname: $bindname, bindpw: $bindpw, enable: true}')
+  doing "Sending AD join request to TrueNAS..."
 
   local JOIN_RESULT
   JOIN_RESULT=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
     "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call activedirectory.update '${JOIN_PAYLOAD}'" 2>&1)
+    "sudo midclt call activedirectory.update '{\"domainname\": \"${AD_REALM_LOWER}\", \"bindname\": \"domain-join-svc\", \"bindpw\": \"${DOMAIN_JOIN_PASSWORD}\", \"enable\": true}'" 2>&1) || true
 
-  if [ $? -ne 0 ]; then
+  if [ -z "$JOIN_RESULT" ] || echo "$JOIN_RESULT" | grep -qi "error"; then
     error "Failed to initiate AD join"
-    error "$JOIN_RESULT"
+    [ -n "$JOIN_RESULT" ] && error "$JOIN_RESULT"
     return 1
   fi
 
@@ -321,7 +327,7 @@ function configureTrueNASProfileShare() {
   local SHARE_EXISTS
   SHARE_EXISTS=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
     "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call sharing.smb.query '[[\"name\", \"=\", \"profiles\"]]' | python3 -c \"import sys,json; d=json.load(sys.stdin); print('true' if d else 'false')\"" 2>/dev/null || echo "false")
+    "sudo midclt call sharing.smb.query '[[\"name\", \"=\", \"profiles\"]]' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(\"true\" if d else \"false\")' 2>/dev/null" 2>/dev/null) || SHARE_EXISTS="false"
 
   if [ "$SHARE_EXISTS" = "true" ]; then
     info "SMB share 'profiles' already exists"
