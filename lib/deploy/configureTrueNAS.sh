@@ -221,15 +221,34 @@ EOF
     read -r REJOIN
     if [[ ! "$REJOIN" =~ ^[yY] ]]; then
       info "Skipping AD join"
-      configureTrueNASProfileShare "$AD_REALM_LOWER"
+      if [ "$CONFIGURE_PROFILES" = "true" ]; then
+        configureTrueNASProfileShare "$AD_REALM_LOWER"
+      fi
       saveTrueNASConfig
       return 0
     fi
 
-    # Leave current domain first
+    # Leave current domain and clear Kerberos principal/realm
+    # The principal must be cleared, otherwise re-joining with a password fails:
+    # "Simultaneous keytab and password authentication are not permitted"
     doing "Leaving current AD domain..."
-    truenasAPI PUT /activedirectory '{"enable": false}' > /dev/null || true
-    sleep 3
+    local LEAVE_JOB
+    LEAVE_JOB=$(truenasAPI PUT /activedirectory \
+      "{\"domainname\": \"${CURRENT_DOMAIN}\", \"enable\": false, \"kerberos_principal\": \"\"}") || true
+
+    if [[ "$LEAVE_JOB" =~ ^[0-9]+$ ]]; then
+      doing "  Waiting for domain leave to complete..."
+      local LEAVE_WAITED=0
+      while [ $LEAVE_WAITED -lt 30 ]; do
+        local LEAVE_STATE
+        LEAVE_STATE=$(truenasAPI GET "/core/get_jobs?id=${LEAVE_JOB}" | jq -r '.[0].state // "UNKNOWN"') || LEAVE_STATE="UNKNOWN"
+        [[ "$LEAVE_STATE" == "SUCCESS" || "$LEAVE_STATE" == "FAILED" ]] && break
+        sleep 3
+        LEAVE_WAITED=$((LEAVE_WAITED + 3))
+      done
+    else
+      sleep 5
+    fi
   fi
 
   # Configure DNS to use Pi-hole
