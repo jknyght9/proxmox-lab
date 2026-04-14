@@ -208,14 +208,19 @@ EOF
   DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
 
   if [ -n "$DNS_IP" ]; then
-    doing "Configuring TrueNAS DNS to use Pi-hole ($DNS_IP)..."
+    doing "Configuring TrueNAS DNS to use Pi-hole only ($DNS_IP)..."
+    # Clear all nameservers except Pi-hole — external DNS (e.g., 1.1.1.1) will
+    # fail to resolve internal AD SRV records and cause the join to fail
     local DNS_RESULT
     DNS_RESULT=$(truenasAPI PUT /network/configuration \
-      "{\"nameserver1\": \"${DNS_IP}\"}") || true
+      "{\"nameserver1\": \"${DNS_IP}\", \"nameserver2\": \"\", \"nameserver3\": \"\"}") || true
 
     if echo "$DNS_RESULT" | jq -e '.error' > /dev/null 2>&1; then
       warn "Could not update DNS via API: $(echo "$DNS_RESULT" | jq -r '.error // .message // "unknown error"')"
-      warn "Set DNS manually: TrueNAS UI -> Network -> Global Configuration -> Nameserver 1 -> ${DNS_IP}"
+      warn "Set DNS manually: TrueNAS UI -> Network -> Global Configuration"
+      warn "  Nameserver 1: ${DNS_IP}"
+      warn "  Nameserver 2: (clear)"
+      warn "  Nameserver 3: (clear)"
       question "Continue with AD join? DNS must resolve $AD_REALM_LOWER first. (Y/n): "
       read -r CONTINUE_JOIN
       if [[ "$CONTINUE_JOIN" =~ ^[nN] ]]; then
@@ -223,11 +228,11 @@ EOF
         return 1
       fi
     else
-      success "TrueNAS DNS configured to use Pi-hole"
+      success "TrueNAS DNS configured (Pi-hole only)"
     fi
   fi
 
-  # Join AD domain
+  # Join AD domain — the PUT returns a job ID, not the config object
   doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
   info "  This may take 30-60 seconds..."
 
@@ -242,13 +247,15 @@ EOF
       enable: true
     }')
 
-  local JOIN_RESULT
-  JOIN_RESULT=$(truenasAPI PUT /activedirectory "$JOIN_PAYLOAD") || true
+  local JOB_ID
+  JOB_ID=$(truenasAPI PUT /activedirectory "$JOIN_PAYLOAD") || true
 
-  if [ -z "$JOIN_RESULT" ] || echo "$JOIN_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+  # Response is a bare job ID number
+  if ! [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then
+    # Not a job ID — might be an error object
     local ERR_MSG
-    ERR_MSG=$(echo "$JOIN_RESULT" | jq -r '.error // .message // "unknown error"' 2>/dev/null)
-    error "Failed to join AD domain: $ERR_MSG"
+    ERR_MSG=$(echo "$JOB_ID" | jq -r '.error // .message // "unknown error"' 2>/dev/null)
+    error "Failed to initiate AD join: $ERR_MSG"
     echo
     info "Troubleshooting:"
     info "  1. Verify DNS: dig _ldap._tcp.${AD_REALM_LOWER} SRV (from TrueNAS)"
@@ -257,28 +264,52 @@ EOF
     return 1
   fi
 
-  # Wait for AD join to complete
+  info "  AD join job started (job ID: $JOB_ID)"
+
+  # Poll the job until it completes or fails
   doing "Waiting for AD join to complete..."
-  local MAX_WAIT=120
+  local MAX_WAIT=180
   local WAITED=0
   while [ $WAITED -lt $MAX_WAIT ]; do
-    local AD_STATE
-    AD_STATE=$(truenasAPI GET /activedirectory/started) || AD_STATE="false"
+    local JOB_STATUS
+    JOB_STATUS=$(truenasAPI GET "/core/get_jobs?id=${JOB_ID}") || JOB_STATUS="[]"
 
-    if [ "$AD_STATE" = "true" ]; then
-      break
-    fi
+    local JOB_STATE
+    JOB_STATE=$(echo "$JOB_STATUS" | jq -r '.[0].state // "UNKNOWN"')
+
+    case "$JOB_STATE" in
+      SUCCESS)
+        success "TrueNAS joined to AD domain: $AD_REALM_LOWER"
+        break
+        ;;
+      FAILED)
+        local JOB_ERROR
+        JOB_ERROR=$(echo "$JOB_STATUS" | jq -r '.[0].error // "unknown error"')
+        error "AD join failed: $JOB_ERROR"
+        return 1
+        ;;
+      RUNNING|WAITING)
+        local JOB_PROGRESS
+        JOB_PROGRESS=$(echo "$JOB_STATUS" | jq -r '.[0].progress.description // ""')
+        if [ -n "$JOB_PROGRESS" ]; then
+          doing "  ${JOB_PROGRESS} (${WAITED}s / ${MAX_WAIT}s)"
+        else
+          doing "  Still waiting... (${WAITED}s / ${MAX_WAIT}s)"
+        fi
+        ;;
+      *)
+        doing "  Job state: $JOB_STATE (${WAITED}s / ${MAX_WAIT}s)"
+        ;;
+    esac
+
     sleep 5
     WAITED=$((WAITED + 5))
-    doing "  Still waiting... (${WAITED}s / ${MAX_WAIT}s)"
   done
 
   if [ $WAITED -ge $MAX_WAIT ]; then
     warn "AD join did not complete within ${MAX_WAIT}s"
     warn "Check TrueNAS UI -> Directory Services for status"
-    warn "The join may still be in progress."
-  else
-    success "TrueNAS joined to AD domain: $AD_REALM_LOWER"
+    warn "The join may still be in progress (job ID: $JOB_ID)"
   fi
 
   # Verify join
