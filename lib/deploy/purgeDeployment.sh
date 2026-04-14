@@ -36,7 +36,13 @@ EOF
   # Load cluster info for multi-node cleanup
   if ! ensureClusterContext; then
     warn "No cluster info found. Attempting to proceed with single node..."
-    if [ -z "$PROXMOX_HOST" ]; then
+    # Fall back to bootstrap.yml, then prompt
+    if [ -z "${PROXMOX_HOST:-}" ] && [ -f "${SCRIPT_DIR}/bootstrap.yml" ]; then
+      _bootstrap_init_vars
+      PROXMOX_HOST=$(yamlGet "proxmox.ip")
+      [ -n "$PROXMOX_HOST" ] && info "Using Proxmox host from bootstrap.yml: $PROXMOX_HOST"
+    fi
+    if [ -z "${PROXMOX_HOST:-}" ]; then
       read -rp "$(question "Enter Proxmox host IP: ")" PROXMOX_HOST
     fi
     CLUSTER_NODES=("$PROXMOX_HOST")
@@ -171,7 +177,7 @@ EOF
 
   # Step 8: Clean local files
   doing "Step 8/10: Cleaning local configuration files..."
-  rm -f hosts.json 2>/dev/null || true
+  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json 2>/dev/null || true
 
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then

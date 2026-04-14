@@ -116,6 +116,8 @@ function readBootstrapConfig() {
   NETWORK_GATEWAY=$(yamlGet "network.gateway")
   NETWORK_BRIDGE=$(yamlGet "network.bridge")
   DNS_POSTFIX=$(yamlGet "dns_suffix")
+  # Storage overrides from bootstrap.yml are used as defaults in the
+  # interactive storage selection prompt (not auto-applied)
   STORAGE_TEMPLATES_OVERRIDE=$(yamlGet "storage.templates")
   STORAGE_RUNTIME_OVERRIDE=$(yamlGet "storage.runtime")
 
@@ -136,7 +138,7 @@ function readBootstrapConfig() {
   info "  Network:       $NETWORK_CIDR (gw: $NETWORK_GATEWAY)"
   info "  Bridge:        ${NETWORK_BRIDGE:-<auto-detect>}"
   info "  DNS Suffix:    $DNS_POSTFIX"
-  info "  Storage:       ${STORAGE_TEMPLATES_OVERRIDE:-<auto-detect>}"
+  info "  Storage:       ${STORAGE_TEMPLATES_OVERRIDE:-<interactive>}"
 
   success "Bootstrap configuration loaded"
 }
@@ -229,18 +231,110 @@ function discoverCluster() {
 }
 
 # =============================================================================
-# Storage Discovery
+# Storage Selection
 # =============================================================================
 
-# Discover available storage pools from Proxmox API and select the best
-# option for templates and runtime. Clusters prefer shared storage;
-# standalone uses local-lvm. LXC containers always use local-lvm
-# (file-level storage like NFS/CIFS doesn't support LXC).
+# Helper: present a numbered list of storage pools and let the user pick.
+# Arguments: $1 = prompt text, $2 = jq-filtered JSON array of candidates,
+#            $3 = default value (pre-selected if user presses Enter)
+# Returns: selected storage name in $_SELECTED_STORAGE
+function _selectStorage() {
+  local prompt="$1" candidates="$2" default="$3"
+  local names=() types=() shared_flags=()
+
+  while IFS='|' read -r name type is_shared; do
+    names+=("$name")
+    types+=("$type")
+    shared_flags+=("$is_shared")
+  done < <(echo "$candidates" | jq -r '[.[] | {storage, type, shared}] | sort_by(.storage) | .[] | "\(.storage)|\(.type)|\(.shared)"')
+
+  if [ ${#names[@]} -eq 0 ]; then
+    warn "  No suitable storage pools found"
+    _SELECTED_STORAGE=""
+    return 1
+  fi
+
+  # Find default index
+  local default_idx=""
+  for i in "${!names[@]}"; do
+    [ "${names[$i]}" = "$default" ] && default_idx=$i
+  done
+
+  echo
+  echo "  $prompt"
+  for i in "${!names[@]}"; do
+    local label="${names[$i]} (${types[$i]})"
+    [ "${shared_flags[$i]}" = "1" ] && label+=" [shared]"
+    local marker=""
+    [ "$i" = "$default_idx" ] && marker=" (default)"
+    echo "    $((i+1))) ${label}${marker}"
+  done
+
+  local selection
+  if [ -n "$default_idx" ]; then
+    read -rp "$(question "  Select [1-${#names[@]}] (default: $((default_idx+1))): ")" selection
+    selection=${selection:-$((default_idx+1))}
+  else
+    read -rp "$(question "  Select [1-${#names[@]}]: ")" selection
+  fi
+
+  # Validate
+  if [[ ! "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt ${#names[@]} ]; then
+    if [ -n "$default_idx" ]; then
+      selection=$((default_idx+1))
+      warn "  Invalid selection — using default: ${names[$default_idx]}"
+    else
+      warn "  Invalid selection — using first option: ${names[0]}"
+      selection=1
+    fi
+  fi
+
+  _SELECTED_STORAGE="${names[$((selection-1))]}"
+}
+
+# Discover available storage pools from Proxmox and prompt the user to
+# select which pools to use for templates, VMs, and LXC containers.
+#
+# Snippet and vztmpl storage are auto-detected (not user-facing choices)
+# since they require specific content types that limit the options.
 #
 # Globals set: TEMPLATE_STORAGE, TEMPLATE_STORAGE_TYPE, RUNTIME_STORAGE,
-#              LXC_STORAGE
+#              LXC_STORAGE, SNIPPET_STORAGE
 function discoverStorage() {
   doing "Discovering storage pools..."
+
+  # Check if storage was already selected in a previous run
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    local saved_templates saved_type saved_runtime saved_lxc saved_snippets saved_vztmpl
+    saved_templates=$(jq -r '.storage.templates // empty' "$CLUSTER_INFO_FILE")
+    saved_type=$(jq -r '.storage.templates_type // empty' "$CLUSTER_INFO_FILE")
+    saved_runtime=$(jq -r '.storage.runtime // empty' "$CLUSTER_INFO_FILE")
+    saved_lxc=$(jq -r '.storage.lxc // empty' "$CLUSTER_INFO_FILE")
+    saved_snippets=$(jq -r '.storage.snippets // empty' "$CLUSTER_INFO_FILE")
+    saved_vztmpl=$(jq -r '.storage.vztmpl // empty' "$CLUSTER_INFO_FILE")
+
+    if [ -n "$saved_templates" ] && [ -n "$saved_runtime" ] && [ -n "$saved_lxc" ]; then
+      info "  Previous storage selection found:"
+      info "    Templates:       $saved_templates ($saved_type)"
+      info "    Operational VMs: $saved_runtime"
+      info "    Operational LXC: $saved_lxc"
+      info "    Snippets:        $saved_snippets"
+      info "    LXC templates:   $saved_vztmpl"
+
+      read -rp "$(question "  Keep these settings? [Y/n]: ")" keep_storage
+      keep_storage=${keep_storage:-Y}
+      if [[ "$keep_storage" =~ ^[Yy]$ ]]; then
+        TEMPLATE_STORAGE="$saved_templates"
+        TEMPLATE_STORAGE_TYPE="$saved_type"
+        RUNTIME_STORAGE="$saved_runtime"
+        LXC_STORAGE="$saved_lxc"
+        SNIPPET_STORAGE="$saved_snippets"
+        VZTMPL_STORAGE="$saved_vztmpl"
+        success "Storage configuration loaded from previous run"
+        return 0
+      fi
+    fi
+  fi
 
   local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
@@ -255,20 +349,24 @@ function discoverStorage() {
     TEMPLATE_STORAGE_TYPE="lvm"
     RUNTIME_STORAGE="local-lvm"
     LXC_STORAGE="local-lvm"
+    SNIPPET_STORAGE="local"
     return 0
   fi
 
-  # Show all storage pools with their content types
+  # Show all storage pools with their content types (sorted alphabetically)
   info "  Available storage pools:"
-  echo "$STORAGE_JSON" | jq -r '.[] | "    \(.storage) (\(.type)) \(if .shared == 1 then "[shared]" else "[local]" end) content: \(.content)"'
+  echo "$STORAGE_JSON" | jq -r '[.[] | {storage, type, shared, content}] | sort_by(.storage) | .[] | "    \(.storage) (\(.type)) \(if .shared == 1 then "[shared]" else "[local]" end) content: \(.content)"'
 
   # Filter storage pools that can hold VM disk images
   local IMAGE_STORAGE
   IMAGE_STORAGE=$(echo "$STORAGE_JSON" | jq '[.[] | select(.content | contains("images"))]')
 
+  # --- Auto-detect snippet and vztmpl storage (limited choices) ---
+
   # Identify storage that supports snippets (needed for cloud-init cicustom)
   # Prefer shared snippet storage for clusters so templates work on any node
-  local SNIPPET_STORAGE
+  # Not local — needed by generatePackerVarsFromBootstrap
+  SNIPPET_STORAGE=""
   if [ "$IS_CLUSTER" = "true" ]; then
     SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("snippets")) and .shared == 1)] | first | .storage // empty')
   fi
@@ -283,56 +381,110 @@ function discoverStorage() {
   fi
 
   # Identify storage that supports LXC templates (vztmpl)
-  local VZTMPL_STORAGE
-  VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("vztmpl"))] | .[].storage' | head -1)
+  # Prefer shared storage for clusters so templates are accessible on all nodes
+  # Not local — needed by downloadLXCTemplates
+  VZTMPL_STORAGE=""
+  if [ "$IS_CLUSTER" = "true" ]; then
+    VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("vztmpl")) and .shared == 1)] | sort_by(.storage) | first | .storage // empty')
+  fi
+  if [ -z "$VZTMPL_STORAGE" ]; then
+    VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("vztmpl"))] | sort_by(.storage) | first | .storage // empty')
+  fi
   if [ -n "$VZTMPL_STORAGE" ]; then
     info "  LXC template storage: $VZTMPL_STORAGE"
   else
     warn "  No storage with 'vztmpl' content found — LXC template downloads may fail"
   fi
 
-  # Apply user overrides if specified
-  if [ -n "$STORAGE_TEMPLATES_OVERRIDE" ]; then
-    TEMPLATE_STORAGE="$STORAGE_TEMPLATES_OVERRIDE"
-    TEMPLATE_STORAGE_TYPE=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$TEMPLATE_STORAGE" '.[] | select(.storage == $s) | .type // "lvm"')
-    info "  Templates: $TEMPLATE_STORAGE (override)"
-  elif [ "$IS_CLUSTER" = "true" ]; then
-    # Cluster: prefer shared storage
-    local SHARED
-    SHARED=$(echo "$IMAGE_STORAGE" | jq -r '[.[] | select(.shared == 1)] | first // empty')
-    if [ -n "$SHARED" ] && [ "$SHARED" != "null" ]; then
-      TEMPLATE_STORAGE=$(echo "$SHARED" | jq -r '.storage')
-      TEMPLATE_STORAGE_TYPE=$(echo "$SHARED" | jq -r '.type')
-      info "  Templates: $TEMPLATE_STORAGE (shared, auto-selected)"
+  # --- Storage selection ---
+  #
+  # Priority: bootstrap.yml > cluster-info.json > interactive prompt
+  # If bootstrap.yml has both templates and runtime, use them directly.
+  # If cluster-info.json has saved selections, offer to keep them.
+  # Otherwise, prompt interactively.
+
+  local resolved_template="" resolved_vm="" resolved_lxc=""
+
+  # Check bootstrap.yml first — explicit config skips all prompts
+  if [ -n "$STORAGE_TEMPLATES_OVERRIDE" ] && [ -n "$STORAGE_RUNTIME_OVERRIDE" ]; then
+    resolved_template="$STORAGE_TEMPLATES_OVERRIDE"
+    resolved_vm="$STORAGE_RUNTIME_OVERRIDE"
+    # LXC uses runtime storage unless it's file-level
+    local runtime_type
+    runtime_type=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$resolved_vm" '.[] | select(.storage == $s) | .type // "lvm"')
+    if [[ "$runtime_type" =~ ^(nfs|cifs|glusterfs)$ ]]; then
+      # Runtime is file-level — pick first block-level storage
+      resolved_lxc=$(echo "$IMAGE_STORAGE" | jq -r '[.[] | select(.type | test("^(nfs|cifs|glusterfs)$") | not)] | sort_by(.storage) | first | .storage // "local-lvm"')
     else
-      TEMPLATE_STORAGE="local-lvm"
-      TEMPLATE_STORAGE_TYPE="lvm"
-      warn "  No shared storage found — using local-lvm for templates"
+      resolved_lxc="$resolved_vm"
     fi
+    TEMPLATE_STORAGE="$resolved_template"
+    TEMPLATE_STORAGE_TYPE=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$TEMPLATE_STORAGE" '.[] | select(.storage == $s) | .type // "lvm"')
+    RUNTIME_STORAGE="$resolved_vm"
+    LXC_STORAGE="$resolved_lxc"
+    info "  Templates:       $TEMPLATE_STORAGE ($TEMPLATE_STORAGE_TYPE) — from bootstrap.yml"
+    info "  Operational VMs: $RUNTIME_STORAGE — from bootstrap.yml"
+    info "  Operational LXC: $LXC_STORAGE"
   else
-    # Standalone: use local-lvm
-    TEMPLATE_STORAGE="local-lvm"
-    TEMPLATE_STORAGE_TYPE="lvm"
-    info "  Templates: $TEMPLATE_STORAGE (standalone default)"
-  fi
+    # Fall back to interactive selection with saved defaults
 
-  if [ -n "$STORAGE_RUNTIME_OVERRIDE" ]; then
-    RUNTIME_STORAGE="$STORAGE_RUNTIME_OVERRIDE"
-    info "  Runtime: $RUNTIME_STORAGE (override)"
-  else
-    RUNTIME_STORAGE="$TEMPLATE_STORAGE"
-    info "  Runtime VMs: $RUNTIME_STORAGE (same as templates)"
-  fi
+    local default_template="" default_vm="" default_lxc=""
 
-  # LXC containers: always local-lvm (file-level storage doesn't support LXC)
-  local STORAGE_TYPE_CHECK
-  STORAGE_TYPE_CHECK=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$RUNTIME_STORAGE" '.[] | select(.storage == $s) | .type // "lvm"')
-  if [[ "$STORAGE_TYPE_CHECK" =~ ^(nfs|cifs|glusterfs)$ ]]; then
-    LXC_STORAGE="local-lvm"
-    info "  Runtime LXC: local-lvm (forced — $RUNTIME_STORAGE is file-level)"
-  else
-    LXC_STORAGE="$RUNTIME_STORAGE"
-    info "  Runtime LXC: $LXC_STORAGE"
+    # Load previous selections as defaults
+    if [ -f "$CLUSTER_INFO_FILE" ]; then
+      default_template=$(jq -r '.storage.templates // empty' "$CLUSTER_INFO_FILE")
+      default_vm=$(jq -r '.storage.runtime // empty' "$CLUSTER_INFO_FILE")
+      default_lxc=$(jq -r '.storage.lxc // empty' "$CLUSTER_INFO_FILE")
+    fi
+
+    # bootstrap.yml partial overrides
+    [ -z "$default_template" ] && [ -n "$STORAGE_TEMPLATES_OVERRIDE" ] && default_template="$STORAGE_TEMPLATES_OVERRIDE"
+    [ -z "$default_vm" ] && [ -n "$STORAGE_RUNTIME_OVERRIDE" ] && default_vm="$STORAGE_RUNTIME_OVERRIDE"
+
+    # Heuristic defaults
+    if [ -z "$default_template" ]; then
+      if [ "$IS_CLUSTER" = "true" ]; then
+        default_template=$(echo "$IMAGE_STORAGE" | jq -r '[.[] | select(.shared == 1)] | sort_by(.storage) | first | .storage // empty')
+      fi
+      [ -z "$default_template" ] && default_template="local-lvm"
+    fi
+    [ -z "$default_vm" ] && default_vm="local-lvm"
+    [ -z "$default_lxc" ] && default_lxc="local-lvm"
+
+    # 1) Template storage
+    _selectStorage "Select storage for Packer templates (VM images, LXC templates):" "$IMAGE_STORAGE" "$default_template"
+    TEMPLATE_STORAGE="$_SELECTED_STORAGE"
+    TEMPLATE_STORAGE_TYPE=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$TEMPLATE_STORAGE" '.[] | select(.storage == $s) | .type // "lvm"')
+    info "  Templates: $TEMPLATE_STORAGE ($TEMPLATE_STORAGE_TYPE)"
+
+    # 2) Operational VM storage
+    _selectStorage "Select storage for operational VMs (Nomad cluster, Kasm):" "$IMAGE_STORAGE" "$default_vm"
+    RUNTIME_STORAGE="$_SELECTED_STORAGE"
+    info "  Operational VMs: $RUNTIME_STORAGE"
+
+    # 3) Operational LXC storage (file-level excluded)
+    local LXC_CANDIDATES
+    LXC_CANDIDATES=$(echo "$IMAGE_STORAGE" | jq '[.[] | select(.type | test("^(nfs|cifs|glusterfs)$") | not)]')
+    local lxc_count
+    lxc_count=$(echo "$LXC_CANDIDATES" | jq 'length')
+
+    if [ "$lxc_count" -eq 1 ]; then
+      LXC_STORAGE=$(echo "$LXC_CANDIDATES" | jq -r '.[0].storage')
+      info "  Operational LXC: $LXC_STORAGE (only block-level option)"
+    elif [ "$lxc_count" -gt 1 ]; then
+      local lxc_default="$default_lxc"
+      local lxc_default_type
+      lxc_default_type=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$lxc_default" '.[] | select(.storage == $s) | .type // "lvm"')
+      if [[ "$lxc_default_type" =~ ^(nfs|cifs|glusterfs)$ ]]; then
+        lxc_default="local-lvm"
+      fi
+      _selectStorage "Select storage for operational LXC containers (file-level storage excluded):" "$LXC_CANDIDATES" "$lxc_default"
+      LXC_STORAGE="$_SELECTED_STORAGE"
+      info "  Operational LXC: $LXC_STORAGE"
+    else
+      LXC_STORAGE="local-lvm"
+      warn "  No block-level storage found for LXC — using local-lvm"
+    fi
   fi
 
   # Save storage config to cluster-info.json
@@ -354,7 +506,7 @@ function discoverStorage() {
       is_shared: $shared
     }' "$CLUSTER_INFO_FILE" > "$tmp" && mv "$tmp" "$CLUSTER_INFO_FILE"
 
-  success "Storage discovery complete"
+  success "Storage selection complete"
 }
 
 # =============================================================================
@@ -531,7 +683,7 @@ function generateTfvarsFromBootstrap() {
   # Convention: .3 = VIP, .4-.6 = DNS nodes, .7+ = services
   local BASE_IP CIDR_MASK
   BASE_IP=$(echo "$NETWORK_CIDR" | cut -d/ -f1 | sed 's/\.[0-9]*$//')
-  CIDR_MASK=$(echo "$NETWORK_CIDR" | grep -oE '/[0-9]+$')
+  CIDR_MASK=$(echo "$NETWORK_CIDR" | grep -oE '[0-9]+$')
   local DNS_PRIMARY="${BASE_IP}.4"
 
   # Build node IP map
@@ -576,6 +728,7 @@ dns_primary_ipv4 = "${DNS_PRIMARY}"
 template_storage = "${TEMPLATE_STORAGE}"
 vm_storage       = "${RUNTIME_STORAGE}"
 lxc_storage      = "${LXC_STORAGE}"
+lxc_ostemplate   = "${VZTMPL_STORAGE}:vztmpl/${LXC_DEFAULT_TEMPLATE}"
 
 # Proxmox cluster nodes
 proxmox_node_ips = {
@@ -668,54 +821,130 @@ EOF
 # LXC Template Download
 # =============================================================================
 
-# Download required LXC templates to each Proxmox node.
-# The lxc-pihole Terraform module needs a Debian 12 standard template.
-#
-# Globals read: PROXMOX_PASS, CLUSTER_NODES[], CLUSTER_NODE_IPS[]
-function downloadLXCTemplates() {
-  doing "Downloading LXC templates to Proxmox nodes..."
+# Download a single LXC template with progress display.
+# Uses sshRun (enterprise SSH key) — called after bootstrap when keys are distributed.
+# Arguments: $1=node_ip, $2=node_name, $3=storage, $4=search_pattern, $5=filename
+# Returns: 0 on success (template verified), 1 on failure
+function _downloadOneTemplate() {
+  local node_ip="$1" node_name="$2" storage="$3" pattern="$4" filename="$5"
+  local display_name="${filename%%_*}"  # e.g. "debian-12-standard"
 
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
-  local LXC_TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
+  # Check if already present
+  local template_list
+  template_list=$(sshRun "$REMOTE_USER" "$node_ip" "pveam list ${storage}" 2>/dev/null | tail -n +2) || template_list=""
+
+  if echo "$template_list" | grep -q "$pattern"; then
+    success "    $display_name — already present"
+    return 0
+  fi
+
+  # Download (capture output to log, show spinner)
+  doing "    $display_name — downloading..."
+  local log_file
+  log_file=$(mktemp)
+
+  sshRun "$REMOTE_USER" "$node_ip" "pveam download ${storage} $filename 2>&1" > "$log_file" 2>&1 || true
+
+  # Verify the template actually landed — don't trust exit codes
+  local verify_list
+  verify_list=$(sshRun "$REMOTE_USER" "$node_ip" "pveam list ${storage}" 2>/dev/null | tail -n +2) || verify_list=""
+
+  if echo "$verify_list" | grep -q "$pattern"; then
+    success "    $display_name — done"
+    rm -f "$log_file"
+    return 0
+  fi
+
+  # Exact filename failed — try latest available version
+  warn "    $display_name — exact version not found, trying latest..."
+  local latest
+  latest=$(sshRun "$REMOTE_USER" "$node_ip" \
+    "pveam available --section system 2>/dev/null | grep '$pattern' | awk '{print \$2}' | tail -1" 2>/dev/null)
+
+  if [ -n "$latest" ]; then
+    sshRun "$REMOTE_USER" "$node_ip" "pveam download ${storage} $latest 2>&1" > "$log_file" 2>&1 || true
+
+    verify_list=$(sshRun "$REMOTE_USER" "$node_ip" "pveam list ${storage}" 2>/dev/null | tail -n +2) || verify_list=""
+
+    if echo "$verify_list" | grep -q "$pattern"; then
+      success "    $display_name — done ($latest)"
+      rm -f "$log_file"
+      return 0
+    fi
+  fi
+
+  # Failed — show the download log so user can see why
+  error "    $display_name — download failed"
+  if [ -s "$log_file" ]; then
+    warn "    Download output:"
+    sed 's/^/      /' "$log_file"
+  fi
+  rm -f "$log_file"
+  return 1
+}
+
+# Download required LXC templates (Debian for Pi-hole containers).
+# Uses enterprise SSH key — must be called after bootstrap distributes keys.
+# Uses shared storage detection to avoid redundant downloads on clusters.
+#
+# Globals read: REMOTE_USER, CLUSTER_NODES[], CLUSTER_NODE_IPS[],
+#               LXC_TEMPLATES[], VZTMPL_STORAGE
+function downloadLXCTemplates() {
+  doing "Downloading LXC templates..."
+
+  # Load VZTMPL_STORAGE from cluster-info.json if not set
+  if [ -z "${VZTMPL_STORAGE:-}" ] && [ -f "$CLUSTER_INFO_FILE" ]; then
+    VZTMPL_STORAGE=$(jq -r '.storage.vztmpl // "local"' "$CLUSTER_INFO_FILE")
+  fi
+  local STORAGE="${VZTMPL_STORAGE:-local}"
+
+  # Ensure cluster context is loaded
+  if [ ${#CLUSTER_NODE_IPS[@]} -eq 0 ]; then
+    ensureClusterContext || return 1
+  fi
+
+  # Update the template index first (once, on primary node)
+  sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" "pveam update" >/dev/null 2>&1 || warn "  Could not update template index"
+
+  # Detect if storage is shared (only need to download once)
+  local check_all=true
+  local storage_shared
+  storage_shared=$(sshRun "$REMOTE_USER" "${CLUSTER_NODE_IPS[0]}" \
+    "pvesh get /storage/${STORAGE} --output-format json 2>/dev/null | jq -r '.shared // 0'" 2>/dev/null)
+  if [ "$storage_shared" = "1" ]; then
+    check_all=false
+    info "  Storage '$STORAGE' is shared — downloading to primary node only"
+  fi
+
+  local any_failed=false
 
   for i in "${!CLUSTER_NODE_IPS[@]}"; do
     local NODE_IP="${CLUSTER_NODE_IPS[$i]}"
     local NODE_NAME="${CLUSTER_NODES[$i]}"
 
-    info "  Checking LXC templates on $NODE_NAME ($NODE_IP)..."
-
-    # Check if template already exists
-    local EXISTS
-    EXISTS=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-      "pveam list ${VZTMPL_STORAGE:-local} 2>/dev/null | grep -c 'debian-12-standard' || echo 0" 2>/dev/null)
-
-    if [ "$EXISTS" -gt 0 ]; then
-      info "    Debian 12 template already present on $NODE_NAME"
-    else
-      info "    Downloading $LXC_TEMPLATE to $NODE_NAME..."
-      sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-        "pveam update && pveam download ${VZTMPL_STORAGE:-local} $LXC_TEMPLATE" 2>/dev/null
-
-      if [ $? -eq 0 ]; then
-        info "    Template downloaded successfully on $NODE_NAME"
-      else
-        warn "    Failed to download template on $NODE_NAME — trying latest available..."
-        # Fall back to downloading whatever debian-12-standard is available
-        local LATEST
-        LATEST=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-          "pveam available --section system 2>/dev/null | grep 'debian-12-standard' | awk '{print \$2}' | tail -1" 2>/dev/null)
-        if [ -n "$LATEST" ]; then
-          sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$NODE_IP" \
-            "pveam download ${VZTMPL_STORAGE:-local} $LATEST" 2>/dev/null
-          info "    Downloaded $LATEST on $NODE_NAME"
-        else
-          warn "    No Debian 12 template found in repository for $NODE_NAME"
-        fi
-      fi
+    # For shared storage, skip nodes after the first
+    if [ "$check_all" = false ] && [ "$i" -gt 0 ]; then
+      continue
     fi
+
+    info "  $NODE_NAME ($NODE_IP):"
+
+    for entry in "${LXC_TEMPLATES[@]}"; do
+      local pattern="${entry%%|*}"
+      local filename="${entry##*|}"
+
+      if ! _downloadOneTemplate "$NODE_IP" "$NODE_NAME" "$STORAGE" "$pattern" "$filename"; then
+        any_failed=true
+      fi
+    done
   done
 
-  success "LXC template check complete"
+  if [ "$any_failed" = true ]; then
+    error "  Some templates failed to download. Check DNS/internet on your Proxmox nodes."
+    return 1
+  fi
+
+  success "LXC templates ready"
 }
 
 # =============================================================================
@@ -737,14 +966,30 @@ EOF
 
   _bootstrap_init_vars
 
+  # Remove completion marker — must finish all steps to re-mark as complete
+  rm -f "$SCRIPT_DIR/.bootstrap-complete"
+
+  # Remove stale Vault files from previous deployments — if Vault
+  # doesn't exist yet, these would make Terraform/Packer try to connect to it
+  if [ -f "$SCRIPT_DIR/terraform/vault.auto.tfvars" ]; then
+    warn "Removing stale vault.auto.tfvars from previous deployment"
+    rm -f "$SCRIPT_DIR/terraform/vault.auto.tfvars"
+  fi
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    warn "Removing stale vault-credentials.json from previous deployment"
+    rm -f "$VAULT_CREDENTIALS_FILE"
+  fi
+
   readBootstrapConfig || return 1
   discoverCluster || return 1
   discoverStorage || return 1
   discoverNetworkBridges || return 1
   createAPIToken || return 1
-  downloadLXCTemplates || return 1
   generateTfvarsFromBootstrap || return 1
   generatePackerVarsFromBootstrap || return 1
+
+  # Mark bootstrap as successfully completed
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$SCRIPT_DIR/.bootstrap-complete"
 
   echo
   success "Bootstrap complete!"

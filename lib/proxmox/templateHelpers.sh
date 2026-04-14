@@ -56,31 +56,30 @@ function createLXCTemplate() {
 function ensureLXCTemplates() {
   doing "Ensuring LXC templates are available on all cluster nodes..."
 
-  local TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
+  local STORAGE="${VZTMPL_STORAGE:-local}"
   local failed_nodes=()
 
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
-    # Check if template exists on this node
-    if sshRun "$REMOTE_USER" "$ip" "test -f /var/lib/vz/template/cache/${TEMPLATE}" 2>/dev/null; then
-      info "  $node: Template already exists"
+    # Check if the default Debian template is present (required for Pi-hole)
+    local template_list
+    template_list=$(sshRun "$REMOTE_USER" "$ip" "pveam list ${STORAGE}" 2>/dev/null | tail -n +2) || template_list=""
+
+    if echo "$template_list" | grep -q "debian-12-standard"; then
+      info "  $node: Debian 12 template present"
     else
-      doing "  $node: Downloading template..."
-      if sshRun "$REMOTE_USER" "$ip" "pveam update && pveam download local ${TEMPLATE}" 2>/dev/null; then
-        success "  $node: Template downloaded"
-      else
-        failed_nodes+=("$node ($ip)")
-      fi
+      failed_nodes+=("$node ($ip)")
     fi
   done
 
   if [ ${#failed_nodes[@]} -gt 0 ]; then
-    error "Failed to download template on the following nodes:"
+    error "Debian 12 LXC template missing on the following nodes:"
     for node in "${failed_nodes[@]}"; do
       echo "  - $node"
     done
+    error "Run option 1 to download templates, or check storage '$STORAGE'"
     return 1
   fi
 

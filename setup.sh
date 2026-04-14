@@ -119,6 +119,9 @@ function deployAll() {
   # generate terraform.tfvars and packer.auto.pkrvars.hcl.
   runBootstrap || return 1
 
+  # Set PROXMOX_HOST from bootstrap (distributeSSHKeys and downstream use it)
+  PROXMOX_HOST="$PROXMOX_IP"
+
   # Distribute SSH keys to all discovered nodes
   distributeSSHKeys
 
@@ -229,27 +232,27 @@ while true; do
 
   case $choice in
     1)  deployAll;;
-    2)  deployCriticalServicesOnly;;
-    3)  deployVaultWithCA;;
-    4)  deployTraefikOnly;;
-    5)  deployAuthentikOnly;;
-    6)  deploySambaADOnly;;
-    7)  deployLAMOnly;;
-    8)  deployUptimeKumaOnly;;
-    9)  deployBackupOnly;;
-    10) rollbackManual;;
+    2)  ensureBootstrapComplete && deployCriticalServicesOnly;;
+    3)  ensureBootstrapComplete && deployVaultWithCA;;
+    4)  ensureBootstrapComplete && deployTraefikOnly;;
+    5)  ensureBootstrapComplete && deployAuthentikOnly;;
+    6)  ensureBootstrapComplete && deploySambaADOnly;;
+    7)  ensureBootstrapComplete && deployLAMOnly;;
+    8)  ensureBootstrapComplete && deployUptimeKumaOnly;;
+    9)  ensureBootstrapComplete && deployBackupOnly;;
+    10) ensureBootstrapComplete && rollbackManual;;
     11) purgeDeployment;;
 
     # Developer tools (only available with --dev)
-    d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords;          else error "Invalid option"; fi;;
-    d2|D2) if [ "$DEV_MODE" = true ]; then rebuildTemplates;          else error "Invalid option"; fi;;
-    d3|D3) if [ "$DEV_MODE" = true ]; then regenerateCA;              else error "Invalid option"; fi;;
-    d4|D4) if [ "$DEV_MODE" = true ]; then updateRootCertificates;    else error "Invalid option"; fi;;
-    d5|D5) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;   else error "Invalid option"; fi;;
-    d6|D6) if [ "$DEV_MODE" = true ]; then deployNomadOnly;           else error "Invalid option"; fi;;
-    d7|D7) if [ "$DEV_MODE" = true ]; then deployKasmOnly;            else error "Invalid option"; fi;;
-    d8|D8) if [ "$DEV_MODE" = true ]; then deployTailscaleOnly;       else error "Invalid option"; fi;;
-    d9|D9) if [ "$DEV_MODE" = true ]; then configureAuthentikADSyncOnly; else error "Invalid option"; fi;;
+    d1|D1) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateDNSRecords;          else error "Invalid option"; fi;;
+    d2|D2) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                     else error "Invalid option"; fi;;
+    d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && regenerateCA;              else error "Invalid option"; fi;;
+    d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateRootCertificates;    else error "Invalid option"; fi;;
+    d5|D5) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                              else error "Invalid option"; fi;;
+    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployNomadOnly;           else error "Invalid option"; fi;;
+    d7|D7) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployKasmOnly;            else error "Invalid option"; fi;;
+    d8|D8) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployTailscaleOnly;       else error "Invalid option"; fi;;
+    d9|D9) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && configureAuthentikADSyncOnly; else error "Invalid option"; fi;;
 
     0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;

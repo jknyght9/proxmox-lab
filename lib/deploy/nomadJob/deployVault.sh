@@ -30,7 +30,8 @@ Requires: Nomad cluster running, Traefik for ingress (recommended)
 EOF
 
   ensureClusterContext || return 1
-  ensureCriticalServices || return 1
+  # DNS is not required for Vault — it runs on Nomad with static IPs.
+  # Skip ensureCriticalServices here; only Nomad is needed.
   ensureNomadCluster || return 1
 
   # Get first Nomad node IP from hosts.json

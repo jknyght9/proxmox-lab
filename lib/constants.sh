@@ -33,6 +33,13 @@ VMID_DOCKER_TEMPLATE=9001
 VMID_NOMAD_TEMPLATE=9002
 VMID_BASE_TEMPLATE=9999
 
+# LXC template for Pi-hole containers (Debian only)
+# Format: "search_pattern|exact_filename"
+LXC_TEMPLATES=(
+  "debian-12-standard|debian-12-standard_12.12-1_amd64.tar.zst"
+)
+LXC_DEFAULT_TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
+
 # Vault credentials file (gitignored - contains sensitive data)
 VAULT_CREDENTIALS_FILE="$SCRIPT_DIR/crypto/vault-credentials.json"
 

@@ -96,6 +96,12 @@ variable "lxc_storage" {
   default     = "local-lvm"
 }
 
+variable "lxc_ostemplate" {
+  type        = string
+  description = "LXC OS template identifier (storage:vztmpl/filename)"
+  default     = "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+}
+
 # =============================================================================
 # SSH Key Configuration
 # =============================================================================

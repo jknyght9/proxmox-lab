@@ -70,9 +70,6 @@ EOF
   fi
   success "Nomad template built"
 
-  # Migrate template disk to shared storage for multi-node cloning
-  migrateTemplateToSharedStorage 9002
-
   # ============================================
   # Deploy Nomad VMs
   # ============================================

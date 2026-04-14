@@ -4,6 +4,7 @@
 !.claude/CLAUDE.md
 .DS_Store
 .terraform
+.bootstrap-complete
 bootstrap.yml
 cluster-info.json
 crypto

@@ -63,8 +63,6 @@ EOF
     fi
     success "docker-template built"
 
-    # Migrate to shared storage if needed
-    migrateTemplateToSharedStorage 9001
   fi
 
   # ============================================

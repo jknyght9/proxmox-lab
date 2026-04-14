@@ -65,11 +65,13 @@ dns_main_nodes = [
 # -----------------------------------------------------------------------------
 # Storage Configuration
 # -----------------------------------------------------------------------------
-# Auto-detected by bootstrap. Clusters prefer shared storage; standalone
-# uses local-lvm. LXC always uses block storage (not NFS/CIFS).
-template_storage = "local-lvm"
+# Selected during bootstrap. template_storage can be NFS/shared (for
+# multi-node access). vm_storage/lxc_storage are for operational workloads.
+# LXC requires block storage (not NFS/CIFS).
+template_storage = "nfs-templates"
 vm_storage       = "local-lvm"
 lxc_storage      = "local-lvm"
+lxc_ostemplate   = "nfs-templates:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
 # -----------------------------------------------------------------------------
 # Proxmox Cluster Node IPs
