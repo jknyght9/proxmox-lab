@@ -321,6 +321,7 @@ function showMenu() {
     echo " d7) Deploy Nomad only"
     echo " d8) Deploy Kasm only"
     echo " d9) Deploy Tailscale Subnet Router"
+    echo "d10) Create domain-join AppRole (Vault)"
   fi
   echo
 }
@@ -330,7 +331,7 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-11, b1-b6, d1-d9]: ")" choice
+    read -rp "$(question "Select an option [0-11, b1-b6, d1-d10]: ")" choice
   else
     read -rp "$(question "Select an option [0-11]: ")" choice
   fi
@@ -366,6 +367,7 @@ while true; do
     d7|D7) if [ "$DEV_MODE" = true ]; then deployNomadOnly; else error "Invalid option: $choice"; fi;;
     d8|D8) if [ "$DEV_MODE" = true ]; then deployKasmOnly; else error "Invalid option: $choice"; fi;;
     d9|D9) if [ "$DEV_MODE" = true ]; then deployTailscaleOnly; else error "Invalid option: $choice"; fi;;
+    d10|D10) if [ "$DEV_MODE" = true ]; then configureDomainJoinAppRole; else error "Invalid option: $choice"; fi;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
