@@ -2,27 +2,53 @@
 
 # configureTrueNAS.sh - Join TrueNAS SCALE to Active Directory and configure profile shares
 #
+# Uses the TrueNAS REST API (v2.0) over HTTPS — no SSH or sudo required.
+# An API key is generated in TrueNAS UI and stored in Vault for reuse.
+#
 # Prerequisites:
 #   - Samba AD deployed and running
 #   - Vault containing AD credentials
 #   - TrueNAS SCALE accessible on the network
-#   - sshpass installed locally
+#   - TrueNAS API key (generated in UI: top-right user → API Keys)
 #
-# Globals read: ENTERPRISE_KEY_PATH, ENTERPRISE_PUBKEY_PATH, VAULT_CREDENTIALS_FILE,
-#               CLUSTER_INFO_FILE, SCRIPT_DIR
+# Globals read: VAULT_CREDENTIALS_FILE, CLUSTER_INFO_FILE, SCRIPT_DIR
 
-TRUENAS_USER="truenas_admin"
-TRUENAS_SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+# truenasAPI - Make authenticated REST API call to TrueNAS
+#
+# Arguments: $1 - HTTP method, $2 - API endpoint path, $3 - JSON body (optional)
+# Globals read: TRUENAS_IP, TRUENAS_API_KEY
+# Returns: curl output (JSON)
+function truenasAPI() {
+  local METHOD="$1"
+  local ENDPOINT="$2"
+  local BODY="${3:-}"
+
+  local CURL_ARGS=(
+    -sk
+    --connect-timeout 10
+    --max-time 30
+    -X "$METHOD"
+    -H "Authorization: Bearer ${TRUENAS_API_KEY}"
+    -H "Content-Type: application/json"
+    "https://${TRUENAS_IP}/api/v2.0${ENDPOINT}"
+  )
+
+  if [ -n "$BODY" ]; then
+    CURL_ARGS+=(-d "$BODY")
+  fi
+
+  curl "${CURL_ARGS[@]}" 2>/dev/null
+}
 
 # joinTrueNASToAD - Join TrueNAS SCALE to the Samba AD domain
 #
 # Flow:
-#   1. Prompt for TrueNAS IP and password
-#   2. Install enterprise SSH key for future passwordless access
-#   3. Fetch domain-join credentials from Vault
-#   4. Join TrueNAS to AD via midclt
-#   5. Configure SMB profile share with AD permissions
-#   6. Save TrueNAS config to cluster-info.json
+#   1. Get TrueNAS IP and API key (from Vault or prompt)
+#   2. Fetch domain-join credentials from Vault
+#   3. Configure DNS on TrueNAS to use Pi-hole
+#   4. Join TrueNAS to AD domain
+#   5. Configure SMB profile share
+#   6. Save config to cluster-info.json
 #
 # Returns: 0 on success, 1 on failure
 function joinTrueNASToAD() {
@@ -33,6 +59,8 @@ TrueNAS Active Directory Join
 
 Joins TrueNAS SCALE to the Active Directory domain and configures
 an SMB share for user profiles.
+
+Uses TrueNAS REST API — requires an API key from the TrueNAS UI.
 #############################################################################
 
 EOF
@@ -61,12 +89,20 @@ EOF
   info "AD Realm: $AD_REALM"
   info "AD Domain: $AD_DOMAIN"
 
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  if [ -z "$VAULT_ADDR" ] || [ -z "$ROOT_TOKEN" ]; then
+    error "Could not read Vault credentials"
+    return 1
+  fi
+
   # ==========================================================================
-  # Step 1: Get TrueNAS connection details
+  # Step 1: Get TrueNAS connection details + API key
   # ==========================================================================
 
   # Check if TrueNAS IP is already saved
-  local TRUENAS_IP
   TRUENAS_IP=$(jq -r '.truenas.ip // empty' "$CLUSTER_INFO_FILE" 2>/dev/null)
 
   if [ -n "$TRUENAS_IP" ]; then
@@ -95,21 +131,29 @@ EOF
   fi
   success "TrueNAS is reachable"
 
-  # ==========================================================================
-  # Step 2: Install SSH key on TrueNAS
-  # ==========================================================================
+  # Get API key from Vault or prompt
+  getTrueNASAPIKey || return 1
 
-  installTrueNASSSHKey "$TRUENAS_IP" || return 1
+  # Verify API key works
+  doing "Verifying TrueNAS API access..."
+  local SYS_INFO
+  SYS_INFO=$(truenasAPI GET /system/info)
+
+  if [ -z "$SYS_INFO" ] || echo "$SYS_INFO" | jq -e '.error' > /dev/null 2>&1; then
+    error "TrueNAS API authentication failed"
+    error "Verify the API key is correct and has not expired."
+    return 1
+  fi
+
+  local TRUENAS_VERSION
+  TRUENAS_VERSION=$(echo "$SYS_INFO" | jq -r '.version // "unknown"')
+  success "TrueNAS API connected (version: $TRUENAS_VERSION)"
 
   # ==========================================================================
-  # Step 3: Fetch domain-join credentials from Vault
+  # Step 2: Fetch domain-join credentials from Vault
   # ==========================================================================
 
   doing "Fetching domain-join credentials from Vault..."
-
-  local VAULT_ADDR ROOT_TOKEN
-  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
-  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
   local SECRETS_JSON
   SECRETS_JSON=$(curl -skf --connect-timeout 5 --max-time 10 \
@@ -126,46 +170,52 @@ EOF
   success "Retrieved domain-join credentials from Vault"
 
   # ==========================================================================
-  # Step 4: Join TrueNAS to AD
+  # Step 3: Configure DNS + Join AD
   # ==========================================================================
 
   local AD_REALM_LOWER
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
 
+  # Check current AD status
   doing "Checking if TrueNAS is already domain-joined..."
+  local AD_CONFIG
+  AD_CONFIG=$(truenasAPI GET /activedirectory) || AD_CONFIG="{}"
 
-  local AD_STATUS
-  AD_STATUS=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call activedirectory.config 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get(\"enable\", False))' 2>/dev/null" 2>/dev/null) || AD_STATUS="False"
+  local AD_ENABLED
+  AD_ENABLED=$(echo "$AD_CONFIG" | jq -r '.enable // false')
 
-  if [ "$AD_STATUS" = "True" ]; then
-    info "TrueNAS is already joined to an AD domain"
+  if [ "$AD_ENABLED" = "true" ]; then
+    local CURRENT_DOMAIN
+    CURRENT_DOMAIN=$(echo "$AD_CONFIG" | jq -r '.domainname // "unknown"')
+    info "TrueNAS is already joined to: $CURRENT_DOMAIN"
     question "Re-join to $AD_REALM_LOWER? (y/N): "
     read -r REJOIN
     if [[ ! "$REJOIN" =~ ^[yY] ]]; then
       info "Skipping AD join"
-      # Still proceed to share configuration
-      configureTrueNASProfileShare "$TRUENAS_IP" "$AD_REALM_LOWER"
-      saveTrueNASConfig "$TRUENAS_IP"
+      configureTrueNASProfileShare "$AD_REALM_LOWER"
+      saveTrueNASConfig
       return 0
     fi
+
+    # Leave current domain first
+    doing "Leaving current AD domain..."
+    truenasAPI PUT /activedirectory '{"enable": false}' > /dev/null || true
+    sleep 3
   fi
 
-  doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
-
-  # Configure DNS on TrueNAS to use Pi-hole (required for AD resolution)
+  # Configure DNS to use Pi-hole
   local DNS_IP
   DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
 
   if [ -n "$DNS_IP" ]; then
     doing "Configuring TrueNAS DNS to use Pi-hole ($DNS_IP)..."
-    # TrueNAS SCALE network.configuration.update expects JSON with the update payload
-    if ! ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-      "${TRUENAS_USER}@${TRUENAS_IP}" \
-      "sudo midclt call network.configuration.update '{\"nameserver1\": \"${DNS_IP}\"}'" > /dev/null 2>&1; then
-      warn "Could not update DNS via midclt."
-      warn "Set DNS manually: TrueNAS UI → Network → Global Configuration → Nameserver 1 → ${DNS_IP}"
+    local DNS_RESULT
+    DNS_RESULT=$(truenasAPI PUT /network/configuration \
+      "{\"nameserver1\": \"${DNS_IP}\"}") || true
+
+    if echo "$DNS_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+      warn "Could not update DNS via API: $(echo "$DNS_RESULT" | jq -r '.error // .message // "unknown error"')"
+      warn "Set DNS manually: TrueNAS UI -> Network -> Global Configuration -> Nameserver 1 -> ${DNS_IP}"
       question "Continue with AD join? DNS must resolve $AD_REALM_LOWER first. (Y/n): "
       read -r CONTINUE_JOIN
       if [[ "$CONTINUE_JOIN" =~ ^[nN] ]]; then
@@ -177,31 +227,45 @@ EOF
     fi
   fi
 
-  # Join AD domain using domain-join-svc account
-  doing "Sending AD join request to TrueNAS..."
+  # Join AD domain
+  doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
+  info "  This may take 30-60 seconds..."
+
+  local JOIN_PAYLOAD
+  JOIN_PAYLOAD=$(jq -n \
+    --arg domain "$AD_REALM_LOWER" \
+    --arg bindpw "$DOMAIN_JOIN_PASSWORD" \
+    '{
+      domainname: $domain,
+      bindname: "domain-join-svc",
+      bindpw: $bindpw,
+      enable: true
+    }')
 
   local JOIN_RESULT
-  JOIN_RESULT=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call activedirectory.update '{\"domainname\": \"${AD_REALM_LOWER}\", \"bindname\": \"domain-join-svc\", \"bindpw\": \"${DOMAIN_JOIN_PASSWORD}\", \"enable\": true}'" 2>&1) || true
+  JOIN_RESULT=$(truenasAPI PUT /activedirectory "$JOIN_PAYLOAD") || true
 
-  if [ -z "$JOIN_RESULT" ] || echo "$JOIN_RESULT" | grep -qi "error"; then
-    error "Failed to initiate AD join"
-    [ -n "$JOIN_RESULT" ] && error "$JOIN_RESULT"
+  if [ -z "$JOIN_RESULT" ] || echo "$JOIN_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+    local ERR_MSG
+    ERR_MSG=$(echo "$JOIN_RESULT" | jq -r '.error // .message // "unknown error"' 2>/dev/null)
+    error "Failed to join AD domain: $ERR_MSG"
+    echo
+    info "Troubleshooting:"
+    info "  1. Verify DNS: dig _ldap._tcp.${AD_REALM_LOWER} SRV (from TrueNAS)"
+    info "  2. Verify credentials: vault kv get secret/samba-ad"
+    info "  3. Check TrueNAS UI -> Directory Services for detailed errors"
     return 1
   fi
 
   # Wait for AD join to complete
   doing "Waiting for AD join to complete..."
-  local MAX_WAIT=60
+  local MAX_WAIT=120
   local WAITED=0
   while [ $WAITED -lt $MAX_WAIT ]; do
-    local STARTED
-    STARTED=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-      "${TRUENAS_USER}@${TRUENAS_IP}" \
-      "sudo midclt call activedirectory.started 2>/dev/null" 2>/dev/null || echo "false")
+    local AD_STATE
+    AD_STATE=$(truenasAPI GET /activedirectory/started) || AD_STATE="false"
 
-    if [ "$STARTED" = "true" ]; then
+    if [ "$AD_STATE" = "true" ]; then
       break
     fi
     sleep 5
@@ -210,103 +274,114 @@ EOF
   done
 
   if [ $WAITED -ge $MAX_WAIT ]; then
-    error "AD join timed out after ${MAX_WAIT}s"
-    error "Check TrueNAS UI for join status and errors"
-    return 1
+    warn "AD join did not complete within ${MAX_WAIT}s"
+    warn "Check TrueNAS UI -> Directory Services for status"
+    warn "The join may still be in progress."
+  else
+    success "TrueNAS joined to AD domain: $AD_REALM_LOWER"
   fi
-
-  success "TrueNAS joined to AD domain: $AD_REALM_LOWER"
 
   # Verify join
   doing "Verifying AD join..."
   local DOMAIN_INFO
-  DOMAIN_INFO=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call activedirectory.domain_info" 2>/dev/null || echo "{}")
+  DOMAIN_INFO=$(truenasAPI GET /activedirectory) || DOMAIN_INFO="{}"
 
-  info "Domain info: $DOMAIN_INFO"
+  local JOINED_DOMAIN
+  JOINED_DOMAIN=$(echo "$DOMAIN_INFO" | jq -r '.domainname // "unknown"')
+  local JOINED_ENABLED
+  JOINED_ENABLED=$(echo "$DOMAIN_INFO" | jq -r '.enable // false')
+
+  if [ "$JOINED_ENABLED" = "true" ]; then
+    success "AD join verified: $JOINED_DOMAIN"
+  else
+    warn "AD join state unclear — check TrueNAS UI"
+  fi
 
   # ==========================================================================
-  # Step 5: Configure profile share
+  # Step 4: Configure profile share
   # ==========================================================================
 
-  configureTrueNASProfileShare "$TRUENAS_IP" "$AD_REALM_LOWER"
+  configureTrueNASProfileShare "$AD_REALM_LOWER"
 
   # ==========================================================================
-  # Step 6: Save config
+  # Step 5: Save config
   # ==========================================================================
 
-  saveTrueNASConfig "$TRUENAS_IP"
+  saveTrueNASConfig
 
   echo
   success "TrueNAS AD join and profile share configuration complete!"
   echo
   info "TrueNAS: $TRUENAS_IP"
   info "AD Domain: $AD_REALM_LOWER"
-  info "Profile Share: \\\\$(hostname -f 2>/dev/null || echo "$TRUENAS_IP")\\profiles"
+  info "Profile Share: \\\\${TRUENAS_IP}\\profiles"
   echo
 }
 
-# installTrueNASSSHKey - Install enterprise SSH key on TrueNAS
+# getTrueNASAPIKey - Get TrueNAS API key from Vault or prompt user
 #
-# Prompts for truenas_admin password, then copies the enterprise public key
-# to TrueNAS so subsequent operations use key-based auth.
+# Checks Vault at secret/truenas for a stored API key.
+# If not found, prompts the user and stores it in Vault for next time.
 #
-# Arguments: $1 - TrueNAS IP
+# Sets global: TRUENAS_API_KEY
 # Returns: 0 on success, 1 on failure
-function installTrueNASSSHKey() {
-  local TRUENAS_IP="$1"
+function getTrueNASAPIKey() {
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
-  # Check if key auth already works
-  doing "Checking if SSH key auth is already configured..."
-  if ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    -o PasswordAuthentication=no -o BatchMode=yes \
-    "${TRUENAS_USER}@${TRUENAS_IP}" "echo ok" > /dev/null 2>&1; then
-    success "SSH key auth already working for $TRUENAS_USER@$TRUENAS_IP"
+  # Try to read from Vault first
+  doing "Checking Vault for TrueNAS API key..."
+  local TRUENAS_SECRETS
+  TRUENAS_SECRETS=$(curl -sk --connect-timeout 5 --max-time 10 \
+    "${VAULT_ADDR}/v1/secret/data/truenas" \
+    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
+
+  TRUENAS_API_KEY=$(echo "$TRUENAS_SECRETS" | jq -r '.data.data.api_key // empty')
+
+  if [ -n "$TRUENAS_API_KEY" ]; then
+    success "Found TrueNAS API key in Vault"
     return 0
   fi
 
-  info "SSH key auth not configured. Installing enterprise key on TrueNAS..."
-  question "Enter password for $TRUENAS_USER@$TRUENAS_IP: "
-  read -rs TRUENAS_PASS
+  # Not in Vault — prompt user
+  info "No TrueNAS API key found in Vault."
+  echo
+  info "Generate an API key in TrueNAS:"
+  info "  1. Log into TrueNAS web UI (https://$TRUENAS_IP)"
+  info "  2. Click the user icon (top-right) -> API Keys"
+  info "  3. Click Add -> name it 'proxmox-lab' -> Save"
+  info "  4. Copy the key and paste it below"
+  echo
+  question "Enter TrueNAS API key: "
+  read -rs TRUENAS_API_KEY
   echo
 
-  if [ -z "$TRUENAS_PASS" ]; then
-    error "Password is required"
+  if [ -z "$TRUENAS_API_KEY" ]; then
+    error "API key is required"
     return 1
   fi
 
-  # Test password auth
-  if ! sshpass -p "$TRUENAS_PASS" ssh $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" "echo ok" > /dev/null 2>&1; then
-    error "Password authentication failed for $TRUENAS_USER@$TRUENAS_IP"
-    return 1
+  # Store in Vault for next time
+  doing "Storing TrueNAS API key in Vault..."
+
+  local API_KEY_PAYLOAD
+  API_KEY_PAYLOAD=$(jq -n \
+    --arg api_key "$TRUENAS_API_KEY" \
+    --arg ip "$TRUENAS_IP" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{data: {api_key: $api_key, ip: $ip, stored_at: $ts}}')
+
+  if curl -skf --connect-timeout 5 --max-time 10 -X POST \
+    "${VAULT_ADDR}/v1/secret/data/truenas" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$API_KEY_PAYLOAD" > /dev/null; then
+    success "TrueNAS API key stored in Vault at secret/truenas"
+  else
+    warn "Could not store API key in Vault — you'll be prompted again next time"
   fi
 
-  # Install enterprise public key
-  local PUBKEY_CONTENT
-  PUBKEY_CONTENT=$(cat "$ENTERPRISE_PUBKEY_PATH")
-
-  sshpass -p "$TRUENAS_PASS" ssh $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
-     grep -qF '${PUBKEY_CONTENT}' ~/.ssh/authorized_keys 2>/dev/null || \
-     (echo '${PUBKEY_CONTENT}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys)"
-
-  if [ $? -ne 0 ]; then
-    error "Failed to install SSH key on TrueNAS"
-    return 1
-  fi
-
-  # Verify key auth now works
-  if ! ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    -o PasswordAuthentication=no -o BatchMode=yes \
-    "${TRUENAS_USER}@${TRUENAS_IP}" "echo ok" > /dev/null 2>&1; then
-    error "SSH key was installed but key auth still fails"
-    return 1
-  fi
-
-  success "Enterprise SSH key installed on TrueNAS"
   return 0
 }
 
@@ -315,23 +390,25 @@ function installTrueNASSSHKey() {
 # Creates or updates an SMB share on TrueNAS for roaming user profiles.
 # The share is configured with AD group permissions.
 #
-# Arguments: $1 - TrueNAS IP, $2 - AD realm (lowercase)
+# Arguments: $1 - AD realm (lowercase)
+# Globals read: TRUENAS_IP, TRUENAS_API_KEY
 # Returns: 0 on success (non-fatal on failure)
 function configureTrueNASProfileShare() {
-  local TRUENAS_IP="$1"
-  local AD_REALM_LOWER="$2"
+  local AD_REALM_LOWER="$1"
 
   doing "Configuring SMB profile share on TrueNAS..."
 
   # Check if profiles share already exists
-  local SHARE_EXISTS
-  SHARE_EXISTS=$(ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "sudo midclt call sharing.smb.query '[[\"name\", \"=\", \"profiles\"]]' 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(\"true\" if d else \"false\")' 2>/dev/null" 2>/dev/null) || SHARE_EXISTS="false"
+  local SHARES
+  SHARES=$(truenasAPI GET /sharing/smb) || SHARES="[]"
+
+  local SHARE_EXISTS SHARE_ID
+  SHARE_ID=$(echo "$SHARES" | jq -r '.[] | select(.name == "profiles") | .id // empty')
+  SHARE_EXISTS=$( [ -n "$SHARE_ID" ] && echo "true" || echo "false" )
 
   if [ "$SHARE_EXISTS" = "true" ]; then
-    info "SMB share 'profiles' already exists"
-    question "Reconfigure share with AD permissions? (y/N): "
+    info "SMB share 'profiles' already exists (id: $SHARE_ID)"
+    question "Reconfigure share? (y/N): "
     read -r RECONFIG
     if [[ ! "$RECONFIG" =~ ^[yY] ]]; then
       info "Skipping share configuration"
@@ -339,72 +416,52 @@ function configureTrueNASProfileShare() {
     fi
   fi
 
-  # Prompt for dataset path (with sensible default)
+  # Prompt for dataset path
   local DEFAULT_DATASET="/mnt/pool/profiles"
   question "Enter TrueNAS dataset path for profiles [$DEFAULT_DATASET]: "
   read -r DATASET_PATH
   DATASET_PATH="${DATASET_PATH:-$DEFAULT_DATASET}"
 
-  # Prompt for AD group that gets access (with sensible default)
+  # Prompt for AD group
   local DEFAULT_GROUP="Domain Users"
   question "Enter AD group for profile access [$DEFAULT_GROUP]: "
   read -r AD_GROUP
   AD_GROUP="${AD_GROUP:-$DEFAULT_GROUP}"
 
-  # Verify dataset exists on TrueNAS
-  doing "Verifying dataset path exists..."
-  if ! ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-    "${TRUENAS_USER}@${TRUENAS_IP}" \
-    "[ -d '$DATASET_PATH' ]" 2>/dev/null; then
-    warn "Dataset path $DATASET_PATH does not exist on TrueNAS"
-    question "Create it? (Y/n): "
-    read -r CREATE_DS
-    if [[ ! "$CREATE_DS" =~ ^[nN] ]]; then
-      ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-        "${TRUENAS_USER}@${TRUENAS_IP}" \
-        "sudo mkdir -p '$DATASET_PATH'" 2>/dev/null || {
-          warn "Could not create directory — create the dataset manually in TrueNAS UI"
-          return 0
-        }
-      success "Created $DATASET_PATH"
-    else
-      warn "Skipping share creation — create the dataset first"
-      return 0
-    fi
-  fi
+  local SHARE_PAYLOAD
+  SHARE_PAYLOAD=$(jq -n \
+    --arg path "$DATASET_PATH" \
+    '{
+      name: "profiles",
+      path: $path,
+      purpose: "NO_PRESET",
+      comment: "User profile storage (AD-integrated)",
+      browsable: true,
+      ro: false,
+      guestok: false,
+      abe: true
+    }')
 
-  # Create or update SMB share
   if [ "$SHARE_EXISTS" = "true" ]; then
     doing "Updating existing 'profiles' SMB share..."
-    ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-      "${TRUENAS_USER}@${TRUENAS_IP}" "
-      SHARE_ID=\$(sudo midclt call sharing.smb.query '[[\"name\", \"=\", \"profiles\"]]' | python3 -c \"import sys,json; print(json.load(sys.stdin)[0]['id'])\")
-      sudo midclt call sharing.smb.update \$SHARE_ID '{
-        \"path\": \"${DATASET_PATH}\",
-        \"purpose\": \"NO_PRESET\",
-        \"comment\": \"User profile storage (AD-integrated)\"
-      }'
-    " > /dev/null 2>&1
+    local UPDATE_RESULT
+    UPDATE_RESULT=$(truenasAPI PUT "/sharing/smb/id/${SHARE_ID}" "$SHARE_PAYLOAD") || true
+
+    if echo "$UPDATE_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+      warn "Share update may have failed: $(echo "$UPDATE_RESULT" | jq -r '.error // "unknown"')"
+      warn "Verify in TrueNAS UI -> Shares -> SMB"
+      return 0
+    fi
   else
     doing "Creating 'profiles' SMB share..."
-    ssh -i "$ENTERPRISE_KEY_PATH" $TRUENAS_SSH_OPTS \
-      "${TRUENAS_USER}@${TRUENAS_IP}" "
-      sudo midclt call sharing.smb.create '{
-        \"name\": \"profiles\",
-        \"path\": \"${DATASET_PATH}\",
-        \"purpose\": \"NO_PRESET\",
-        \"comment\": \"User profile storage (AD-integrated)\",
-        \"browsable\": true,
-        \"ro\": false,
-        \"guestok\": false,
-        \"abe\": true
-      }'
-    " > /dev/null 2>&1
-  fi
+    local CREATE_RESULT
+    CREATE_RESULT=$(truenasAPI POST /sharing/smb "$SHARE_PAYLOAD") || true
 
-  if [ $? -ne 0 ]; then
-    warn "SMB share configuration may have failed — verify in TrueNAS UI"
-    return 0
+    if echo "$CREATE_RESULT" | jq -e '.error' > /dev/null 2>&1; then
+      warn "Share creation may have failed: $(echo "$CREATE_RESULT" | jq -r '.error // "unknown"')"
+      warn "Verify in TrueNAS UI -> Shares -> SMB"
+      return 0
+    fi
   fi
 
   success "SMB 'profiles' share configured at $DATASET_PATH"
@@ -421,19 +478,14 @@ function configureTrueNASProfileShare() {
 }
 
 # saveTrueNASConfig - Save TrueNAS connection info to cluster-info.json
-#
-# Arguments: $1 - TrueNAS IP
 function saveTrueNASConfig() {
-  local TRUENAS_IP="$1"
-
   doing "Saving TrueNAS configuration to cluster-info.json..."
 
   local UPDATED
   UPDATED=$(jq \
     --arg ip "$TRUENAS_IP" \
-    --arg user "$TRUENAS_USER" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.truenas = {ip: $ip, user: $user, joined_at: $ts}' \
+    '.truenas = {ip: $ip, joined_at: $ts}' \
     "$CLUSTER_INFO_FILE")
 
   echo "$UPDATED" > "$CLUSTER_INFO_FILE"
