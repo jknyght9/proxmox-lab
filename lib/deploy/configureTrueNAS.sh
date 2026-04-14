@@ -281,19 +281,27 @@ EOF
   fi
 
   # Join AD domain — the PUT returns a job ID, not the config object
+  # Fetch the system hostname so the machine registers with its real name in AD
+  local TRUENAS_HOSTNAME
+  TRUENAS_HOSTNAME=$(truenasAPI GET /network/configuration | jq -r '.hostname // empty') || TRUENAS_HOSTNAME=""
+
   doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
+  if [ -n "$TRUENAS_HOSTNAME" ]; then
+    info "  NetBIOS name: $TRUENAS_HOSTNAME"
+  fi
   info "  This may take 30-60 seconds..."
 
   local JOIN_PAYLOAD
   JOIN_PAYLOAD=$(jq -n \
     --arg domain "$AD_REALM_LOWER" \
     --arg bindpw "$DOMAIN_JOIN_PASSWORD" \
+    --arg netbios "${TRUENAS_HOSTNAME:-}" \
     '{
       domainname: $domain,
       bindname: "domain-join-svc",
       bindpw: $bindpw,
       enable: true
-    }')
+    } + (if $netbios != "" then {netbiosname: ($netbios | ascii_upcase)} else {} end)')
 
   local JOB_ID
   JOB_ID=$(truenasAPI PUT /activedirectory "$JOIN_PAYLOAD") || true
