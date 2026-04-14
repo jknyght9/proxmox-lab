@@ -307,6 +307,7 @@ function showMenu() {
     echo " b4) Deploy LDAP Account Manager (on Nomad)"
     echo " b5) Deploy Vault with CA (PKI + ACME) [migration]"
     echo " b6) Join TrueNAS to Active Directory"
+    echo " b7) Join TrueNAS to AD + configure profile share"
     echo
     echo "------------------------------------------"
     echo "  Developer Tools"
@@ -331,7 +332,7 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-11, b1-b6, d1-d10]: ")" choice
+    read -rp "$(question "Select an option [0-11, b1-b7, d1-d10]: ")" choice
   else
     read -rp "$(question "Select an option [0-11]: ")" choice
   fi
@@ -355,7 +356,8 @@ while true; do
     b3|B3) if [ "$DEV_MODE" = true ]; then deployBackupOnly; else error "Invalid option: $choice"; fi;;
     b4|B4) if [ "$DEV_MODE" = true ]; then deployLAMOnly; else error "Invalid option: $choice"; fi;;
     b5|B5) if [ "$DEV_MODE" = true ]; then deployVaultWithCA; else error "Invalid option: $choice"; fi;;
-    b6|B6) if [ "$DEV_MODE" = true ]; then joinTrueNASToAD; else error "Invalid option: $choice"; fi;;
+    b6|B6) if [ "$DEV_MODE" = true ]; then joinTrueNASToADOnly; else error "Invalid option: $choice"; fi;;
+    b7|B7) if [ "$DEV_MODE" = true ]; then joinTrueNASToADWithProfiles; else error "Invalid option: $choice"; fi;;
 
     # Developer menu options (only available with --dev)
     d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords; else error "Invalid option: $choice"; fi;;

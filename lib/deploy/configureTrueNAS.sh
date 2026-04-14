@@ -51,11 +51,27 @@ function truenasAPI() {
 #   6. Save config to cluster-info.json
 #
 # Returns: 0 on success, 1 on failure
+# joinTrueNASToADOnly - Join TrueNAS to AD without profile share configuration
+function joinTrueNASToADOnly() {
+  joinTrueNASToAD false
+}
+
+# joinTrueNASToADWithProfiles - Join TrueNAS to AD and configure profile share
+function joinTrueNASToADWithProfiles() {
+  joinTrueNASToAD true
+}
+
+# joinTrueNASToAD - Core function to join TrueNAS SCALE to the Samba AD domain
+#
+# Arguments: $1 - "true" to configure profile share, "false" to skip
 function joinTrueNASToAD() {
-  cat <<EOF
+  local CONFIGURE_PROFILES="${1:-true}"
+
+  if [ "$CONFIGURE_PROFILES" = "true" ]; then
+    cat <<EOF
 
 ############################################################################
-TrueNAS Active Directory Join
+TrueNAS Active Directory Join + Profile Share
 
 Joins TrueNAS SCALE to the Active Directory domain and configures
 an SMB share for user profiles.
@@ -64,6 +80,19 @@ Uses TrueNAS REST API — requires an API key from the TrueNAS UI.
 #############################################################################
 
 EOF
+  else
+    cat <<EOF
+
+############################################################################
+TrueNAS Active Directory Join
+
+Joins TrueNAS SCALE to the Active Directory domain.
+
+Uses TrueNAS REST API — requires an API key from the TrueNAS UI.
+#############################################################################
+
+EOF
+  fi
 
   # Verify prerequisites
   if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
@@ -329,10 +358,12 @@ EOF
   fi
 
   # ==========================================================================
-  # Step 4: Configure profile share
+  # Step 4: Configure profile share (optional)
   # ==========================================================================
 
-  configureTrueNASProfileShare "$AD_REALM_LOWER"
+  if [ "$CONFIGURE_PROFILES" = "true" ]; then
+    configureTrueNASProfileShare "$AD_REALM_LOWER"
+  fi
 
   # ==========================================================================
   # Step 5: Save config
@@ -341,11 +372,15 @@ EOF
   saveTrueNASConfig
 
   echo
-  success "TrueNAS AD join and profile share configuration complete!"
+  if [ "$CONFIGURE_PROFILES" = "true" ]; then
+    success "TrueNAS AD join and profile share configuration complete!"
+    info "Profile Share: \\\\${TRUENAS_IP}\\profiles"
+  else
+    success "TrueNAS AD join complete!"
+  fi
   echo
   info "TrueNAS: $TRUENAS_IP"
   info "AD Domain: $AD_REALM_LOWER"
-  info "Profile Share: \\\\${TRUENAS_IP}\\profiles"
   echo
 }
 
