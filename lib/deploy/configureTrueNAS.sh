@@ -328,6 +328,30 @@ EOF
     return 1
   fi
 
+  # 25.10 requires the Kerberos realm to exist in the local realms list before
+  # the AD join will accept it. Older /activedirectory auto-created the realm;
+  # /directoryservices does not. Create it if missing.
+  doing "Ensuring Kerberos realm $AD_REALM is registered..."
+  local REALM_LIST REALM_EXISTS
+  REALM_LIST=$(truenasAPI GET /kerberos/realm) || REALM_LIST="[]"
+  REALM_EXISTS=$(echo "$REALM_LIST" | jq -r --arg r "$AD_REALM" 'any(.realm == $r) // false')
+
+  if [ "$REALM_EXISTS" != "true" ]; then
+    local REALM_PAYLOAD REALM_RESULT
+    REALM_PAYLOAD=$(jq -n --arg r "$AD_REALM" '{realm: $r}')
+    REALM_RESULT=$(truenasAPI POST /kerberos/realm "$REALM_PAYLOAD") || true
+    if echo "$REALM_RESULT" | jq -e '.id' > /dev/null 2>&1; then
+      success "Kerberos realm $AD_REALM registered (id: $(echo "$REALM_RESULT" | jq -r '.id'))"
+    else
+      local REALM_ERR
+      REALM_ERR=$(echo "$REALM_RESULT" | jq -r '.message // .error // "unknown error"' 2>/dev/null)
+      error "Could not register Kerberos realm $AD_REALM: $REALM_ERR"
+      return 1
+    fi
+  else
+    info "Kerberos realm $AD_REALM already registered."
+  fi
+
   doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
   info "  NetBIOS / AD computer name: $(echo "$TRUENAS_HOSTNAME" | tr '[:lower:]' '[:upper:]')"
   info "  This may take 30-60 seconds..."
