@@ -128,22 +128,18 @@ EOF
   fi
 
   # ==========================================================================
-  # Step 1: Get TrueNAS connection details + API key
+  # Step 1: Migrate any legacy singleton config, then select or add a NAS
   # ==========================================================================
 
-  # Check if TrueNAS IP is already saved
-  TRUENAS_IP=$(jq -r '.truenas.ip // empty' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  migrateTrueNASConfig || true
 
-  if [ -n "$TRUENAS_IP" ]; then
-    info "Found saved TrueNAS IP: $TRUENAS_IP"
-    question "Use this IP? (Y/n): "
-    read -r USE_SAVED
-    if [[ "$USE_SAVED" =~ ^[nN] ]]; then
-      TRUENAS_IP=""
-    fi
-  fi
+  TRUENAS_NAME=""
+  TRUENAS_IP=""
+  TRUENAS_API_KEY=""
+  TRUENAS_IS_NEW=false
+  selectOrAddTrueNAS || return 1
 
-  if [ -z "$TRUENAS_IP" ]; then
+  if [ "$TRUENAS_IS_NEW" = "true" ]; then
     question "Enter TrueNAS IP address: "
     read -r TRUENAS_IP
     if [ -z "$TRUENAS_IP" ]; then
@@ -160,8 +156,10 @@ EOF
   fi
   success "TrueNAS is reachable"
 
-  # Get API key from Vault or prompt
-  getTrueNASAPIKey || return 1
+  # Load (existing) or prompt (new) for the API key.
+  # For new NASes the key is persisted to Vault only after we discover the
+  # authoritative hostname below.
+  getTrueNASAPIKey "$TRUENAS_NAME" || return 1
 
   # Verify API key works
   doing "Verifying TrueNAS API access..."
@@ -177,6 +175,35 @@ EOF
   local TRUENAS_VERSION
   TRUENAS_VERSION=$(echo "$SYS_INFO" | jq -r '.version // "unknown"')
   success "TrueNAS API connected (version: $TRUENAS_VERSION)"
+
+  # For new entries, discover the authoritative hostname and persist the key.
+  if [ "$TRUENAS_IS_NEW" = "true" ]; then
+    local RAW_HOST
+    RAW_HOST=$(fetchTrueNASHostname)
+    if [ -z "$RAW_HOST" ]; then
+      error "Could not read TrueNAS hostname via API"
+      return 1
+    fi
+    TRUENAS_NAME=$(normalizeTrueNASName "$RAW_HOST")
+    if [ -z "$TRUENAS_NAME" ]; then
+      error "Could not normalize TrueNAS hostname '$RAW_HOST'"
+      return 1
+    fi
+    info "TrueNAS hostname: $RAW_HOST  →  key: $TRUENAS_NAME"
+
+    if jq -e --arg n "$TRUENAS_NAME" '(.truenas // {}) | has($n)' "$CLUSTER_INFO_FILE" > /dev/null 2>&1 \
+       && [ "$(jq -r --arg n "$TRUENAS_NAME" '(.truenas // {}) | has($n)' "$CLUSTER_INFO_FILE")" = "true" ]; then
+      warn "An entry for '$TRUENAS_NAME' already exists and will be overwritten."
+      question "Continue? (y/N): "
+      read -r CONFIRM_OVERWRITE
+      if [[ ! "$CONFIRM_OVERWRITE" =~ ^[yY] ]]; then
+        info "Aborted."
+        return 1
+      fi
+    fi
+
+    persistTrueNASAPIKey "$TRUENAS_NAME"
+  fi
 
   # ==========================================================================
   # Step 2: Fetch domain-join credentials from Vault
@@ -224,7 +251,7 @@ EOF
       if [ "$CONFIGURE_PROFILES" = "true" ]; then
         configureTrueNASProfileShare "$AD_REALM_LOWER"
       fi
-      saveTrueNASConfig
+      saveTrueNASConfig "$TRUENAS_NAME"
       return 0
     fi
 
@@ -396,7 +423,7 @@ EOF
   # Step 5: Save config
   # ==========================================================================
 
-  saveTrueNASConfig
+  saveTrueNASConfig "$TRUENAS_NAME"
 
   echo
   if [ "$CONFIGURE_PROFILES" = "true" ]; then
@@ -406,39 +433,56 @@ EOF
     success "TrueNAS AD join complete!"
   fi
   echo
-  info "TrueNAS: $TRUENAS_IP"
+  info "TrueNAS: $TRUENAS_NAME ($TRUENAS_IP)"
   info "AD Domain: $AD_REALM_LOWER"
   echo
 }
 
-# getTrueNASAPIKey - Get TrueNAS API key from Vault or prompt user
+# normalizeTrueNASName - Normalize a hostname for use as a cluster-info / Vault key
 #
-# Checks Vault at secret/truenas for a stored API key.
-# If not found, prompts the user and stores it in Vault for next time.
+# Strips any DNS suffix (first label only) and lowercases.
+function normalizeTrueNASName() {
+  local RAW="$1"
+  echo "$RAW" | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]'
+}
+
+# fetchTrueNASHostname - Read the TrueNAS system hostname via its REST API.
+#
+# Globals read: TRUENAS_IP, TRUENAS_API_KEY
+function fetchTrueNASHostname() {
+  truenasAPI GET /network/configuration | jq -r '.hostname // empty'
+}
+
+# getTrueNASAPIKey - Load the API key for a named TrueNAS, or prompt for one.
+#
+# Arguments: $1 - hostname key (may be empty when adding a new NAS)
+#
+# If a name is given, reads secret/truenas/<name> from Vault. If nothing is
+# stored there (or no name is given), prompts the user; the caller is
+# responsible for persisting the key once the authoritative hostname is known
+# (see persistTrueNASAPIKey).
 #
 # Sets global: TRUENAS_API_KEY
-# Returns: 0 on success, 1 on failure
 function getTrueNASAPIKey() {
+  local NAME="${1:-}"
   local VAULT_ADDR ROOT_TOKEN
   VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
   ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
 
-  # Try to read from Vault first
-  doing "Checking Vault for TrueNAS API key..."
-  local TRUENAS_SECRETS
-  TRUENAS_SECRETS=$(curl -sk --connect-timeout 5 --max-time 10 \
-    "${VAULT_ADDR}/v1/secret/data/truenas" \
-    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
-
-  TRUENAS_API_KEY=$(echo "$TRUENAS_SECRETS" | jq -r '.data.data.api_key // empty')
-
-  if [ -n "$TRUENAS_API_KEY" ]; then
-    success "Found TrueNAS API key in Vault"
-    return 0
+  if [ -n "$NAME" ]; then
+    doing "Looking up TrueNAS API key in Vault (secret/truenas/${NAME})..."
+    local SECRET
+    SECRET=$(curl -sk --connect-timeout 5 --max-time 10 \
+      "${VAULT_ADDR}/v1/secret/data/truenas/${NAME}" \
+      -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
+    TRUENAS_API_KEY=$(echo "$SECRET" | jq -r '.data.data.api_key // empty')
+    if [ -n "$TRUENAS_API_KEY" ]; then
+      success "Found TrueNAS API key in Vault"
+      return 0
+    fi
+    info "No API key stored at secret/truenas/${NAME} — prompting."
   fi
 
-  # Not in Vault — prompt user
-  info "No TrueNAS API key found in Vault."
   echo
   info "Generate an API key in TrueNAS:"
   info "  1. Log into TrueNAS web UI (https://$TRUENAS_IP)"
@@ -455,27 +499,200 @@ function getTrueNASAPIKey() {
     return 1
   fi
 
-  # Store in Vault for next time
-  doing "Storing TrueNAS API key in Vault..."
+  return 0
+}
 
-  local API_KEY_PAYLOAD
-  API_KEY_PAYLOAD=$(jq -n \
+# persistTrueNASAPIKey - Write the current TRUENAS_API_KEY to Vault under
+# the given hostname key.
+#
+# Arguments: $1 - hostname key (required)
+# Globals read: TRUENAS_API_KEY, TRUENAS_IP
+function persistTrueNASAPIKey() {
+  local NAME="$1"
+  if [ -z "$NAME" ]; then
+    warn "persistTrueNASAPIKey called without a name — skipping."
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  doing "Storing TrueNAS API key in Vault (secret/truenas/${NAME})..."
+
+  local PAYLOAD
+  PAYLOAD=$(jq -n \
     --arg api_key "$TRUENAS_API_KEY" \
     --arg ip "$TRUENAS_IP" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{data: {api_key: $api_key, ip: $ip, stored_at: $ts}}')
 
   if curl -skf --connect-timeout 5 --max-time 10 -X POST \
-    "${VAULT_ADDR}/v1/secret/data/truenas" \
+    "${VAULT_ADDR}/v1/secret/data/truenas/${NAME}" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$API_KEY_PAYLOAD" > /dev/null; then
-    success "TrueNAS API key stored in Vault at secret/truenas"
+    -d "$PAYLOAD" > /dev/null; then
+    success "TrueNAS API key stored at secret/truenas/${NAME}"
   else
     warn "Could not store API key in Vault — you'll be prompted again next time"
   fi
+}
 
-  return 0
+# migrateTrueNASConfig - Idempotently upgrade legacy singleton state to the
+# hostname-keyed layout.
+#
+# Old layout:
+#   cluster-info.json: .truenas = { ip, joined_at }
+#   Vault:             secret/truenas = { api_key, ip, stored_at }
+#
+# New layout:
+#   cluster-info.json: .truenas = { "<hostname>": { ip, joined_at } }
+#   Vault:             secret/truenas/<hostname> = { api_key, ip, stored_at }
+#
+# Safe to call multiple times — returns immediately if no legacy data exists.
+function migrateTrueNASConfig() {
+  local OLD_IP OLD_JOINED
+  OLD_IP=$(jq -r '.truenas.ip // empty' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  OLD_JOINED=$(jq -r '.truenas.joined_at // empty' "$CLUSTER_INFO_FILE" 2>/dev/null)
+
+  if [ -z "$OLD_IP" ]; then
+    return 0
+  fi
+
+  info "Detected legacy single-NAS TrueNAS config — migrating to per-host layout..."
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  local OLD_SECRET OLD_API_KEY
+  OLD_SECRET=$(curl -sk --connect-timeout 5 --max-time 10 \
+    "${VAULT_ADDR}/v1/secret/data/truenas" \
+    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null || echo "{}")
+  OLD_API_KEY=$(echo "$OLD_SECRET" | jq -r '.data.data.api_key // empty')
+
+  if [ -z "$OLD_API_KEY" ]; then
+    warn "Legacy .truenas entry exists but no API key at secret/truenas."
+    warn "Cannot auto-discover the hostname; leaving legacy entry in place."
+    warn "Re-run this option once the NAS is reachable with a valid key."
+    return 0
+  fi
+
+  TRUENAS_IP="$OLD_IP"
+  TRUENAS_API_KEY="$OLD_API_KEY"
+  local RAW_HOST
+  RAW_HOST=$(fetchTrueNASHostname)
+  if [ -z "$RAW_HOST" ]; then
+    warn "Could not reach legacy NAS at $OLD_IP to read its hostname."
+    warn "Leaving legacy config in place; re-run once the NAS is reachable."
+    TRUENAS_IP=""
+    TRUENAS_API_KEY=""
+    return 0
+  fi
+
+  local NAME
+  NAME=$(normalizeTrueNASName "$RAW_HOST")
+  if [ -z "$NAME" ]; then
+    warn "Empty normalized hostname — aborting migration."
+    TRUENAS_IP=""
+    TRUENAS_API_KEY=""
+    return 0
+  fi
+
+  info "  Legacy NAS hostname: $RAW_HOST  →  key: $NAME"
+
+  # Write the new per-host Vault entry, preserving the existing fields.
+  local NEW_PAYLOAD
+  NEW_PAYLOAD=$(echo "$OLD_SECRET" | jq '{data: .data.data}')
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X POST \
+      "${VAULT_ADDR}/v1/secret/data/truenas/${NAME}" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$NEW_PAYLOAD" > /dev/null; then
+    warn "Failed to write secret/truenas/${NAME}; leaving legacy entry in place."
+    TRUENAS_IP=""
+    TRUENAS_API_KEY=""
+    return 0
+  fi
+
+  # Remove the legacy Vault entry (metadata delete removes all versions).
+  curl -sk --connect-timeout 5 --max-time 10 -X DELETE \
+    "${VAULT_ADDR}/v1/secret/metadata/truenas" \
+    -H "X-Vault-Token: $ROOT_TOKEN" > /dev/null 2>&1 || true
+
+  # Rewrite cluster-info.json: replace singleton with a map entry.
+  local UPDATED
+  UPDATED=$(jq \
+    --arg name "$NAME" \
+    --arg ip "$OLD_IP" \
+    --arg ts "$OLD_JOINED" \
+    '.truenas = {($name): {ip: $ip, joined_at: $ts}}' \
+    "$CLUSTER_INFO_FILE")
+  echo "$UPDATED" > "$CLUSTER_INFO_FILE"
+
+  success "Migrated legacy TrueNAS entry to key: $NAME"
+  echo
+
+  # Reset globals so the main flow picks fresh values.
+  TRUENAS_IP=""
+  TRUENAS_API_KEY=""
+}
+
+# selectOrAddTrueNAS - Prompt the user to pick an existing TrueNAS entry
+# from cluster-info.json, or choose to add a new one.
+#
+# Sets globals:
+#   TRUENAS_NAME   - the hostname key (empty when adding new)
+#   TRUENAS_IP     - the stored IP (empty when adding new)
+#   TRUENAS_IS_NEW - "true" when the user is adding a new NAS
+function selectOrAddTrueNAS() {
+  local ENTRIES
+  ENTRIES=$(jq -r '(.truenas // {}) | keys[]?' "$CLUSTER_INFO_FILE" 2>/dev/null)
+
+  if [ -z "$ENTRIES" ]; then
+    info "No TrueNAS servers configured yet — adding a new one."
+    TRUENAS_NAME=""
+    TRUENAS_IP=""
+    TRUENAS_IS_NEW=true
+    return 0
+  fi
+
+  echo
+  info "Known TrueNAS servers:"
+  local i=0
+  local -a NAME_ARR=()
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    i=$((i + 1))
+    NAME_ARR+=("$n")
+    local EIP EJOINED
+    EIP=$(jq -r --arg n "$n" '.truenas[$n].ip // "?"' "$CLUSTER_INFO_FILE")
+    EJOINED=$(jq -r --arg n "$n" '.truenas[$n].joined_at // "?"' "$CLUSTER_INFO_FILE")
+    info "  $i) $n — $EIP (joined $EJOINED)"
+  done <<< "$ENTRIES"
+  local ADD_IDX=$((i + 1))
+  info "  $ADD_IDX) Add a new TrueNAS server"
+  echo
+
+  local CHOICE
+  question "Select [1-$ADD_IDX]: "
+  read -r CHOICE
+
+  if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "$ADD_IDX" ]; then
+    error "Invalid selection."
+    return 1
+  fi
+
+  if [ "$CHOICE" -eq "$ADD_IDX" ]; then
+    TRUENAS_NAME=""
+    TRUENAS_IP=""
+    TRUENAS_IS_NEW=true
+  else
+    TRUENAS_NAME="${NAME_ARR[$((CHOICE - 1))]}"
+    TRUENAS_IP=$(jq -r --arg n "$TRUENAS_NAME" '.truenas[$n].ip // empty' "$CLUSTER_INFO_FILE")
+    TRUENAS_IS_NEW=false
+    info "Selected: $TRUENAS_NAME ($TRUENAS_IP)"
+  fi
 }
 
 # configureTrueNASProfileShare - Configure SMB share for user profiles
@@ -570,17 +787,28 @@ function configureTrueNASProfileShare() {
   return 0
 }
 
-# saveTrueNASConfig - Save TrueNAS connection info to cluster-info.json
+# saveTrueNASConfig - Upsert a TrueNAS entry in cluster-info.json under
+# .truenas[<name>].
+#
+# Arguments: $1 - hostname key (required)
+# Globals read: TRUENAS_IP
 function saveTrueNASConfig() {
+  local NAME="$1"
+  if [ -z "$NAME" ]; then
+    warn "saveTrueNASConfig called without a name — skipping."
+    return 1
+  fi
+
   doing "Saving TrueNAS configuration to cluster-info.json..."
 
   local UPDATED
   UPDATED=$(jq \
+    --arg name "$NAME" \
     --arg ip "$TRUENAS_IP" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '.truenas = {ip: $ip, joined_at: $ts}' \
+    '.truenas = ((.truenas // {}) + {($name): {ip: $ip, joined_at: $ts}})' \
     "$CLUSTER_INFO_FILE")
 
   echo "$UPDATED" > "$CLUSTER_INFO_FILE"
-  success "TrueNAS config saved to cluster-info.json"
+  success "TrueNAS config saved: .truenas[$NAME]"
 }
