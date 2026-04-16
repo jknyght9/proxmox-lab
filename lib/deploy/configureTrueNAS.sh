@@ -232,17 +232,17 @@ EOF
   local AD_REALM_LOWER
   AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
 
-  # Check current AD status
+  # Check current AD status (TrueNAS SCALE 25.10+ /directoryservices API)
   doing "Checking if TrueNAS is already domain-joined..."
   local AD_CONFIG
-  AD_CONFIG=$(truenasAPI GET /activedirectory) || AD_CONFIG="{}"
+  AD_CONFIG=$(truenasAPI GET /directoryservices) || AD_CONFIG="{}"
 
   local AD_ENABLED
-  AD_ENABLED=$(echo "$AD_CONFIG" | jq -r '.enable // false')
+  AD_ENABLED=$(echo "$AD_CONFIG" | jq -r 'if (.service_type == "ACTIVEDIRECTORY" and .enable == true) then "true" else "false" end')
 
   if [ "$AD_ENABLED" = "true" ]; then
     local CURRENT_DOMAIN
-    CURRENT_DOMAIN=$(echo "$AD_CONFIG" | jq -r '.domainname // "unknown"')
+    CURRENT_DOMAIN=$(echo "$AD_CONFIG" | jq -r '.configuration.domain // .kerberos_realm // "unknown"')
     info "TrueNAS is already joined to: $CURRENT_DOMAIN"
     question "Re-join to $AD_REALM_LOWER? (y/N): "
     read -r REJOIN
@@ -255,13 +255,15 @@ EOF
       return 0
     fi
 
-    # Leave current domain and clear Kerberos principal/realm
-    # The principal must be cleared, otherwise re-joining with a password fails:
-    # "Simultaneous keytab and password authentication are not permitted"
+    # Leave current domain via /directoryservices/leave (uses KERBEROS_USER
+    # credential; the old /activedirectory "clear kerberos_principal" quirk is
+    # no longer relevant under the new API).
     doing "Leaving current AD domain..."
+    local LEAVE_PAYLOAD
+    LEAVE_PAYLOAD=$(jq -n --arg pw "$DOMAIN_JOIN_PASSWORD" \
+      '{credential: {credential_type: "KERBEROS_USER", username: "domain-join-svc", password: $pw}}')
     local LEAVE_JOB
-    LEAVE_JOB=$(truenasAPI PUT /activedirectory \
-      "{\"domainname\": \"${CURRENT_DOMAIN}\", \"enable\": false, \"kerberos_principal\": \"\"}") || true
+    LEAVE_JOB=$(truenasAPI POST /directoryservices/leave "$LEAVE_PAYLOAD") || true
 
     if [[ "$LEAVE_JOB" =~ ^[0-9]+$ ]]; then
       doing "  Waiting for domain leave to complete..."
@@ -273,7 +275,16 @@ EOF
         sleep 3
         LEAVE_WAITED=$((LEAVE_WAITED + 3))
       done
+      if [ "$LEAVE_STATE" = "FAILED" ]; then
+        local LEAVE_ERR
+        LEAVE_ERR=$(truenasAPI GET "/core/get_jobs?id=${LEAVE_JOB}" | jq -r '.[0].error // "unknown"')
+        warn "Leave job reported FAILED: $LEAVE_ERR"
+        warn "Continuing anyway — re-join may recover."
+      fi
     else
+      local LEAVE_ERR_MSG
+      LEAVE_ERR_MSG=$(echo "$LEAVE_JOB" | jq -r '.message // .error // "(no message)"' 2>/dev/null)
+      warn "Leave request did not return a job ID: $LEAVE_ERR_MSG"
       sleep 5
     fi
   fi
@@ -307,31 +318,44 @@ EOF
     fi
   fi
 
-  # Join AD domain — the PUT returns a job ID, not the config object
-  # Fetch the system hostname so the machine registers with its real name in AD
+  # Join AD domain — PUT /directoryservices returns a job ID.
+  # configuration.hostname is required (minLength 1), so fetch the system hostname.
   local TRUENAS_HOSTNAME
   TRUENAS_HOSTNAME=$(truenasAPI GET /network/configuration | jq -r '.hostname // empty') || TRUENAS_HOSTNAME=""
 
-  doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
-  if [ -n "$TRUENAS_HOSTNAME" ]; then
-    info "  NetBIOS name: $TRUENAS_HOSTNAME"
+  if [ -z "$TRUENAS_HOSTNAME" ]; then
+    error "Could not read TrueNAS system hostname — required for AD registration."
+    return 1
   fi
+
+  doing "Joining TrueNAS to AD domain: $AD_REALM_LOWER..."
+  info "  NetBIOS / AD computer name: $(echo "$TRUENAS_HOSTNAME" | tr '[:lower:]' '[:upper:]')"
   info "  This may take 30-60 seconds..."
 
   local JOIN_PAYLOAD
   JOIN_PAYLOAD=$(jq -n \
-    --arg domain "$AD_REALM_LOWER" \
-    --arg bindpw "$DOMAIN_JOIN_PASSWORD" \
-    --arg netbios "${TRUENAS_HOSTNAME:-}" \
+    --arg realm "$AD_REALM" \
+    --arg dns_domain "$AD_REALM_LOWER" \
+    --arg pw "$DOMAIN_JOIN_PASSWORD" \
+    --arg host "$TRUENAS_HOSTNAME" \
     '{
-      domainname: $domain,
-      bindname: "domain-join-svc",
-      bindpw: $bindpw,
+      service_type: "ACTIVEDIRECTORY",
+      credential: {
+        credential_type: "KERBEROS_USER",
+        username: "domain-join-svc",
+        password: $pw
+      },
+      kerberos_realm: $realm,
+      configuration: {
+        service_type: "ACTIVEDIRECTORY",
+        hostname: ($host | ascii_upcase),
+        domain: $dns_domain
+      },
       enable: true
-    } + (if $netbios != "" then {netbiosname: ($netbios | ascii_upcase)} else {} end)')
+    }')
 
   local JOB_ID
-  JOB_ID=$(truenasAPI PUT /activedirectory "$JOIN_PAYLOAD") || true
+  JOB_ID=$(truenasAPI PUT /directoryservices "$JOIN_PAYLOAD") || true
 
   # Response is a bare job ID number
   if ! [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then
@@ -395,15 +419,14 @@ EOF
     warn "The join may still be in progress (job ID: $JOB_ID)"
   fi
 
-  # Verify join
+  # Verify join (TrueNAS 25.10+ /directoryservices)
   doing "Verifying AD join..."
   local DOMAIN_INFO
-  DOMAIN_INFO=$(truenasAPI GET /activedirectory) || DOMAIN_INFO="{}"
+  DOMAIN_INFO=$(truenasAPI GET /directoryservices) || DOMAIN_INFO="{}"
 
-  local JOINED_DOMAIN
-  JOINED_DOMAIN=$(echo "$DOMAIN_INFO" | jq -r '.domainname // "unknown"')
-  local JOINED_ENABLED
-  JOINED_ENABLED=$(echo "$DOMAIN_INFO" | jq -r '.enable // false')
+  local JOINED_DOMAIN JOINED_ENABLED
+  JOINED_DOMAIN=$(echo "$DOMAIN_INFO" | jq -r '.configuration.domain // .kerberos_realm // "unknown"')
+  JOINED_ENABLED=$(echo "$DOMAIN_INFO" | jq -r 'if (.service_type == "ACTIVEDIRECTORY" and .enable == true) then "true" else "false" end')
 
   if [ "$JOINED_ENABLED" = "true" ]; then
     success "AD join verified: $JOINED_DOMAIN"
