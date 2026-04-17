@@ -30,7 +30,8 @@ Requires: Nomad cluster running, Traefik for ingress (recommended)
 EOF
 
   ensureClusterContext || return 1
-  ensureCriticalServices || return 1
+  # DNS is not required for Vault — it runs on Nomad with static IPs.
+  # Skip ensureCriticalServices here; only Nomad is needed.
   ensureNomadCluster || return 1
 
   # Get first Nomad node IP from hosts.json
@@ -79,7 +80,7 @@ REMOTE_SCRIPT
   fi
 
   # Deploy Vault using the generic Nomad job deployer
-  if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "$VAULT_DIR" "-var vault_tls_enabled=${VAULT_TLS_VAR}"; then
+  if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "$VAULT_DIR" "-var vault_tls_enabled=${VAULT_TLS_VAR} -var dns_postfix=${DNS_POSTFIX}"; then
     return 1
   fi
 
@@ -243,8 +244,14 @@ REMOTE_SCRIPT
     fi
   fi
 
-  # Update DNS records for vault
-  updateDNSRecords
+  # Update DNS records for vault (skip if DNS not deployed yet)
+  local DNS_IP
+  DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+  if [ -n "$DNS_IP" ] && [ "$DNS_IP" != "null" ] && curl -s --connect-timeout 3 "http://$DNS_IP/admin/" >/dev/null 2>&1; then
+    updateDNSRecords
+  else
+    info "Skipping DNS record update — Pi-hole not available yet"
+  fi
 
   displayDeploymentSummary
 
@@ -291,7 +298,7 @@ function deployVaultWithCA() {
 
     if [ "$cur_proto" != "https" ]; then
       info "Listener cert present but Vault is running without TLS - redeploying with TLS enabled..."
-      if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "" "-var vault_tls_enabled=true"; then
+      if ! deployNomadJob "vault" "nomad/jobs/vault.nomad.hcl" "" "-var vault_tls_enabled=true -var dns_postfix=${DNS_POSTFIX}"; then
         error "Failed to redeploy Vault with TLS enabled"
         return 1
       fi
@@ -363,6 +370,25 @@ function deployVaultWithCA() {
   # Sync local secrets (service passwords + SSH keys) into Vault KV
   # so Vault becomes the single source of truth for all credentials.
   syncSecretsToVault || warn "Failed to sync secrets to Vault — run manually later"
+
+  # Write Vault credentials to a separate auto-loaded tfvars file.
+  # Terraform auto-loads *.auto.tfvars — keeps Vault config separate from
+  # the bootstrap-generated terraform.tfvars.
+  if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
+    local VAULT_ADDR_VAL VAULT_TOKEN_VAL
+    VAULT_ADDR_VAL=$(jq -r '.vault_address // ""' "$VAULT_CREDENTIALS_FILE")
+    VAULT_TOKEN_VAL=$(jq -r '.root_token // ""' "$VAULT_CREDENTIALS_FILE")
+    if [ -n "$VAULT_ADDR_VAL" ] && [ -n "$VAULT_TOKEN_VAL" ]; then
+      doing "Writing terraform/vault.auto.tfvars..."
+      cat > "$SCRIPT_DIR/terraform/vault.auto.tfvars" <<VEOF
+# Auto-generated after Vault deployment — do not edit manually
+vault_address = "${VAULT_ADDR_VAL}"
+vault_token   = "${VAULT_TOKEN_VAL}"
+VEOF
+      chmod 600 "$SCRIPT_DIR/terraform/vault.auto.tfvars"
+      success "terraform/vault.auto.tfvars written"
+    fi
+  fi
 
   success "Vault + PKI/ACME deployment complete!"
 }

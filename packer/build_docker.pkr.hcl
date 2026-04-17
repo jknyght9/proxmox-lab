@@ -69,9 +69,8 @@ build {
       "sudo cloud-init clean --logs || true",
       "sudo rm -rf /var/lib/cloud/instance /var/lib/cloud/instances",
       "sudo rm -rf /var/lib/cloud/seed/nocloud",
-      "sudo bash -lc 'cat >/etc/netplan/01-netcfg.yaml <<EOF\nnetwork:\n  version: 2\n  ethernets:\n    all-en:\n      match:\n        name: \"en*\"\n      dhcp4: true\nEOF'",
-      "sudo chmod 600 /etc/netplan/01-netcfg.yaml",
-      "sudo netplan generate"
+      "sudo rm -f /etc/netplan/*.yaml",
+      "echo '[+] Netplan cleared — Proxmox cloud-init handles network config at deploy time'"
     ]
   }
 

@@ -2,13 +2,15 @@
 #
 # Proxmox Lab — Interactive setup menu
 #
-# Driven entirely by bootstrap.yml. Option 1 reads the YAML, discovers the
-# Proxmox cluster, creates API credentials, generates terraform.tfvars and
-# packer.auto.pkrvars.hcl, then deploys the full stack.
+# Driven entirely by bootstrap.yml. Discovers the Proxmox cluster,
+# creates API credentials, generates config files, and deploys the
+# full stack using Packer + Terraform + Nomad.
 #
 # Usage:
-#   ./setup.sh           # interactive menu
-#   ./setup.sh --dev     # interactive menu with developer/beta options
+#   ./setup.sh               # interactive menu
+#   ./setup.sh --dev         # includes developer tools
+#   ./setup.sh --debug       # verbose output (show all command output)
+#   ./setup.sh --dev --debug # both
 
 set -euo pipefail
 export TERM=xterm
@@ -68,9 +70,12 @@ source "$SCRIPT_DIR/lib/deploy/vm/deployNomad.sh"
 # Argument parsing
 # -----------------------------------------------------------------------------
 DEV_MODE=false
+DEBUG_MODE=false
 for arg in "$@"; do
-  [[ "$arg" == "--dev" ]] && DEV_MODE=true
+  [[ "$arg" == "--dev" ]]   && DEV_MODE=true
+  [[ "$arg" == "--debug" ]] && DEBUG_MODE=true
 done
+export DEBUG_MODE
 
 # -----------------------------------------------------------------------------
 # Global state
@@ -94,16 +99,15 @@ TEMPLATE_STORAGE=""
 NETWORK_BRIDGE=""
 
 # Deployment phase tracking for rollback
-# 0=not started, 1=LXC deployed, 2=Packer built, 3=VMs deployed
 DEPLOY_PHASE=0
 
 # -----------------------------------------------------------------------------
-# Main flow: full installation
+# Main flow: deploy all services
 # -----------------------------------------------------------------------------
-function runEverything() {
+function deployAll() {
   if [ ! -f "$SCRIPT_DIR/bootstrap.yml" ]; then
     error "bootstrap.yml not found."
-    info "Copy bootstrap.yml.example to bootstrap.yml and edit it before running option 1."
+    info "Copy bootstrap.yml.example to bootstrap.yml and edit it first."
     return 1
   fi
 
@@ -115,105 +119,142 @@ function runEverything() {
   # generate terraform.tfvars and packer.auto.pkrvars.hcl.
   runBootstrap || return 1
 
+  # Set PROXMOX_HOST from bootstrap (distributeSSHKeys and downstream use it)
+  PROXMOX_HOST="$PROXMOX_IP"
+
   # Distribute SSH keys to all discovered nodes
   distributeSSHKeys
 
-  # Deploy services (LXC, Packer, VMs)
+  # Deploy all services (DNS, Packer templates, Nomad, Vault, Kasm)
   deployAllServices
 
-  # Setup Nomad cluster
-  setupNomadCluster
-
   displayDeploymentSummary
+}
+
+# Rebuild Packer templates submenu
+function rebuildTemplates() {
+  echo
+  echo -e "  ${C_BOLD}Rebuild Packer Templates${C_RESET}"
+  echo
+  echo "  a) All templates (base + service)"
+  echo "  b) Base only (Ubuntu, Fedora, Debian)"
+  echo "  s) Service only (Docker, Nomad)"
+  echo "  q) Cancel"
+  echo
+  read -rp "$(question "Select: ")" tmpl_choice
+
+  case $tmpl_choice in
+    a|A)
+      doing "Rebuilding all Packer templates..."
+      docker compose build packer >/dev/null 2>&1
+      docker compose run --rm packer init .
+      docker compose run --rm packer build -only='base-*.*' .
+      docker compose run --rm packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
+      success "All templates rebuilt"
+      ;;
+    b|B)
+      doing "Rebuilding base templates..."
+      docker compose build packer >/dev/null 2>&1
+      docker compose run --rm packer init .
+      docker compose run --rm packer build -only='base-*.*' .
+      success "Base templates rebuilt"
+      ;;
+    s|S)
+      doing "Rebuilding service templates..."
+      docker compose build packer >/dev/null 2>&1
+      docker compose run --rm packer init .
+      docker compose run --rm packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
+      success "Service templates rebuilt"
+      ;;
+    *) info "Cancelled";;
+  esac
 }
 
 # -----------------------------------------------------------------------------
 # Menu
 # -----------------------------------------------------------------------------
 function showMenu() {
+  echo -e "${C_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
   echo
-  echo "=========================================="
-  echo "  Proxmox Lab - Main Menu"
-  echo "=========================================="
+  echo -e "  ${C_BOLD}Setup${C_RESET}"
+  echo "    1) Deploy all services"
   echo
-  echo "  1) New installation (reads bootstrap.yml)"
-  echo "  2) Deploy all services (DNS, CA, Nomad, Kasm)"
-  echo "  3) Deploy critical services only (DNS, CA)"
-  echo "  4) Deploy Traefik load balancer (on Nomad)"
-  echo "  5) Deploy Vault secrets manager (on Nomad)"
-  echo "  6) Deploy Authentik SSO (on Nomad)"
-  echo "  7) Deploy Uptime Kuma monitoring (on Nomad)"
-  echo "  8) Rollback service deployment (Terraform)"
-  echo "  9) Purge service deployment (Emergency)"
-  echo " 10) Purge entire deployment"
-  echo "  0) Exit"
+  echo -e "  ${C_BOLD}Core Services${C_RESET}"
+  echo "    2) DNS (Pi-hole cluster)"
+  echo "    3) Vault (secrets + PKI)"
+  echo "    4) Traefik (load balancer)"
+  echo
+  echo -e "  ${C_BOLD}Authentication${C_RESET}"
+  echo "    5) Authentik (SSO / OIDC)"
+  echo "    6) Samba AD (domain controllers)"
+  echo "    7) LDAP Account Manager"
+  echo
+  echo -e "  ${C_BOLD}Monitoring${C_RESET}"
+  echo "    8) Uptime Kuma"
+  echo "    9) Automated backups"
+  echo
+  echo -e "  ${C_BOLD}Management${C_RESET}"
+  echo "   10) Rollback deployment"
+  echo "   11) Purge deployment"
+  echo "    0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
     echo
-    echo "------------------------------------------"
-    echo "  Beta Features (experimental)"
-    echo "------------------------------------------"
+    echo -e "  ${C_DIM}─── Developer Tools ──────────────────────${C_RESET}"
     echo
-    echo " b1) Deploy Samba AD Domain Controllers (on Nomad)"
-    echo " b2) Configure Authentik AD Sync"
-    echo " b3) Configure automated backups (on Nomad)"
-    echo " b4) Deploy LDAP Account Manager (on Nomad)"
-    echo " b5) Deploy Vault with CA (PKI + ACME) [migration]"
-    echo
-    echo "------------------------------------------"
-    echo "  Developer Tools"
-    echo "------------------------------------------"
-    echo
-    echo " d1) Build DNS records"
-    echo " d2) Regenerate CA"
-    echo " d3) Update Proxmox root certificates"
-    echo " d4) Reset Proxmox API credentials"
-    echo " d5) Deploy Nomad only"
-    echo " d6) Deploy Kasm only"
-    echo " d7) Deploy Tailscale Subnet Router"
+    echo "   d1) Build DNS records"
+    echo "   d2) Rebuild Packer templates"
+    echo "   d3) Regenerate CA certificates"
+    echo "   d4) Update root certificates"
+    echo "   d5) Reset API credentials"
+    echo "   d6) Deploy Nomad only"
+    echo "   d7) Deploy Kasm only"
+    echo "   d8) Deploy Tailscale"
+    echo "   d9) Configure Authentik AD Sync"
   fi
   echo
 }
 
 header
 
+if [ "$DEBUG_MODE" = "true" ]; then
+  warn "Debug mode enabled — full command output will be shown"
+  echo
+fi
+
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-10, b1-b5, d1-d7]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d9]: ")" choice
   else
-    read -rp "$(question "Select an option [0-10]: ")" choice
+    read -rp "$(question "Select [0-11]: ")" choice
   fi
 
   case $choice in
-    1)  runEverything;;
-    2)  deployAllServices;;
-    3)  deployCriticalServicesOnly;;
-    4)  deployTraefikOnly;;
-    5)  deployVaultOnly;;
-    6)  deployAuthentikOnly;;
-    7)  deployUptimeKumaOnly;;
-    8)  rollbackManual;;
-    9)  purgeClusterResources;;
-    10) purgeDeployment;;
-
-    # Beta features (only available with --dev)
-    b1|B1) if [ "$DEV_MODE" = true ]; then deploySambaADOnly;            else error "Invalid option: $choice"; fi;;
-    b2|B2) if [ "$DEV_MODE" = true ]; then configureAuthentikADSyncOnly; else error "Invalid option: $choice"; fi;;
-    b3|B3) if [ "$DEV_MODE" = true ]; then deployBackupOnly;             else error "Invalid option: $choice"; fi;;
-    b4|B4) if [ "$DEV_MODE" = true ]; then deployLAMOnly;                else error "Invalid option: $choice"; fi;;
-    b5|B5) if [ "$DEV_MODE" = true ]; then deployVaultWithCA;            else error "Invalid option: $choice"; fi;;
+    1)  deployAll;;
+    2)  ensureBootstrapComplete && deployCriticalServicesOnly;;
+    3)  ensureBootstrapComplete && deployVaultWithCA;;
+    4)  ensureBootstrapComplete && deployTraefikOnly;;
+    5)  ensureBootstrapComplete && deployAuthentikOnly;;
+    6)  ensureBootstrapComplete && deploySambaADOnly;;
+    7)  ensureBootstrapComplete && deployLAMOnly;;
+    8)  ensureBootstrapComplete && deployUptimeKumaOnly;;
+    9)  ensureBootstrapComplete && deployBackupOnly;;
+    10) ensureBootstrapComplete && rollbackManual;;
+    11) purgeDeployment;;
 
     # Developer tools (only available with --dev)
-    d1|D1) if [ "$DEV_MODE" = true ]; then updateDNSRecords;          else error "Invalid option: $choice"; fi;;
-    d2|D2) if [ "$DEV_MODE" = true ]; then regenerateCA;              else error "Invalid option: $choice"; fi;;
-    d3|D3) if [ "$DEV_MODE" = true ]; then updateRootCertificates;    else error "Invalid option: $choice"; fi;;
-    d4|D4) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;   else error "Invalid option: $choice"; fi;;
-    d5|D5) if [ "$DEV_MODE" = true ]; then deployNomadOnly;           else error "Invalid option: $choice"; fi;;
-    d6|D6) if [ "$DEV_MODE" = true ]; then deployKasmOnly;            else error "Invalid option: $choice"; fi;;
-    d7|D7) if [ "$DEV_MODE" = true ]; then deployTailscaleOnly;       else error "Invalid option: $choice"; fi;;
+    d1|D1) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateDNSRecords;          else error "Invalid option"; fi;;
+    d2|D2) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                     else error "Invalid option"; fi;;
+    d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && regenerateCA;              else error "Invalid option"; fi;;
+    d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateRootCertificates;    else error "Invalid option"; fi;;
+    d5|D5) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                              else error "Invalid option"; fi;;
+    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployNomadOnly;           else error "Invalid option"; fi;;
+    d7|D7) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployKasmOnly;            else error "Invalid option"; fi;;
+    d8|D8) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployTailscaleOnly;       else error "Invalid option"; fi;;
+    d9|D9) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && configureAuthentikADSyncOnly; else error "Invalid option"; fi;;
 
-    0|q|Q) warn "Exiting..."; break;;
+    0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;
   esac
 
@@ -222,6 +263,6 @@ while true; do
     SKIP_PAUSE=false
   else
     echo
-    read -rp "Press Enter to continue..."
+    read -rp "  Press Enter to continue..."
   fi
 done

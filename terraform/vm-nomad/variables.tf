@@ -7,6 +7,12 @@ variable "proxmox_endpoint" {
   description = "Proxmox API endpoint URL"
 }
 
+variable "template_node" {
+  type        = string
+  description = "Proxmox node where the nomad-template (9002) lives"
+  default     = "pve01"
+}
+
 variable "proxmox_bridge" {
   type = string
 }
@@ -23,6 +29,12 @@ variable "ssh_admin_public_key_file" {
   description = "Path to admin public key for VM SSH"
 }
 
+variable "ssh_admin_private_key_file" {
+  type        = string
+  description = "Path to admin private key for VM SSH (used by remote-exec provisioners)"
+  default     = "/crypto/labadmin"
+}
+
 variable "nomad_datacenter" {
   type    = string
   default = "dc1"
@@ -36,6 +48,11 @@ variable "nomad_region" {
 variable "gluster_mount_path" {
   type    = string
   default = "/srv/gluster/nomad-data"
+}
+
+variable "gluster_volume_name" {
+  type    = string
+  default = "nomad-data"
 }
 
 variable "node_ip_map" {
@@ -56,10 +73,22 @@ variable "vm_storage" {
   default     = "local-lvm"
 }
 
+variable "network_gateway" {
+  type        = string
+  description = "Gateway IP for Nomad VMs (from bootstrap network.gateway)"
+}
+
+variable "network_cidr_bits" {
+  type        = string
+  description = "CIDR prefix length (e.g., 24)"
+  default     = "24"
+}
+
 variable "vm_configs" {
   type = map(object({
     vm_id          = number
     name           = string
+    ip             = string
     cores          = number
     memory         = number
     disk_size      = string
@@ -68,9 +97,9 @@ variable "vm_configs" {
     target_storage = string
   }))
   default = {
-    "nomad01" = { vm_id = 905, name = "nomad01", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
-    "nomad02" = { vm_id = 906, name = "nomad02", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve02", target_storage = "ceph-pool-01" }
-    "nomad03" = { vm_id = 907, name = "nomad03", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
+    "nomad01" = { vm_id = 905, name = "nomad01", ip = "10.1.50.114", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
+    "nomad02" = { vm_id = 906, name = "nomad02", ip = "10.1.50.115", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve02", target_storage = "ceph-pool-01" }
+    "nomad03" = { vm_id = 907, name = "nomad03", ip = "10.1.50.116", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve03", target_storage = "ceph-pool-01" }
   }
 }
 

@@ -151,25 +151,15 @@ EOF
     info "  Configured $hostname ($ip)"
   done
 
-  # Export for envsubst
-  export TAILSCALE_SUBNET
-
-  # Deploy using the generic Nomad job deployer
+  # Deploy using HCL2 variables
   doing "Deploying Tailscale system job..."
 
-  # Render template with environment variables
-  envsubst '${TAILSCALE_SUBNET}' < "nomad/jobs/tailscale.nomad.hcl" > "/tmp/tailscale-rendered.nomad.hcl"
+  scpToAdmin "nomad/jobs/tailscale.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/tailscale.nomad.hcl"
 
-  # Copy to Nomad node
-  scpToAdmin "/tmp/tailscale-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/tailscale.nomad.hcl"
-
-  # Run the job
-  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/tailscale.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run -var tailscale_subnet=${TAILSCALE_SUBNET} /tmp/tailscale.nomad.hcl"; then
     error "Failed to deploy Tailscale"
     return 1
   fi
-
-  rm -f "/tmp/tailscale-rendered.nomad.hcl"
 
   # Wait for containers to start
   doing "Waiting for Tailscale containers to start on all nodes..."

@@ -1,9 +1,16 @@
-# NOTE: This is a REFERENCE TEMPLATE. The actual job file is generated dynamically
-# by lib/deploy/nomadJob/deploySambaAD.sh with variable substitution.
+# Samba AD Domain Controller Nomad Job
 #
 # Uses ghcr.io/jknyght9/samba-ad-dc Docker image which supports both:
 # - JOIN=false: Provision new AD domain (DC01)
 # - JOIN=true: Join existing domain as replica (DC02)
+#
+# Deploy with: nomad job run -var ad_realm=EXAMPLE.LAN samba-dc.nomad.hcl
+
+variable "ad_realm" {
+  type        = string
+  description = "Active Directory realm (e.g., JDCLABS.LAN)"
+  default     = ""
+}
 
 job "samba-dc" {
   datacenters = ["dc1"]
@@ -72,10 +79,14 @@ job "samba-dc" {
 {{ with secret "secret/data/samba-ad" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-DOMAIN=${AD_REALM}
-DOMAINNAME=${AD_DOMAIN}
-HOSTIP=${NOMAD01_IP}
-DNSFORWARDER=${DNS_FORWARDER}
+{{ with secret "secret/data/config/cluster" }}
+DOMAIN={{ .Data.data.ad_realm }}
+DOMAINNAME={{ .Data.data.ad_domain }}
+DNSFORWARDER={{ .Data.data.dns_forwarder }}
+{{ end }}
+{{ with secret "secret/data/config/nomad-nodes" }}
+HOSTIP={{ .Data.data.nomad01_ip }}
+{{ end }}
 JOIN=false
 INSECURELDAP=true
 NOCOMPLEXITY=true
@@ -96,7 +107,7 @@ EOH
 
         tags = [
           "dc=primary",
-          "realm=${AD_REALM}",
+          "realm=${var.ad_realm}",
         ]
 
         check {
@@ -184,11 +195,15 @@ EOH
 {{ with secret "secret/data/samba-ad" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-DOMAIN=${AD_REALM}
-DOMAINNAME=${AD_DOMAIN}
-HOSTIP=${NOMAD02_IP}
-DNSFORWARDER=${NOMAD01_IP}
-DCIP=${NOMAD01_IP}
+{{ with secret "secret/data/config/cluster" }}
+DOMAIN={{ .Data.data.ad_realm }}
+DOMAINNAME={{ .Data.data.ad_domain }}
+{{ end }}
+{{ with secret "secret/data/config/nomad-nodes" }}
+HOSTIP={{ .Data.data.nomad02_ip }}
+DNSFORWARDER={{ .Data.data.nomad01_ip }}
+DCIP={{ .Data.data.nomad01_ip }}
+{{ end }}
 JOIN=true
 JOINSITE=Default-First-Site-Name
 INSECURELDAP=true
@@ -210,7 +225,7 @@ EOH
 
         tags = [
           "dc=replica",
-          "realm=${AD_REALM}",
+          "realm=${var.ad_realm}",
         ]
 
         check {

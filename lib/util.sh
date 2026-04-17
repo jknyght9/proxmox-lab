@@ -6,14 +6,60 @@ C_RED="\033[0;31m"
 C_GREEN="\033[0;32m"
 C_YELLOW="\033[1;33m"
 C_BLUE="\033[0;34m"
+C_CYAN="\033[0;36m"
+C_DIM="\033[2m"
+C_BOLD="\033[1m"
+
+# Debug mode — set via --debug flag in setup.sh
+DEBUG_MODE="${DEBUG_MODE:-false}"
+LOG_FILE="${LOG_FILE:-/tmp/proxmox-lab-$(date +%Y%m%d-%H%M%S).log}"
 
 # Functions for colorized output
 function info()         { echo -e "${C_BLUE}[+] $*${C_RESET}"; }
 function doing()        { echo -e "${C_BLUE}[>] $*${C_RESET}"; }
 function success()      { echo -e "${C_GREEN}[✓] $*${C_RESET}"; }
-function error()        { echo -e "${C_RED}[X] $*${C_RESET}"; }
+function error()        { echo -e "${C_RED}[✗] $*${C_RESET}"; }
 function warn()         { echo -e "${C_YELLOW}[!] $*${C_RESET}"; }
 function question()     { echo -e "  ${C_YELLOW}[?] $*${C_RESET}"; }
+
+# Run a command with a spinner (suppressed output unless --debug)
+# Usage: run_step "Description" command arg1 arg2 ...
+# In debug mode: shows full output. In normal mode: spinner + log to file.
+function run_step() {
+  local description="$1"
+  shift
+
+  if [ "$DEBUG_MODE" = "true" ]; then
+    doing "$description"
+    "$@"
+    local rc=$?
+    [ $rc -eq 0 ] && success "$description" || error "$description (exit $rc)"
+    return $rc
+  fi
+
+  # Normal mode: spinner with output captured to log file
+  printf "  ${C_CYAN}⟳${C_RESET} %s..." "$description"
+
+  "$@" >> "$LOG_FILE" 2>&1 &
+  local pid=$!
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local i=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r  ${C_CYAN}%s${C_RESET} %s..." "${spin:i++%${#spin}:1}" "$description"
+    sleep 0.1
+  done
+
+  wait "$pid"
+  local rc=$?
+
+  if [ $rc -eq 0 ]; then
+    printf "\r  ${C_GREEN}✓${C_RESET} %s\n" "$description"
+  else
+    printf "\r  ${C_RED}✗${C_RESET} %s ${C_DIM}(see %s)${C_RESET}\n" "$description" "$LOG_FILE"
+  fi
+  return $rc
+}
 
 # Check for required tools and Docker Engine
 function checkRequirements() {
@@ -57,14 +103,17 @@ function checkRequirements() {
 # Display a header banner
 function header() {
   clear
+  echo -e "${C_CYAN}"
   cat << "EOF"
    ___                                       __       _
   / _ \_ __ _____  ___ __ ___   _____  __   / /  __ _| |__
  / /_)/ '__/ _ \ \/ / '_ ` _ \ / _ \ \/ /  / /  / _` | '_ \
 / ___/| | | (_) >  <| | | | | | (_) >  <  / /__| (_| | |_) |
 \/    |_|  \___/_/\_\_| |_| |_|\___/_/\_\ \____/\__,_|_.__/
-
 EOF
+  echo -e "${C_RESET}"
+  echo -e "  ${C_DIM}Infrastructure-as-Code for Proxmox VE${C_RESET}"
+  echo
 }
 
 # SSH command wrapper with common options (simple command)

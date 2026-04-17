@@ -70,9 +70,6 @@ EOF
   fi
   success "Nomad template built"
 
-  # Migrate template disk to shared storage for multi-node cloning
-  migrateTemplateToSharedStorage 9002
-
   # ============================================
   # Deploy Nomad VMs
   # ============================================
@@ -102,168 +99,12 @@ EOF
   # Update DNS records with actual IPs
   updateDNSRecords
 
-  # ============================================
-  # Configure Nomad Cluster
-  # ============================================
-  cat <<EOF
-
-#############################################################################
-Configuring Nomad Cluster
-
-Setting up GlusterFS and verifying Nomad cluster formation.
-#############################################################################
-EOF
-  pressAnyKey
-
-  setupNomadCluster
+  # GlusterFS + Nomad cluster formation is handled by Terraform provisioners
+  # in terraform/vm-nomad/main.tf (remote-exec after VM creation)
 
   displayDeploymentSummary
 
   success "Nomad cluster deployment complete!"
-}
-
-function setupNomadCluster() {
-  local BRICK="$GLUSTER_BRICK/$GLUSTER_VOLUME"
-  local VOL="$GLUSTER_VOLUME"
-  local MOUNTPOINT="$NOMAD_DATA_DIR"
-
-  doing "Setting up Nomad cluster"
-  NODE_IPS=()
-  while IFS= read -r ip; do
-    [[ -n "$ip" ]] && NODE_IPS+=("$ip")
-  done < <(
-    jq -r '.external[] | select(.hostname | contains("nomad")) | .ip' hosts.json \
-    | sed 's:/.*$::'
-  )
-
-  if ((${#NODE_IPS[@]} < 1)); then
-    echo "No Nomad hosts found to configure."
-    return 1
-  fi
-
-  if ((${#NODE_IPS[@]} < 3)); then
-    warn "Expected 3 Nomad nodes, found ${#NODE_IPS[@]}. Some operations may fail."
-  fi
-
-  MGR="${NODE_IPS[0]}"
-  ND1="${NODE_IPS[1]:-$MGR}"
-  ND2="${NODE_IPS[2]:-$MGR}"
-
-  # Verify connectivity to all nodes first
-  doing "Verifying SSH connectivity to Nomad nodes..."
-  for ip in "${NODE_IPS[@]}"; do
-    if ! sshRunAdmin "$VM_USER" "$ip" "hostname" &>/dev/null; then
-      error "Cannot connect to $ip as $VM_USER"
-      return 1
-    fi
-    info "  Connected to $ip"
-  done
-
-  # Create brick directories on all nodes first
-  doing "Creating brick directories on all nodes..."
-  for ip in "${NODE_IPS[@]}"; do
-    sshRunAdmin "$VM_USER" "$ip" "sudo mkdir -p $BRICK && sudo mkdir -p $MOUNTPOINT"
-  done
-
-  # Probe peers for GlusterFS
-  for peer in "${NODE_IPS[@]}"; do
-    if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster pool list | awk '{print \$2}' | grep -qx '$peer'"; then
-      doing "Probing peer $peer"
-      sshRunAdmin "$VM_USER" "$MGR" "sudo gluster peer probe $peer"
-    else
-      info "$peer is already in pool"
-    fi
-  done
-
-  sleep 2
-
-  # Create and start GlusterFS volume
-  BRICKS="$MGR:$BRICK $ND1:$BRICK $ND2:$BRICK"
-  if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume info $VOL >/dev/null 2>&1"; then
-    doing "Creating volume $VOL"
-    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume create $VOL replica 3 $BRICKS force"
-  else
-    info "Volume $VOL exists"
-  fi
-
-  if ! sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume status $VOL >/dev/null 2>&1"; then
-    doing "Starting volume $VOL"
-    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume start $VOL"
-  fi
-
-  sleep 2
-
-  # Set recommended GlusterFS options
-  for opt in \
-    "cluster.quorum-type auto" \
-    "cluster.self-heal-daemon on" \
-    "cluster.data-self-heal on" \
-    "cluster.metadata-self-heal on" \
-    "cluster.entry-self-heal on" \
-    "performance.client-io-threads on" \
-    "network.ping-timeout 10"
-  do
-    sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume set $VOL $opt || true"
-  done
-
-  sleep 2
-
-  # Mount with fstab on all nodes
-  for ip in "${NODE_IPS[@]}"; do
-    doing "Mounting GlusterFS on $ip"
-    sshRunAdmin "$VM_USER" "$ip" "sudo mkdir -p '$MOUNTPOINT'"
-    # Add fstab entry if not present
-    sshRunAdmin "$VM_USER" "$ip" "grep -q ':/${VOL}' /etc/fstab || echo 'localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null"
-    # Mount if not already mounted
-    sshRunAdmin "$VM_USER" "$ip" "mountpoint -q '$MOUNTPOINT' || sudo mount -t glusterfs localhost:/${VOL} ${MOUNTPOINT}"
-  done
-
-  sleep 2
-
-  # Restart Nomad now that GlusterFS is mounted
-  doing "Starting Nomad on all nodes..."
-  for ip in "${NODE_IPS[@]}"; do
-    sshRunAdmin "$VM_USER" "$ip" "sudo systemctl restart nomad"
-  done
-
-  sleep 2
-
-  # Verify GlusterFS
-  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume info $VOL"
-  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume status $VOL"
-  sshRunAdmin "$VM_USER" "$MGR" "sudo gluster volume heal $VOL info || true"
-
-  success "GlusterFS '$VOL' up on: ${NODE_IPS[*]}"
-  info "Mounted at ${MOUNTPOINT} on each node."
-
-  # Wait for Nomad cluster to form (servers auto-join via cloud-init config)
-  doing "Waiting for Nomad cluster to form..."
-  sleep 10
-
-  local retries=30
-  local count=0
-  while [ $count -lt $retries ]; do
-    SERVER_COUNT=$(sshRunAdmin "$VM_USER" "$MGR" "nomad server members 2>/dev/null | grep -c alive || echo 0")
-    if [ "$SERVER_COUNT" -eq 3 ]; then
-      success "Nomad cluster formed with 3 server members"
-      break
-    fi
-    ((count++))
-    info "Waiting for Nomad servers to join... ($count/$retries) - $SERVER_COUNT/3 servers alive"
-    sleep 5
-  done
-
-  if [ $count -eq $retries ]; then
-    warn "Nomad cluster may not be fully formed. Please check manually."
-  fi
-
-  # Verify Nomad cluster health
-  doing "Verifying Nomad cluster health"
-  sshRunAdmin "$VM_USER" "$MGR" "nomad server members"
-  sshRunAdmin "$VM_USER" "$MGR" "nomad node status"
-
-  success "Nomad cluster setup complete!"
-  info "Access Nomad UI at: http://${MGR}:4646"
 }
 
 # ensureNomadCluster - Verify Nomad cluster is deployed and healthy

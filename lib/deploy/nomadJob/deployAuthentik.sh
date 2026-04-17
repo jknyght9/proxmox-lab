@@ -98,7 +98,12 @@ EOF
     # Create required directories
     # - postgres: PostgreSQL data (now handles all caching/sessions)
     # - data: Authentik data directory (media, templates, certs)
-    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,data/media}
+    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,data/media,branding}
+
+    # Create placeholder branding files if they don't exist (prevents Docker
+    # from creating them as directories when bind-mounting)
+    [ -f "$AUTHENTIK_DIR/branding/background.png" ] || sudo touch "$AUTHENTIK_DIR/branding/background.png"
+    [ -f "$AUTHENTIK_DIR/branding/logo.svg" ] || sudo touch "$AUTHENTIK_DIR/branding/logo.svg"
 
     # Set ownership - postgres runs as root, authentik runs as 1000
     sudo chown -R root:root "$AUTHENTIK_DIR/postgres"
@@ -217,24 +222,13 @@ REMOTE_SCRIPT
     return 1
   fi
 
-  # Render template with DNS_POSTFIX (no secrets in file)
-  export DNS_POSTFIX
-  envsubst '${DNS_POSTFIX}' < "nomad/jobs/authentik.nomad.hcl" > "/tmp/authentik-rendered.nomad.hcl"
+  # Copy job file and run with HCL2 variables
+  scpToAdmin "nomad/jobs/authentik.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.nomad.hcl"
 
-  # Copy to Nomad node
-  scpToAdmin "/tmp/authentik-rendered.nomad.hcl" "$VM_USER" "$NOMAD_IP" "/tmp/authentik.nomad.hcl"
-
-  # Clean up local rendered file
-  rm -f "/tmp/authentik-rendered.nomad.hcl"
-
-  # Run the job
-  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run /tmp/authentik.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD_IP" "nomad job run -var dns_postfix=${DNS_POSTFIX} /tmp/authentik.nomad.hcl"; then
     error "Failed to deploy authentik"
     return 1
   fi
-
-  # Clean up remote rendered file
-  sshRunAdmin "$VM_USER" "$NOMAD_IP" "rm -f /tmp/authentik.nomad.hcl"
 
   # Wait for deployment and show status
   doing "Waiting for authentik deployment..."

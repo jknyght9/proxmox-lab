@@ -1,3 +1,8 @@
+variable "dns_server" {
+  type        = string
+  description = "DNS server IP for Traefik container (Pi-hole VIP or primary node)"
+}
+
 job "traefik" {
   datacenters = ["dc1"]
   # System job runs on all nodes for HA (keepalived VIP handles failover)
@@ -30,7 +35,7 @@ job "traefik" {
       config {
         image        = "traefik:v3.6"
         network_mode = "host"
-        dns_servers  = ["${DNS_SERVER}"]
+        dns_servers  = ["${var.dns_server}"]
         args = [
           "--log.level=DEBUG",
           "--api=true",

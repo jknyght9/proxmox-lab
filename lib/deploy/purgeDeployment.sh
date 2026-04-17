@@ -36,7 +36,13 @@ EOF
   # Load cluster info for multi-node cleanup
   if ! ensureClusterContext; then
     warn "No cluster info found. Attempting to proceed with single node..."
-    if [ -z "$PROXMOX_HOST" ]; then
+    # Fall back to bootstrap.yml, then prompt
+    if [ -z "${PROXMOX_HOST:-}" ] && [ -f "${SCRIPT_DIR}/bootstrap.yml" ]; then
+      _bootstrap_init_vars
+      PROXMOX_HOST=$(yamlGet "proxmox.ip")
+      [ -n "$PROXMOX_HOST" ] && info "Using Proxmox host from bootstrap.yml: $PROXMOX_HOST"
+    fi
+    if [ -z "${PROXMOX_HOST:-}" ]; then
       read -rp "$(question "Enter Proxmox host IP: ")" PROXMOX_HOST
     fi
     CLUSTER_NODES=("$PROXMOX_HOST")
@@ -53,12 +59,20 @@ EOF
 
   # Step 2: Remove cloud-init snippets
   doing "Step 2/10: Removing cloud-init snippets..."
+  local snippet_storage=""
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    snippet_storage=$(jq -r '.storage.snippets // ""' "$CLUSTER_INFO_FILE")
+  fi
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
     info "  Cleaning snippets on $node..."
-    # Remove all cloud-init snippets (user-data, meta-data, network-config, vendor-data)
+    # Remove from local storage
     sshRun "$REMOTE_USER" "$ip" "rm -f /var/lib/vz/snippets/*.yml /var/lib/vz/snippets/*.yaml 2>/dev/null" || true
+    # Remove from shared/NFS snippet storage if configured (preserve base template snippets)
+    if [ -n "$snippet_storage" ] && [ "$snippet_storage" != "null" ]; then
+      sshRun "$REMOTE_USER" "$ip" "find /mnt/pve/${snippet_storage}/snippets/ -name '*.yml' -o -name '*.yaml' | grep -v 'cloud-init-agent' | xargs rm -f 2>/dev/null" || true
+    fi
   done
   success "Cloud-init snippets removed"
 
@@ -85,39 +99,21 @@ EOF
   done
   success "Root certificate removed"
 
-  # Step 5: Reset node DNS configuration to original values
+  # Step 5: Reset node DNS configuration to network gateway
   doing "Step 5/10: Resetting DNS configuration..."
+  local gateway_dns
+  gateway_dns=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  if [ -z "$gateway_dns" ] || [ "$gateway_dns" = "null" ]; then
+    gateway_dns="10.1.50.1"
+    warn "  No gateway found in cluster-info.json, using $gateway_dns"
+  fi
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
-
-    # Get original DNS from cluster-info.json (captured during initial detection)
-    local original_dns1="" original_dns2="" original_search=""
-    if [ -f "$CLUSTER_INFO_FILE" ]; then
-      original_dns1=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.dns1 // ""' "$CLUSTER_INFO_FILE")
-      original_dns2=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.dns2 // ""' "$CLUSTER_INFO_FILE")
-      original_search=$(jq -r --arg name "$node" '.nodes[] | select(.name == $name) | .dns.search // ""' "$CLUSTER_INFO_FILE")
-    fi
-
-    if [ -n "$original_dns1" ] && [ "$original_dns1" != "null" ]; then
-      info "  Restoring original DNS on $node: DNS1=$original_dns1 DNS2=$original_dns2"
-      local dns_cmd="pvesh set /nodes/$node/dns -dns1 '$original_dns1'"
-      [ -n "$original_dns2" ] && [ "$original_dns2" != "null" ] && dns_cmd+=" -dns2 '$original_dns2'"
-      [ -n "$original_search" ] && [ "$original_search" != "null" ] && dns_cmd+=" -search '$original_search'"
-      sshRun "$REMOTE_USER" "$ip" "$dns_cmd" 2>/dev/null || warn "  Failed to restore DNS via pvesh on $node"
-    else
-      # Fallback: use gateway if original DNS not captured
-      local fallback_dns
-      fallback_dns=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
-      if [ -n "$fallback_dns" ]; then
-        info "  No original DNS found for $node, using gateway: $fallback_dns"
-        sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 '$fallback_dns'" 2>/dev/null || true
-      else
-        warn "  No DNS configuration found for $node - skipping"
-      fi
-    fi
+    info "  Resetting DNS on $node to gateway: $gateway_dns"
+    sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 $gateway_dns" 2>/dev/null || warn "  Failed to reset DNS on $node"
   done
-  success "DNS configuration reset"
+  success "DNS configuration reset to gateway"
 
   # Step 6: Remove hashicorp API user and role
   doing "Step 6/10: Removing hashicorp API user and role..."
@@ -171,7 +167,7 @@ EOF
 
   # Step 8: Clean local files
   doing "Step 8/10: Cleaning local configuration files..."
-  rm -f hosts.json 2>/dev/null || true
+  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json 2>/dev/null || true
 
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
@@ -213,19 +209,9 @@ EOF
     fi
   fi
 
-  # Clean terraform state (only if docker is available)
-  if command -v docker &>/dev/null && docker info &>/dev/null; then
-    info "  Cleaning terraform state..."
-    local state_list
-    state_list=$(docker compose run --rm -T terraform state list 2>/dev/null) || true
-    if [ -n "$state_list" ]; then
-      echo "$state_list" | while read -r resource; do
-        docker compose run --rm -T terraform state rm "$resource" 2>/dev/null || true
-      done
-    fi
-  else
-    info "  Skipping terraform state cleanup (docker not available)"
-  fi
+  # Clean terraform state by removing state files directly
+  info "  Cleaning terraform state..."
+  rm -f terraform/terraform.tfstate terraform/terraform.tfstate.*.backup terraform/terraform.tfstate.backup 2>/dev/null || true
 
   success "Local files cleaned"
 

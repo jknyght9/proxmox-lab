@@ -89,9 +89,9 @@ EOF
     return 1
   fi
 
-  # Ensure LXC templates are available on all nodes
-  if ! ensureLXCTemplates; then
-    error "Cannot proceed without LXC templates on all nodes."
+  # Download LXC templates if not already present
+  if ! downloadLXCTemplates; then
+    error "Cannot proceed without LXC templates."
     return 1
   fi
 

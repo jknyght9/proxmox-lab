@@ -72,7 +72,7 @@ REMOTE_SCRIPT
   fi
 
   # Deploy Uptime Kuma using the generic Nomad job deployer
-  if ! deployNomadJob "uptime-kuma" "nomad/jobs/uptime-kuma.nomad.hcl" "$UPTIME_KUMA_DIR"; then
+  if ! deployNomadJob "uptime-kuma" "nomad/jobs/uptime-kuma.nomad.hcl" "$UPTIME_KUMA_DIR" "-var dns_postfix=${DNS_POSTFIX}"; then
     return 1
   fi
 

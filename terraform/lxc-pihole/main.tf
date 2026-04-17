@@ -85,7 +85,7 @@ resource "null_resource" "enable_nesting" {
   depends_on = [proxmox_virtual_environment_container.dns]
 
   triggers = {
-    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
   }
 
   connection {
@@ -97,9 +97,9 @@ resource "null_resource" "enable_nesting" {
 
   provisioner "remote-exec" {
     inline = [
-      "echo '[+] Enabling nesting feature for container ${proxmox_virtual_environment_container.dns[each.key].vmid}...'",
-      "pct set ${proxmox_virtual_environment_container.dns[each.key].vmid} -features nesting=1",
-      "pct reboot ${proxmox_virtual_environment_container.dns[each.key].vmid}",
+      "echo '[+] Enabling nesting feature for container ${proxmox_virtual_environment_container.dns[each.key].vm_id}...'",
+      "pct set ${proxmox_virtual_environment_container.dns[each.key].vm_id} -features nesting=1",
+      "pct reboot ${proxmox_virtual_environment_container.dns[each.key].vm_id}",
       "sleep 5",
       "echo '[+] Nesting enabled and container rebooted'"
     ]
@@ -112,7 +112,7 @@ resource "null_resource" "direct_provision" {
   depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
 
   triggers = {
-    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
   }
 
   connection {
@@ -377,25 +377,25 @@ resource "null_resource" "sdn_provision" {
   depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
 
   triggers = {
-    vmid = proxmox_virtual_environment_container.dns[each.key].vmid
+    vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
   }
 
   provisioner "local-exec" {
     command = <<-EOT
       # Wait for container to be fully started and running
-      echo "[+] Waiting for container ${proxmox_virtual_environment_container.dns[each.key].vmid} to be running..."
+      echo "[+] Waiting for container ${proxmox_virtual_environment_container.dns[each.key].vm_id} to be running..."
       for i in $(seq 1 30); do
         STATUS=$(ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-          "pct status ${proxmox_virtual_environment_container.dns[each.key].vmid} 2>/dev/null | grep -oE 'running|stopped'" || echo "unknown")
+          "pct status ${proxmox_virtual_environment_container.dns[each.key].vm_id} 2>/dev/null | grep -oE 'running|stopped'" || echo "unknown")
         if [ "$STATUS" = "running" ]; then
-          echo "[+] Container ${proxmox_virtual_environment_container.dns[each.key].vmid} is running"
+          echo "[+] Container ${proxmox_virtual_environment_container.dns[each.key].vm_id} is running"
           break
         fi
         echo "  Waiting... (attempt $i/30, status: $STATUS)"
         if [ "$STATUS" = "stopped" ]; then
-          echo "[+] Starting container ${proxmox_virtual_environment_container.dns[each.key].vmid}..."
+          echo "[+] Starting container ${proxmox_virtual_environment_container.dns[each.key].vm_id}..."
           ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-            "pct start ${proxmox_virtual_environment_container.dns[each.key].vmid}" || true
+            "pct start ${proxmox_virtual_environment_container.dns[each.key].vm_id}" || true
         fi
         sleep 5
       done
@@ -408,7 +408,7 @@ UNBOUNDCONF
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/unbound-${each.key}.conf root@${each.value.ssh_host}:/tmp/unbound-${each.key}.conf
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=30 root@${each.value.ssh_host} \
-        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/unbound-${each.key}.conf /tmp/pi-hole-unbound.conf"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vm_id} /tmp/unbound-${each.key}.conf /tmp/pi-hole-unbound.conf"
 
       # Create install script on Proxmox host
       cat > /tmp/install-pihole-${each.key}.sh <<'INSTALLSCRIPT'
@@ -481,7 +481,7 @@ INSTALLSCRIPT
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/install-pihole-${each.key}.sh root@${each.value.ssh_host}:/tmp/install-pihole-${each.key}.sh
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no -o ConnectTimeout=300 root@${each.value.ssh_host} \
-        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/install-pihole-${each.key}.sh /tmp/install-pihole.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vmid} -- bash /tmp/install-pihole.sh"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vm_id} /tmp/install-pihole-${each.key}.sh /tmp/install-pihole.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vm_id} -- bash /tmp/install-pihole.sh"
 
       echo "[OK] Pi-hole installed on ${each.key}"
     EOT
@@ -665,7 +665,7 @@ resource "null_resource" "keepalived_setup" {
   depends_on = [null_resource.direct_provision, null_resource.nebula_sync_setup]
 
   triggers = {
-    vmid           = proxmox_virtual_environment_container.dns[each.key].vmid
+    vmid           = proxmox_virtual_environment_container.dns[each.key].vm_id
     ha_vip_address = var.ha_vip_address
   }
 
@@ -786,7 +786,7 @@ resource "null_resource" "sdn_keepalived_setup" {
   depends_on = [null_resource.sdn_provision, null_resource.sdn_nebula_sync_setup]
 
   triggers = {
-    vmid           = proxmox_virtual_environment_container.dns[each.key].vmid
+    vmid           = proxmox_virtual_environment_container.dns[each.key].vm_id
     ha_vip_address = var.ha_vip_address
   }
 
@@ -886,7 +886,7 @@ KEEPSCRIPT
       scp -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no /tmp/keepalived-${each.key}.sh root@${each.value.ssh_host}:/tmp/keepalived-${each.key}.sh
 
       ssh -i ${var.ssh_enterprise_private_key_file} -o StrictHostKeyChecking=no root@${each.value.ssh_host} \
-        "pct push ${proxmox_virtual_environment_container.dns[each.key].vmid} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vmid} -- bash /tmp/keepalived-setup.sh"
+        "pct push ${proxmox_virtual_environment_container.dns[each.key].vm_id} /tmp/keepalived-${each.key}.sh /tmp/keepalived-setup.sh && pct exec ${proxmox_virtual_environment_container.dns[each.key].vm_id} -- bash /tmp/keepalived-setup.sh"
     EOT
   }
 }

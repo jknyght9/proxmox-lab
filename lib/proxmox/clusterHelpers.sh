@@ -73,6 +73,23 @@ EOF
   return 0
 }
 
+# ensureBootstrapComplete - Verify bootstrap has been run before allowing operations
+#
+# Checks that critical bootstrap-generated files exist. Without these,
+# no deployment or management operation can succeed.
+#
+# Globals read: CLUSTER_INFO_FILE, SCRIPT_DIR
+# Arguments: None
+# Returns: 0 if bootstrap complete, 1 if not
+function ensureBootstrapComplete() {
+  if [ ! -f "$SCRIPT_DIR/.bootstrap-complete" ]; then
+    error "Bootstrap has not completed successfully. Select option 1 (Deploy all services) first."
+    info "This reads bootstrap.yml, discovers your cluster, and generates all configuration files."
+    return 1
+  fi
+  return 0
+}
+
 # ensureClusterContext - Load cluster configuration from cluster-info.json
 #
 # Loads cluster node information and sets PROXMOX_HOST if not already set.
@@ -85,7 +102,7 @@ EOF
 function ensureClusterContext() {
   if [ -f "$CLUSTER_INFO_FILE" ]; then
     loadClusterInfo
-    if [ -z "$PROXMOX_HOST" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    if [ -z "${PROXMOX_HOST:-}" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
       PROXMOX_HOST="${CLUSTER_NODE_IPS[0]}"
     fi
     return 0

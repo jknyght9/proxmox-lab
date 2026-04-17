@@ -1,7 +1,27 @@
 locals {
   proxmox_api_host = regex("^https?://([^:/]+)", var.proxmox_endpoint)[0]
-  nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.name}.${var.dns_postfix}\""])
+  # Use IPs for retry_join — DNS names aren't available at boot time
+  nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.ip}\""])
   sorted_vm_keys   = sort(keys(var.vm_configs))
+
+  # GlusterFS configuration
+  gluster_brick  = "/data/gluster/${var.gluster_volume_name}"
+  gluster_volume = var.gluster_volume_name
+
+  # Static IPs — known from vm_configs, no guest agent discovery needed
+  vm_ips = { for k, v in var.vm_configs : k => v.ip }
+  master_key  = local.sorted_vm_keys[0]
+  master_ip   = local.vm_ips[local.master_key]
+  all_ips     = [for k in local.sorted_vm_keys : local.vm_ips[k]]
+
+  # Rendered Traefik authentik middleware config
+  traefik_authentik_yml = templatefile("${path.module}/templates/traefik-authentik.yml.tpl", {
+    dns_postfix = var.dns_postfix
+    nomad01_ip  = local.vm_ips[local.sorted_vm_keys[0]]
+    nomad_ips   = local.all_ips
+    dns01_ip    = var.dns_primary_ip
+  })
+  peer_ips    = [for k in local.sorted_vm_keys : local.vm_ips[k] if k != local.master_key]
 }
 
 # Render cloud-init user data templates
@@ -62,7 +82,8 @@ resource "proxmox_virtual_environment_vm" "nomad" {
   tags      = ["terraform", "infra", "vm", "nomad"]
 
   clone {
-    vm_id = 9002  # nomad-template
+    vm_id     = 9002  # nomad-template (on primary node)
+    node_name = var.template_node
   }
 
   agent {
@@ -96,15 +117,215 @@ resource "proxmox_virtual_environment_vm" "nomad" {
     }
     ip_config {
       ipv4 {
-        address = "dhcp"
+        address = "${each.value.ip}/${var.network_cidr_bits}"
+        gateway = var.network_gateway
       }
+    }
+    dns {
+      # Use gateway DNS for initial provisioning — Pi-hole may not exist yet.
+      # Cloud-init user-data switches to Pi-hole (dns_primary_ip) after boot.
+      servers = [var.network_gateway]
+      domain  = var.dns_postfix
     }
     user_data_file_id = "local:snippets/${each.value.name}-user-data.yml"
   }
 
   lifecycle {
     ignore_changes = [
+      clone,         # Cloned VMs can't be re-cloned; ignore after creation
       disk[0].size,  # Don't resize on subsequent applies
+    ]
+  }
+}
+
+# =============================================================================
+# GlusterFS Cluster Setup (replaces setupNomadCluster bash function)
+# =============================================================================
+
+# Step 1: Create brick directories on each node
+resource "null_resource" "gluster_brick_setup" {
+  for_each   = var.vm_configs
+  depends_on = [proxmox_virtual_environment_vm.nomad]
+
+  triggers = {
+    vm_id = proxmox_virtual_environment_vm.nomad[each.key].vm_id
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.vm_ips[each.key]
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '[+] Setting up GlusterFS brick on ${each.value.name}...'",
+      "sudo mkdir -p ${local.gluster_brick}",
+      "sudo mkdir -p ${var.gluster_mount_path}",
+    ]
+  }
+}
+
+# Step 2: Initialize GlusterFS cluster from master node (peer probe + volume create)
+resource "null_resource" "gluster_init" {
+  depends_on = [null_resource.gluster_brick_setup]
+
+  triggers = {
+    cluster_ips = join(",", local.all_ips)
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.master_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = flatten([
+      "echo '[+] Initializing GlusterFS cluster from ${local.master_ip}...'",
+
+      # Peer probe all other nodes
+      [for ip in local.peer_ips : "sudo gluster peer probe ${ip}"],
+      "sleep 3",
+      "sudo gluster pool list",
+
+      # Create replicated volume (skip if already exists)
+      "sudo gluster volume info ${local.gluster_volume} >/dev/null 2>&1 || sudo gluster volume create ${local.gluster_volume} replica ${length(local.all_ips)} ${join(" ", [for ip in local.all_ips : "${ip}:${local.gluster_brick}"])} force",
+      "sudo gluster volume info ${local.gluster_volume} | grep -q 'Status: Started' || sudo gluster volume start ${local.gluster_volume}",
+
+      # Set recommended GlusterFS options
+      "sudo gluster volume set ${local.gluster_volume} cluster.quorum-type auto || true",
+      "sudo gluster volume set ${local.gluster_volume} cluster.self-heal-daemon on || true",
+      "sudo gluster volume set ${local.gluster_volume} cluster.data-self-heal on || true",
+      "sudo gluster volume set ${local.gluster_volume} cluster.metadata-self-heal on || true",
+      "sudo gluster volume set ${local.gluster_volume} cluster.entry-self-heal on || true",
+      "sudo gluster volume set ${local.gluster_volume} performance.client-io-threads on || true",
+      "sudo gluster volume set ${local.gluster_volume} network.ping-timeout 10 || true",
+
+      "echo '[+] GlusterFS volume ${local.gluster_volume} ready'",
+    ])
+  }
+}
+
+# Step 3: Mount GlusterFS and configure fstab on all nodes
+resource "null_resource" "gluster_mount" {
+  for_each   = var.vm_configs
+  depends_on = [null_resource.gluster_init]
+
+  triggers = {
+    volume = local.gluster_volume
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.vm_ips[each.key]
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '[+] Mounting GlusterFS on ${each.value.name}...'",
+      "sudo mkdir -p ${var.gluster_mount_path}",
+      "grep -q ':/${local.gluster_volume}' /etc/fstab || echo 'localhost:/${local.gluster_volume} ${var.gluster_mount_path} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null",
+      "mountpoint -q ${var.gluster_mount_path} || sudo mount -t glusterfs localhost:/${local.gluster_volume} ${var.gluster_mount_path}",
+      "echo '[+] GlusterFS mounted at ${var.gluster_mount_path}'",
+    ]
+  }
+}
+
+# Step 4: Deploy Traefik middleware config to GlusterFS (replaces envsubst in deployTraefik.sh)
+resource "null_resource" "traefik_config" {
+  depends_on = [null_resource.gluster_mount]
+
+  triggers = {
+    config_hash = sha256(local.traefik_authentik_yml)
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.master_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p ${var.gluster_mount_path}/traefik/config",
+      "sudo mkdir -p ${var.gluster_mount_path}/traefik/tls",
+    ]
+  }
+
+  provisioner "file" {
+    content     = local.traefik_authentik_yml
+    destination = "/tmp/authentik.yml"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo cp /tmp/authentik.yml ${var.gluster_mount_path}/traefik/config/authentik.yml",
+      "sudo chmod 644 ${var.gluster_mount_path}/traefik/config/authentik.yml",
+      "rm /tmp/authentik.yml",
+      "echo '[+] Traefik authentik middleware config deployed'",
+    ]
+  }
+}
+
+# Step 5: Restart Nomad on each node (separate connections — no nested SSH)
+resource "null_resource" "nomad_restart" {
+  for_each   = var.vm_configs
+  depends_on = [null_resource.gluster_mount]
+
+  triggers = {
+    gluster_mount = null_resource.gluster_mount[each.key].id
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "echo '[+] Restarting Nomad on ${each.value.name}...'",
+      "sudo systemctl restart nomad",
+    ]
+  }
+}
+
+# Step 5: Wait for Nomad cluster to form (all servers joined)
+resource "null_resource" "nomad_cluster_health" {
+  depends_on = [null_resource.nomad_restart]
+
+  connection {
+    type        = "ssh"
+    host        = local.master_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      echo '[+] Waiting for Nomad cluster to form...'
+      for i in $(seq 1 30); do
+        COUNT=$(nomad server members 2>/dev/null | grep -c alive || echo 0)
+        if [ "$COUNT" -eq ${length(local.all_ips)} ]; then
+          echo "[+] Nomad cluster healthy: $COUNT/${length(local.all_ips)} servers"
+          nomad server members
+          exit 0
+        fi
+        echo "    Waiting... ($i/30) $COUNT/${length(local.all_ips)} servers"
+        sleep 5
+      done
+      echo '[!] Nomad cluster may not be fully formed'
+      nomad server members
+      exit 1
+      EOT
     ]
   }
 }

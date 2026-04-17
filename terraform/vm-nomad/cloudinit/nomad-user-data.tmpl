@@ -65,6 +65,23 @@ write_files:
         client_auto_join = false
       }
 
+  # Vault WIF skeleton — address is a placeholder until Vault is deployed.
+  # configureNomadVaultIntegration updates the address and restarts Nomad.
+  - path: /etc/nomad.d/vault.hcl
+    permissions: '0644'
+    content: |
+      vault {
+        enabled = true
+        address = "https://127.0.0.1:8200"
+
+        default_identity {
+          aud  = ["vault.io"]
+          env  = false
+          file = true
+          ttl  = "1h"
+        }
+      }
+
 %{ if traefik_ha_enabled ~}
   - path: /usr/local/bin/check-traefik-health.sh
     permissions: '0755'
@@ -128,29 +145,8 @@ write_files:
 runcmd:
   - mkdir -p /opt/nomad/data
   - chown -R nomad:nomad /opt/nomad || true
-%{ if dns_primary_ip != "" ~}
-  - |
-    # Configure systemd-resolved to use Pi-hole as DNS
-    bash -lc '
-      resolvectl dns eth0 ${dns_primary_ip}
-      resolvectl domain eth0 ${dns_postfix}
-      # Make DNS config persistent via netplan
-      mkdir -p /etc/netplan
-      cat > /etc/netplan/99-dns-override.yaml <<EOF
-    network:
-      version: 2
-      ethernets:
-        eth0:
-          dhcp4: true
-          dhcp4-overrides:
-            use-dns: false
-          nameservers:
-            addresses: [${dns_primary_ip}]
-            search: [${dns_postfix}]
-    EOF
-      netplan apply 2>/dev/null || true
-    '
-%{ endif ~}
+  # DNS starts with gateway (set in Terraform initialization.dns).
+  # deployAllServices switches to Pi-hole after Phase 4 via switchNomadDNS.
   - |
     bash -lc '
       systemctl enable --now systemd-timesyncd || true

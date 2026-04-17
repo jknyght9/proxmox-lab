@@ -96,6 +96,12 @@ variable "lxc_storage" {
   default     = "local-lvm"
 }
 
+variable "lxc_ostemplate" {
+  type        = string
+  description = "LXC OS template identifier (storage:vztmpl/filename)"
+  default     = "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
+}
+
 # =============================================================================
 # SSH Key Configuration
 # =============================================================================
@@ -113,19 +119,20 @@ variable "ssh_admin_public_key_file" {
 }
 
 # =============================================================================
-# Service Passwords (will move to Vault in Phase 2)
+# Vault Configuration
 # =============================================================================
 
-variable "pihole_admin_password" {
+variable "vault_address" {
   type        = string
-  description = "Pi-hole web admin password"
-  sensitive   = true
+  description = "Vault API address (e.g., https://10.1.50.114:8200)"
+  default     = ""
 }
 
-variable "pihole_root_password" {
+variable "vault_token" {
   type        = string
-  description = "Pi-hole container root password"
+  description = "Vault root token (from crypto/vault-credentials.json)"
   sensitive   = true
+  default     = ""
 }
 
 # =============================================================================
