@@ -11,12 +11,6 @@ function distributeSSHKeys() {
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
 
-    # Skip if this is the primary (already has keys from installSSHKeys)
-    if [ "$ip" = "$PROXMOX_HOST" ]; then
-      info "  $node ($ip): Primary - already configured"
-      continue
-    fi
-
     doing "  $node ($ip): Installing SSH keys..."
 
     # Create .ssh directory

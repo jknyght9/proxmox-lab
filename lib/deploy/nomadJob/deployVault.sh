@@ -244,8 +244,14 @@ REMOTE_SCRIPT
     fi
   fi
 
-  # Update DNS records for vault
-  updateDNSRecords
+  # Update DNS records for vault (skip if DNS not deployed yet)
+  local DNS_IP
+  DNS_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+  if [ -n "$DNS_IP" ] && [ "$DNS_IP" != "null" ] && curl -s --connect-timeout 3 "http://$DNS_IP/admin/" >/dev/null 2>&1; then
+    updateDNSRecords
+  else
+    info "Skipping DNS record update — Pi-hole not available yet"
+  fi
 
   displayDeploymentSummary
 

@@ -98,7 +98,12 @@ EOF
     # Create required directories
     # - postgres: PostgreSQL data (now handles all caching/sessions)
     # - data: Authentik data directory (media, templates, certs)
-    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,data/media}
+    sudo mkdir -p "$AUTHENTIK_DIR"/{postgres,data/media,branding}
+
+    # Create placeholder branding files if they don't exist (prevents Docker
+    # from creating them as directories when bind-mounting)
+    [ -f "$AUTHENTIK_DIR/branding/background.png" ] || sudo touch "$AUTHENTIK_DIR/branding/background.png"
+    [ -f "$AUTHENTIK_DIR/branding/logo.svg" ] || sudo touch "$AUTHENTIK_DIR/branding/logo.svg"
 
     # Set ownership - postgres runs as root, authentik runs as 1000
     sudo chown -R root:root "$AUTHENTIK_DIR/postgres"

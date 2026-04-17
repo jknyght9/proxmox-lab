@@ -4,10 +4,14 @@
 #
 # Deploys in phases:
 #   Phase 1: Packer templates (base cloud images + docker/nomad templates)
-#   Phase 2: Nomad VMs (static IPs, uses gateway DNS for provisioning)
+#   Phase 2: Nomad VMs (static IPs, cloud-init sets Pi-hole DNS)
 #   Phase 3: Vault (deploy + PKI + sync secrets + vault.auto.tfvars)
 #   Phase 4: DNS + Kasm (full terraform apply — Vault passwords now available)
 #   Phase 5: Traefik, DNS records, summary
+#
+# Note: Nomad VMs are provisioned with Pi-hole DNS in cloud-init, but Pi-hole
+# isn't deployed until Phase 4. Between Phases 2-4, we temporarily switch
+# Nomad VMs to use the network gateway for DNS so Docker pulls work in Phase 3.
 #
 # Prerequisites:
 #   - cluster-info.json with network configuration
@@ -18,6 +22,41 @@
 # Globals modified: DEPLOY_PHASE
 # Arguments: None
 # Returns: 0 on success, 1 on failure
+
+# switchNomadDNS - Temporarily switch DNS on all Nomad VMs
+#
+# Nomad VMs are created with Pi-hole DNS (dns_primary_ipv4) in cloud-init,
+# but Pi-hole isn't available until Phase 4. This function switches DNS to
+# the gateway for Phases 2-3 (so Docker pulls work) and back to Pi-hole
+# after Phase 4.
+#
+# Arguments: $1 - DNS server IP to set (gateway or Pi-hole)
+# Returns: 0 on success
+function switchNomadDNS() {
+  local DNS_SERVER="$1"
+  local NOMAD_IPS
+
+  # Get Nomad IPs from hosts.json or terraform.tfvars
+  if [ -f "hosts.json" ]; then
+    NOMAD_IPS=$(jq -r '.external[] | select(.hostname | startswith("nomad")) | .ip' hosts.json 2>/dev/null | cut -d'/' -f1)
+  fi
+
+  # Fallback: read from cluster-info.json vm_configs
+  if [ -z "$NOMAD_IPS" ]; then
+    NOMAD_IPS=$(grep -oP '(?<=ip = ")[^"]+' terraform/vm-nomad/variables.tf 2>/dev/null || true)
+  fi
+
+  if [ -z "$NOMAD_IPS" ]; then
+    warn "Could not determine Nomad VM IPs — skipping DNS switch"
+    return 0
+  fi
+
+  doing "Switching Nomad VM DNS to $DNS_SERVER..."
+  for ip in $NOMAD_IPS; do
+    sshRunAdmin "$VM_USER" "$ip" "sudo resolvectl dns eth0 $DNS_SERVER" 2>/dev/null || true
+  done
+  success "Nomad VMs now using DNS: $DNS_SERVER"
+}
 function deployAllServices() {
   cat <<EOF
 
@@ -187,6 +226,14 @@ EOF
     refreshHostsJsonFromProxmox "nomad" $VMID_NOMAD_START $VMID_NOMAD_END
   fi
 
+  # Nomad VMs were created with Pi-hole DNS (not yet deployed).
+  # Switch to gateway DNS so Docker pulls work during Phase 3.
+  local GATEWAY_IP
+  GATEWAY_IP=$(jq -r '.network.external.gateway // empty' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  if [ -n "$GATEWAY_IP" ]; then
+    switchNomadDNS "$GATEWAY_IP"
+  fi
+
   # ============================================
   # PHASE 3: Deploy Vault + sync secrets
   # ============================================
@@ -264,12 +311,19 @@ EOF
   DEPLOY_PHASE=4
   success "Phase 4 complete: DNS and Kasm deployed"
 
+  # Pi-hole is now running — switch Nomad VMs back to Pi-hole DNS
+  local DNS_PRIMARY_IP
+  DNS_PRIMARY_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+  if [ -n "$DNS_PRIMARY_IP" ] && [ "$DNS_PRIMARY_IP" != "null" ]; then
+    switchNomadDNS "$DNS_PRIMARY_IP"
+  fi
+
   # Refresh hosts.json with actual IPs
   doing "Refreshing Terraform state..."
   docker compose run --rm -T terraform refresh >/dev/null 2>&1 || true
 
   doing "Generating hosts.json from Terraform outputs..."
-  if docker compose run --rm -T terraform output -json host-records > hosts.json 2>&1; then
+  if docker compose run --rm -T terraform output -json host-records 2>/dev/null > hosts.json; then
     if jq -e '.external' hosts.json >/dev/null 2>&1; then
       success "hosts.json generated"
     else
@@ -288,8 +342,14 @@ EOF
   # PHASE 5: Traefik + DNS records
   # ============================================
 
-  # Update DNS records with all deployed service IPs
-  updateDNSRecords
+  # Deploy Traefik reverse proxy
+  if ! deployTraefikOnly; then
+    error "Phase 5 failed: Traefik deployment"
+    DEPLOY_PHASE=5
+    return 1
+  fi
+
+  DEPLOY_PHASE=5
 
   displayDeploymentSummary
 

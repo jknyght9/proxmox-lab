@@ -122,7 +122,9 @@ resource "proxmox_virtual_environment_vm" "nomad" {
       }
     }
     dns {
-      servers = [var.dns_primary_ip != "" ? var.dns_primary_ip : var.network_gateway]
+      # Use gateway DNS for initial provisioning — Pi-hole may not exist yet.
+      # Cloud-init user-data switches to Pi-hole (dns_primary_ip) after boot.
+      servers = [var.network_gateway]
       domain  = var.dns_postfix
     }
     user_data_file_id = "local:snippets/${each.value.name}-user-data.yml"
@@ -130,6 +132,7 @@ resource "proxmox_virtual_environment_vm" "nomad" {
 
   lifecycle {
     ignore_changes = [
+      clone,         # Cloned VMs can't be re-cloned; ignore after creation
       disk[0].size,  # Don't resize on subsequent applies
     ]
   }

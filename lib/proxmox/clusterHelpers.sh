@@ -102,7 +102,7 @@ function ensureBootstrapComplete() {
 function ensureClusterContext() {
   if [ -f "$CLUSTER_INFO_FILE" ]; then
     loadClusterInfo
-    if [ -z "$PROXMOX_HOST" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    if [ -z "${PROXMOX_HOST:-}" ] && [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
       PROXMOX_HOST="${CLUSTER_NODE_IPS[0]}"
     fi
     return 0

@@ -11,6 +11,8 @@
 # Arguments: None
 # Returns: 0 on success, 1 on failure
 function deployLAMOnly() {
+  ensureClusterContext || return 1
+
   cat <<EOF
 
 ############################################################################
@@ -23,7 +25,6 @@ Protected by Authentik forward auth.
 
 EOF
 
-  ensureClusterContext || return 1
   ensureNomadCluster || return 1
 
   # Load AD configuration
@@ -83,6 +84,36 @@ EOF
       echo "LAM config already exists, skipping bootstrap"
     fi
 BOOTSTRAP
+
+  # Create Vault policy and role for LAM
+  doing "Configuring Vault policy and role for LAM..."
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  # Create policy
+  local POLICY_HCL
+  POLICY_HCL=$(cat "$SCRIPT_DIR/nomad/vault-policies/lam.hcl")
+  curl -skf -X PUT "${VAULT_ADDR}/v1/sys/policies/acl/lam" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -d "{\"policy\": $(echo "$POLICY_HCL" | jq -Rs .)}" >/dev/null
+  success "Created lam policy"
+
+  # Create role
+  curl -skf -X POST "${VAULT_ADDR}/v1/auth/jwt-nomad/role/lam" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -d '{
+      "role_type": "jwt",
+      "bound_audiences": ["vault.io"],
+      "user_claim": "/nomad_job_id",
+      "user_claim_json_pointer": true,
+      "claim_mappings": {"nomad_namespace": "nomad_namespace", "nomad_job_id": "nomad_job_id"},
+      "token_type": "service",
+      "token_policies": ["lam"],
+      "token_period": 1800,
+      "bound_claims": {"nomad_namespace": "default", "nomad_job_id": "lam"}
+    }' >/dev/null
+  success "Created Vault role 'lam'"
 
   # Deploy LAM — AD config comes from Vault KV templates, dns_postfix via -var
   doing "Deploying LAM..."

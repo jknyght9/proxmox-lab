@@ -309,7 +309,7 @@ REMOTE_SCRIPT
 
   scpToAdmin "nomad/jobs/samba-dc.nomad.hcl" "$VM_USER" "$NOMAD01_IP" "/tmp/samba-dc.nomad.hcl"
 
-  if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run /tmp/samba-dc.nomad.hcl"; then
+  if ! sshRunAdmin "$VM_USER" "$NOMAD01_IP" "nomad job run -var ad_realm=${AD_REALM} /tmp/samba-dc.nomad.hcl"; then
     error "Failed to deploy Samba AD"
     return 1
   fi

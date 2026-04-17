@@ -145,16 +145,8 @@ write_files:
 runcmd:
   - mkdir -p /opt/nomad/data
   - chown -R nomad:nomad /opt/nomad || true
-%{ if dns_primary_ip != "" ~}
-  - |
-    # Configure systemd-resolved to use Pi-hole as DNS
-    # Network config (static IP, gateway, DNS) is handled by Proxmox cloud-init
-    # via initialization.ip_config and initialization.dns in Terraform
-    bash -lc '
-      resolvectl dns eth0 ${dns_primary_ip}
-      resolvectl domain eth0 ${dns_postfix}
-    '
-%{ endif ~}
+  # DNS starts with gateway (set in Terraform initialization.dns).
+  # deployAllServices switches to Pi-hole after Phase 4 via switchNomadDNS.
   - |
     bash -lc '
       systemctl enable --now systemd-timesyncd || true

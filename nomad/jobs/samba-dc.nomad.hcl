@@ -1,9 +1,16 @@
-# NOTE: This is a REFERENCE TEMPLATE. The actual job file is generated dynamically
-# by lib/deploy/nomadJob/deploySambaAD.sh with variable substitution.
+# Samba AD Domain Controller Nomad Job
 #
 # Uses ghcr.io/jknyght9/samba-ad-dc Docker image which supports both:
 # - JOIN=false: Provision new AD domain (DC01)
 # - JOIN=true: Join existing domain as replica (DC02)
+#
+# Deploy with: nomad job run -var ad_realm=EXAMPLE.LAN samba-dc.nomad.hcl
+
+variable "ad_realm" {
+  type        = string
+  description = "Active Directory realm (e.g., JDCLABS.LAN)"
+  default     = ""
+}
 
 job "samba-dc" {
   datacenters = ["dc1"]
@@ -100,7 +107,7 @@ EOH
 
         tags = [
           "dc=primary",
-{{ with secret "secret/data/config/cluster" }}          "realm={{ .Data.data.ad_realm }}",{{ end }}
+          "realm=${var.ad_realm}",
         ]
 
         check {
@@ -218,7 +225,7 @@ EOH
 
         tags = [
           "dc=replica",
-{{ with secret "secret/data/config/cluster" }}          "realm={{ .Data.data.ad_realm }}",{{ end }}
+          "realm=${var.ad_realm}",
         ]
 
         check {
