@@ -42,7 +42,11 @@ job "uptime-kuma" {
       driver = "docker"
 
       config {
-        image        = "louislam/uptime-kuma:1"
+        # 2.x ships with UPTIME_KUMA_ENABLE_EMBEDDED_MARIADB=1 baked into
+        # the image — no external DB sidecar required. Data layout under
+        # /app/data differs from 1.x (MariaDB files vs SQLite kuma.db),
+        # so a first-time start against an empty directory is expected.
+        image        = "louislam/uptime-kuma:2"
         network_mode = "host"
         volumes = [
           "/srv/gluster/nomad-data/uptime-kuma:/app/data",

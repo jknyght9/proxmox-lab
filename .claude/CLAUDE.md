@@ -548,11 +548,20 @@ nomad job restart tailscale
 - Node not registering: Verify auth key hasn't expired, check `docker logs`
 
 ### Uptime Kuma Configuration
-- **Docker Image**: `louislam/uptime-kuma:1`
+- **Docker Image**: `louislam/uptime-kuma:2` (embedded MariaDB —
+  `UPTIME_KUMA_ENABLE_EMBEDDED_MARIADB=1` is baked in; no external DB
+  sidecar required)
 - **Port**: 3001 (HTTP)
-- **Storage**: `/srv/gluster/nomad-data/uptime-kuma`
+- **Storage**: `/srv/gluster/nomad-data/uptime-kuma` (MariaDB data files
+  in 2.x; not compatible with 1.x SQLite `kuma.db`)
 - **DNS**: `status.<dns_postfix>` via Traefik
-- **Setup**: First user becomes admin; configure monitors via web UI
+- **First-time setup** (manual, UI only — Uptime Kuma does not expose
+  env-var-based admin provisioning):
+  1. Browse to `https://status.<dns_postfix>/`, create the first admin.
+  2. Configure monitors.
+  3. **If you want to disable auth** (typical in-cluster use): Settings
+     → Security → Disable Auth. Persists across restarts because the
+     gluster volume is mounted reliably by the mount-race fix.
 
 **Suggested Monitors:**
 - Vault: `http://nomad01:8200/v1/sys/health?uninitcode=200&sealedcode=200`
