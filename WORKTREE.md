@@ -130,16 +130,19 @@ The fix must work in both environments the user operates:
 - `nomad/jobs/*.hcl` — every job to audit for gluster bind mounts.
 - `CLAUDE.md` — existing GlusterFS section, troubleshooting references.
 
-**Jobs known to bind-mount off `/srv/gluster/nomad-data` (to audit):**
-- `vault.nomad.hcl` — `vault/`, `vault-tls/`.
-- `traefik.nomad.hcl` — `traefik/`, `traefik/tls/`.
+**Jobs that bind-mount off `/srv/gluster/nomad-data` (guarded):**
+- `vault.nomad.hcl` — `vault/`, `vault-tls/`, `certs/`.
+- `traefik.nomad.hcl` — `traefik/` via Nomad `host_volume "gluster-data"`.
 - `authentik.nomad.hcl` — `authentik/postgres`, `authentik/data`,
   `authentik/branding`, `certs/root_ca.crt`.
-- `samba-dc.nomad.hcl` — `samba-dc01/`, `samba-dc02/`.
 - `uptime-kuma.nomad.hcl` — `uptime-kuma/`.
-- `backup.nomad.hcl` — reads many of the above.
+- `backup.nomad.hcl` — reads `/srv/gluster/nomad-data` read-only.
 - `tailscale.nomad.hcl` — `tailscale/${node.unique.name}/`.
-- `lam.nomad.hcl` — `lam/`.
+- `lam.nomad.hcl` — `lam/config`, `lam/session`.
+
+**Jobs on local storage (no guard needed):**
+- `samba-dc.nomad.hcl` — uses `/opt/samba-dc01/`, `/opt/samba-dc02/` by
+  design; Samba AD requires POSIX ACL support that GlusterFS FUSE lacks.
 
 ## Dependencies & Related Worktrees
 - **Relies on:** `feature/ad-join` merged into `main` (2026-04-17).
