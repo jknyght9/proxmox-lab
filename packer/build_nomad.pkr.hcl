@@ -76,6 +76,19 @@ build {
     ]
   }
 
+  # Sequence Docker and Nomad after the GlusterFS mount so jobs never
+  # bind-mount a pre-mount empty local directory on boot. Pairs with the
+  # x-systemd.* options written into fstab by deployNomad.sh.
+  provisioner "shell" {
+    inline = [
+      "echo '[+] Installing systemd drop-ins: docker/nomad wait for GlusterFS mount'",
+      "sudo mkdir -p /etc/systemd/system/docker.service.d /etc/systemd/system/nomad.service.d",
+      "printf '[Unit]\\nRequiresMountsFor=/srv/gluster/nomad-data\\n' | sudo tee /etc/systemd/system/docker.service.d/wait-gluster.conf > /dev/null",
+      "printf '[Unit]\\nRequiresMountsFor=/srv/gluster/nomad-data\\n' | sudo tee /etc/systemd/system/nomad.service.d/wait-gluster.conf > /dev/null",
+      "sudo systemctl daemon-reload"
+    ]
+  }
+
   provisioner "shell" {
     inline = [
       "echo '[+] Installing keepalived for Traefik HA'",

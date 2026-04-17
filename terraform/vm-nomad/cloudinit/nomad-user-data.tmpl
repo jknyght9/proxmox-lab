@@ -59,6 +59,17 @@ write_files:
         }
       }
 
+      # raw_exec is used by per-job "wait-for-gluster" prestart guards that
+      # verify /srv/gluster/nomad-data is actually mounted and populated
+      # before the main task container is allowed to start. Tasks execute
+      # as the Nomad client's uid (root here) directly on the host, which
+      # is the cheapest way to stat a host-side sentinel file.
+      plugin "raw_exec" {
+        config {
+          enabled = true
+        }
+      }
+
       consul {
         auto_advertise   = false
         server_auto_join = false

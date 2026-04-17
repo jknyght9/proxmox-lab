@@ -210,15 +210,34 @@ function setupNomadCluster() {
 
   sleep 2
 
-  # Mount with fstab on all nodes
+  # Mount with fstab on all nodes.
+  #
+  # The fstab options sequence the mount against glusterd and make it safe
+  # across boots:
+  #   _netdev                           - defer to remote-fs.target
+  #   nofail                            - don't block boot if unavailable
+  #   x-systemd.requires=glusterd.service
+  #   x-systemd.after=glusterd.service
+  #
+  # The matching RequiresMountsFor=/srv/gluster/nomad-data drop-ins baked
+  # into the Packer image for docker.service and nomad.service ensure those
+  # services only start once this mount is up — so no Nomad job can bind
+  # an empty pre-mount local directory on reboot.
+  local FSTAB_LINE="localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev,nofail,x-systemd.requires=glusterd.service,x-systemd.after=glusterd.service 0 0"
   for ip in "${NODE_IPS[@]}"; do
     doing "Mounting GlusterFS on $ip"
     sshRunAdmin "$VM_USER" "$ip" "sudo mkdir -p '$MOUNTPOINT'"
-    # Add fstab entry if not present
-    sshRunAdmin "$VM_USER" "$ip" "grep -q ':/${VOL}' /etc/fstab || echo 'localhost:/${VOL} ${MOUNTPOINT} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null"
+    # Replace any existing gluster fstab line with the new form (idempotent).
+    sshRunAdmin "$VM_USER" "$ip" "sudo sed -i '\|^localhost:/${VOL}[[:space:]]|d' /etc/fstab && echo '$FSTAB_LINE' | sudo tee -a /etc/fstab >/dev/null"
+    sshRunAdmin "$VM_USER" "$ip" "sudo systemctl daemon-reload"
     # Mount if not already mounted
     sshRunAdmin "$VM_USER" "$ip" "mountpoint -q '$MOUNTPOINT' || sudo mount -t glusterfs localhost:/${VOL} ${MOUNTPOINT}"
   done
+
+  # Write the mount sentinel through one node — gluster replicates it to all.
+  # Per-job prestart guards read this marker to confirm the volume is really
+  # mounted (not a pre-mount empty local directory).
+  sshRunAdmin "$VM_USER" "$MGR" "printf 'v1\\n' | sudo tee '$MOUNTPOINT/.mount-sentinel' >/dev/null && sudo chmod 644 '$MOUNTPOINT/.mount-sentinel'"
 
   sleep 2
 

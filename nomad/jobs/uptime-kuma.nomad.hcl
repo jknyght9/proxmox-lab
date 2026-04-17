@@ -16,6 +16,28 @@ job "uptime-kuma" {
       port "http" { static = 3001 }
     }
 
+    # Belt-and-suspenders: refuse to start if the gluster volume isn't
+    # actually mounted. Prevents Uptime Kuma from creating a fresh SQLite
+    # DB in a pre-mount empty directory (this is how we lost state before).
+    task "wait-for-gluster" {
+      driver = "raw_exec"
+      lifecycle {
+        hook    = "prestart"
+        sidecar = false
+      }
+      config {
+        command = "/bin/bash"
+        args = [
+          "-c",
+          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
+        ]
+      }
+      resources {
+        cpu    = 10
+        memory = 16
+      }
+    }
+
     task "uptime-kuma" {
       driver = "docker"
 

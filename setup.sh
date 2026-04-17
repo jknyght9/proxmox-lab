@@ -34,6 +34,7 @@ source "$SCRIPT_DIR/lib/deploy/configureNomadVaultIntegration.sh"
 source "$SCRIPT_DIR/lib/deploy/configureTrueNAS.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployKasm.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployNomad.sh"
+source "$SCRIPT_DIR/lib/deploy/vm/fixGlusterMountOrdering.sh"
 source "$SCRIPT_DIR/lib/proxmox/clusterHelpers.sh"
 source "$SCRIPT_DIR/lib/proxmox/configureNetworking.sh"
 source "$SCRIPT_DIR/lib/proxmox/configureProxmox.sh"
@@ -323,6 +324,7 @@ function showMenu() {
     echo " d8) Deploy Kasm only"
     echo " d9) Deploy Tailscale Subnet Router"
     echo "d10) Create domain-join AppRole (Vault)"
+    echo "d11) Fix GlusterFS mount ordering (one-shot)"
   fi
   echo
 }
@@ -332,7 +334,7 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select an option [0-11, b1-b7, d1-d10]: ")" choice
+    read -rp "$(question "Select an option [0-11, b1-b7, d1-d11]: ")" choice
   else
     read -rp "$(question "Select an option [0-11]: ")" choice
   fi
@@ -370,6 +372,7 @@ while true; do
     d8|D8) if [ "$DEV_MODE" = true ]; then deployKasmOnly; else error "Invalid option: $choice"; fi;;
     d9|D9) if [ "$DEV_MODE" = true ]; then deployTailscaleOnly; else error "Invalid option: $choice"; fi;;
     d10|D10) if [ "$DEV_MODE" = true ]; then configureDomainJoinAppRole; else error "Invalid option: $choice"; fi;;
+    d11|D11) if [ "$DEV_MODE" = true ]; then fixGlusterMountOrdering; else error "Invalid option: $choice"; fi;;
 
     0|q|Q) warn "Exiting..."; break;;
     *) error "Invalid option: $choice";;
