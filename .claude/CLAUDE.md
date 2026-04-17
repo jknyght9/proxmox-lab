@@ -276,6 +276,34 @@ When a multi-homed system is detected, the setup script creates policy-based rou
 - **Server discovery**: DNS-based via `retry_join` with FQDNs
 - **Datacenter**: `dc1`, Region: `global`
 
+#### GlusterFS mount sequencing (fix/gluster-mount-race)
+The gluster volume is mounted **before** `docker.service` and `nomad.service`
+start on every boot, via:
+
+- fstab options `_netdev,nofail,x-systemd.requires=glusterd.service,x-systemd.after=glusterd.service`
+  turn the fstab line into a systemd mount unit ordered after `glusterd`.
+- Systemd drop-ins at `/etc/systemd/system/docker.service.d/wait-gluster.conf`
+  and `/etc/systemd/system/nomad.service.d/wait-gluster.conf` declare
+  `RequiresMountsFor=/srv/gluster/nomad-data` — Docker and Nomad cannot
+  enter `active` until the mount is up.
+- Sentinel file `/srv/gluster/nomad-data/.mount-sentinel` (contents `v1`)
+  is created once the volume is confirmed mounted (by `deployNomad.sh` or
+  the one-shot `fixGlusterMountOrdering` helper, exposed as setup.sh
+  `--dev` menu option `d11`).
+
+Every Nomad job that bind-mounts a path under `/srv/gluster/nomad-data`
+includes a `wait-for-gluster` prestart task (`raw_exec`, `sidecar = false`)
+that runs `mountpoint -q /srv/gluster/nomad-data && test -f
+/srv/gluster/nomad-data/.mount-sentinel`. If the mount is missing or the
+sentinel is absent, the alloc fails fast instead of binding to an empty
+pre-mount local directory.
+
+**When adding a new Nomad job that bind-mounts from the gluster volume**,
+copy the `wait-for-gluster` task from an existing job (e.g.
+`nomad/jobs/vault.nomad.hcl`) into the same task group. The guard depends
+on `plugin "raw_exec"` being enabled in `/etc/nomad.d/nomad.hcl`, which
+the cloud-init template and `fixGlusterMountOrdering` already provide.
+
 ## Configuration Files
 
 ### Bootstrap Configuration (user-provided)
@@ -531,11 +559,20 @@ nomad job restart tailscale
 - Node not registering: Verify auth key hasn't expired, check `docker logs`
 
 ### Uptime Kuma Configuration
-- **Docker Image**: `louislam/uptime-kuma:1`
+- **Docker Image**: `louislam/uptime-kuma:2` (embedded MariaDB —
+  `UPTIME_KUMA_ENABLE_EMBEDDED_MARIADB=1` is baked in; no external DB
+  sidecar required)
 - **Port**: 3001 (HTTP)
-- **Storage**: `/srv/gluster/nomad-data/uptime-kuma`
+- **Storage**: `/srv/gluster/nomad-data/uptime-kuma` (MariaDB data files
+  in 2.x; not compatible with 1.x SQLite `kuma.db`)
 - **DNS**: `status.<dns_postfix>` via Traefik
-- **Setup**: First user becomes admin; configure monitors via web UI
+- **First-time setup** (manual, UI only — Uptime Kuma does not expose
+  env-var-based admin provisioning):
+  1. Browse to `https://status.<dns_postfix>/`, create the first admin.
+  2. Configure monitors.
+  3. **If you want to disable auth** (typical in-cluster use): Settings
+     → Security → Disable Auth. Persists across restarts because the
+     gluster volume is mounted reliably by the mount-race fix.
 
 **Suggested Monitors:**
 - Vault: `http://nomad01:8200/v1/sys/health?uninitcode=200&sealedcode=200`

@@ -36,6 +36,28 @@ job "backup" {
       change_mode = "restart"
     }
 
+    # Belt-and-suspenders: refuse to start if the gluster volume isn't
+    # actually mounted — a backup that reads an empty /data would silently
+    # archive nothing and then prune the real backups on the remote.
+    task "wait-for-gluster" {
+      driver = "raw_exec"
+      lifecycle {
+        hook    = "prestart"
+        sidecar = false
+      }
+      config {
+        command = "/bin/bash"
+        args = [
+          "-c",
+          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
+        ]
+      }
+      resources {
+        cpu    = 10
+        memory = 16
+      }
+    }
+
     task "backup" {
       driver = "docker"
 

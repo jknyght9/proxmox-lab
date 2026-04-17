@@ -62,6 +62,7 @@ source "$SCRIPT_DIR/lib/deploy/nomadJob/deployVault.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/unsealVault.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployTailscale.sh"
 source "$SCRIPT_DIR/lib/deploy/nomadJob/deployLAM.sh"
+source "$SCRIPT_DIR/lib/deploy/configureTrueNAS.sh"
 
 source "$SCRIPT_DIR/lib/deploy/vm/deployKasm.sh"
 source "$SCRIPT_DIR/lib/deploy/vm/deployNomad.sh"
@@ -211,6 +212,9 @@ function showMenu() {
     echo "   d7) Deploy Kasm only"
     echo "   d8) Deploy Tailscale"
     echo "   d9) Configure Authentik AD Sync"
+    echo "  d10) Join TrueNAS to Active Directory"
+    echo "  d11) Join TrueNAS to AD + configure profile share"
+    echo "  d12) Create domain-join AppRole (Vault)"
   fi
   echo
 }
@@ -225,7 +229,7 @@ fi
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d9]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d12]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -244,15 +248,18 @@ while true; do
     11) purgeDeployment;;
 
     # Developer tools (only available with --dev)
-    d1|D1) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateDNSRecords;          else error "Invalid option"; fi;;
-    d2|D2) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                     else error "Invalid option"; fi;;
-    d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && regenerateCA;              else error "Invalid option"; fi;;
-    d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateRootCertificates;    else error "Invalid option"; fi;;
-    d5|D5) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                              else error "Invalid option"; fi;;
-    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployNomadOnly;           else error "Invalid option"; fi;;
-    d7|D7) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployKasmOnly;            else error "Invalid option"; fi;;
-    d8|D8) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployTailscaleOnly;       else error "Invalid option"; fi;;
-    d9|D9) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && configureAuthentikADSyncOnly; else error "Invalid option"; fi;;
+    d1|D1)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateDNSRecords;             else error "Invalid option"; fi;;
+    d2|D2)   if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                        else error "Invalid option"; fi;;
+    d3|D3)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && regenerateCA;                 else error "Invalid option"; fi;;
+    d4|D4)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && updateRootCertificates;       else error "Invalid option"; fi;;
+    d5|D5)   if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                 else error "Invalid option"; fi;;
+    d6|D6)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployNomadOnly;              else error "Invalid option"; fi;;
+    d7|D7)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployKasmOnly;               else error "Invalid option"; fi;;
+    d8|D8)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && deployTailscaleOnly;          else error "Invalid option"; fi;;
+    d9|D9)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && configureAuthentikADSyncOnly; else error "Invalid option"; fi;;
+    d10|D10) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && joinTrueNASToADOnly;          else error "Invalid option"; fi;;
+    d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && joinTrueNASToADWithProfiles;  else error "Invalid option"; fi;;
+    d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && configureDomainJoinAppRole;   else error "Invalid option"; fi;;
 
     0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;

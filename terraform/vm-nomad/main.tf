@@ -229,9 +229,43 @@ resource "null_resource" "gluster_mount" {
     inline = [
       "echo '[+] Mounting GlusterFS on ${each.value.name}...'",
       "sudo mkdir -p ${var.gluster_mount_path}",
-      "grep -q ':/${local.gluster_volume}' /etc/fstab || echo 'localhost:/${local.gluster_volume} ${var.gluster_mount_path} glusterfs defaults,_netdev 0 0' | sudo tee -a /etc/fstab >/dev/null",
+      # Hardened fstab line — the x-systemd.* options make the generated
+      # mount unit depend on glusterd, and nofail keeps a bad mount from
+      # blocking boot. Pairs with the RequiresMountsFor drop-ins baked
+      # into the Packer image for docker.service and nomad.service so
+      # neither service starts before the mount is up. Idempotent:
+      # replaces any pre-existing gluster line.
+      "sudo sed -i '\\|^localhost:/${local.gluster_volume}[[:space:]]|d' /etc/fstab",
+      "echo 'localhost:/${local.gluster_volume} ${var.gluster_mount_path} glusterfs defaults,_netdev,nofail,x-systemd.requires=glusterd.service,x-systemd.after=glusterd.service 0 0' | sudo tee -a /etc/fstab >/dev/null",
+      "sudo systemctl daemon-reload",
       "mountpoint -q ${var.gluster_mount_path} || sudo mount -t glusterfs localhost:/${local.gluster_volume} ${var.gluster_mount_path}",
       "echo '[+] GlusterFS mounted at ${var.gluster_mount_path}'",
+    ]
+  }
+}
+
+# Step 3b: Write the .mount-sentinel marker that per-job wait-for-gluster
+# prestart tasks read to confirm the volume is really mounted (not a
+# pre-mount empty local directory). Written through a single node —
+# gluster replicates it to all peers.
+resource "null_resource" "gluster_mount_sentinel" {
+  depends_on = [null_resource.gluster_mount]
+
+  triggers = {
+    volume = local.gluster_volume
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.master_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "printf 'v1\\n' | sudo tee ${var.gluster_mount_path}/.mount-sentinel >/dev/null",
+      "sudo chmod 644 ${var.gluster_mount_path}/.mount-sentinel",
     ]
   }
 }

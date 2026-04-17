@@ -29,6 +29,28 @@ job "authentik" {
       port "postgres" { static = 5432 }
     }
 
+    # Belt-and-suspenders: refuse to start if the gluster volume isn't
+    # actually mounted. Runs before postgres (sidecar=true prestart) so
+    # the DB cannot initialize into an empty pre-mount directory.
+    task "wait-for-gluster" {
+      driver = "raw_exec"
+      lifecycle {
+        hook    = "prestart"
+        sidecar = false
+      }
+      config {
+        command = "/bin/bash"
+        args = [
+          "-c",
+          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
+        ]
+      }
+      resources {
+        cpu    = 10
+        memory = 16
+      }
+    }
+
     # PostgreSQL - Database for Authentik
     # Note: As of 2025.10, Authentik no longer uses Redis - everything runs through PostgreSQL
     task "postgres" {

@@ -1,10 +1,12 @@
+.bootstrap-complete
 .cache_ggshield
 # Claude Code local settings (but keep CLAUDE.md for project instructions)
 .claude/*
 !.claude/CLAUDE.md
 .DS_Store
+.env
 .terraform
-.bootstrap-complete
+.trunk
 bootstrap.yml
 cluster-info.json
 crypto

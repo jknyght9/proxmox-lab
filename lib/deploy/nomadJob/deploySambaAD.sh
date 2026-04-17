@@ -344,6 +344,9 @@ REMOTE_SCRIPT
   # created separately by configureAuthentikADSync)
   configureADServiceAccounts
 
+  # Create Vault AppRole for external domain join operations
+  configureDomainJoinAppRole
+
   # ==========================================================================
   # Phase 2: Add DC02 if multi-node setup
   # ==========================================================================
@@ -553,6 +556,128 @@ function configureADServiceAccounts() {
   info "To join a machine to the domain:"
   info "  Username: ${AD_REALM_LOWER}\\domain-join-svc"
   info "  Target OU: OU=Workstations,${BASE_DN}"
+  echo
+
+  return 0
+}
+
+# configureDomainJoinAppRole - Create Vault AppRole for external domain join
+#
+# Creates a Vault policy and AppRole that external systems (VMs, TrueNAS)
+# can use to authenticate and read domain-join credentials. This avoids
+# passing the Vault root token to workstations.
+#
+# The AppRole credentials (role_id, secret_id) are saved to
+# crypto/domain-join-approle.json for use by provisioning scripts.
+#
+# Globals read: VAULT_CREDENTIALS_FILE, SCRIPT_DIR
+# Returns: 0 on success, 1 on failure
+function configureDomainJoinAppRole() {
+  doing "Configuring Vault AppRole for domain join..."
+
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    warn "Vault credentials not found — skipping AppRole setup"
+    return 1
+  fi
+
+  local VAULT_ADDR ROOT_TOKEN
+  VAULT_ADDR=$(jq -r '.vault_address // empty' "$VAULT_CREDENTIALS_FILE")
+  ROOT_TOKEN=$(jq -r '.root_token // empty' "$VAULT_CREDENTIALS_FILE")
+
+  if [ -z "$VAULT_ADDR" ] || [ -z "$ROOT_TOKEN" ]; then
+    warn "Could not read Vault credentials — skipping AppRole setup"
+    return 1
+  fi
+
+  # Create domain-join policy
+  doing "Creating domain-join Vault policy..."
+  local POLICY
+  POLICY=$(cat "$SCRIPT_DIR/nomad/vault-policies/domain-join.hcl")
+
+  if ! curl -skf --connect-timeout 5 --max-time 10 -X PUT \
+    "${VAULT_ADDR}/v1/sys/policies/acl/domain-join" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"policy\": $(echo "$POLICY" | jq -Rs .)}" > /dev/null; then
+    warn "Failed to create domain-join policy"
+    return 1
+  fi
+  success "Created domain-join policy"
+
+  # Enable AppRole auth if not already enabled
+  doing "Enabling AppRole auth method..."
+
+  local AUTH_LIST
+  AUTH_LIST=$(curl -skf -H "X-Vault-Token: $ROOT_TOKEN" \
+    "${VAULT_ADDR}/v1/sys/auth" 2>/dev/null || echo "{}")
+
+  if echo "$AUTH_LIST" | jq -e '."approle/"' > /dev/null 2>&1; then
+    info "AppRole auth method already enabled"
+  else
+    if ! curl -skf -X POST "${VAULT_ADDR}/v1/sys/auth/approle" \
+      -H "X-Vault-Token: $ROOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"type": "approle", "description": "AppRole auth for external systems"}' > /dev/null; then
+      warn "Failed to enable AppRole auth method"
+      return 1
+    fi
+    success "AppRole auth method enabled"
+  fi
+
+  # Create domain-join AppRole
+  doing "Creating domain-join AppRole..."
+
+  if ! curl -skf -X POST "${VAULT_ADDR}/v1/auth/approle/role/domain-join" \
+    -H "X-Vault-Token: $ROOT_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "token_policies": ["domain-join"],
+      "token_ttl": "30m",
+      "token_max_ttl": "1h",
+      "secret_id_ttl": "0",
+      "secret_id_num_uses": 0
+    }' > /dev/null; then
+    warn "Failed to create domain-join AppRole"
+    return 1
+  fi
+  success "Created domain-join AppRole"
+
+  # Fetch role_id
+  local ROLE_ID
+  ROLE_ID=$(curl -skf "${VAULT_ADDR}/v1/auth/approle/role/domain-join/role-id" \
+    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null | jq -r '.data.role_id // empty')
+
+  if [ -z "$ROLE_ID" ]; then
+    warn "Could not retrieve AppRole role_id"
+    return 1
+  fi
+
+  # Generate a secret_id
+  local SECRET_ID
+  SECRET_ID=$(curl -skf -X POST "${VAULT_ADDR}/v1/auth/approle/role/domain-join/secret-id" \
+    -H "X-Vault-Token: $ROOT_TOKEN" 2>/dev/null | jq -r '.data.secret_id // empty')
+
+  if [ -z "$SECRET_ID" ]; then
+    warn "Could not generate AppRole secret_id"
+    return 1
+  fi
+
+  # Save AppRole credentials
+  local APPROLE_FILE="$SCRIPT_DIR/crypto/domain-join-approle.json"
+  mkdir -p "$(dirname "$APPROLE_FILE")"
+  jq -n \
+    --arg role_id "$ROLE_ID" \
+    --arg secret_id "$SECRET_ID" \
+    --arg vault_address "$VAULT_ADDR" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{role_id: $role_id, secret_id: $secret_id, vault_address: $vault_address, created_at: $created_at}' \
+    > "$APPROLE_FILE"
+  chmod 600 "$APPROLE_FILE"
+
+  success "Domain-join AppRole credentials saved to crypto/domain-join-approle.json"
+  info "  Role ID: $ROLE_ID"
+  info "  Vault: $VAULT_ADDR"
+  info "  Token TTL: 30m"
   echo
 
   return 0
