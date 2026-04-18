@@ -50,3 +50,16 @@ services:
     environment:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
+  terraform-services:
+    image: hashicorp/terraform
+    userns_mode: host
+    container_name: terraform-services
+    working_dir: /services
+    volumes:
+      - ./crypto:/crypto:ro
+      - ./terraform/services:/services:z
+      - ./nomad:/nomad:ro
+      - ./logs:/logs:z
+    environment:
+      TF_LOG: INFO
+      TF_LOG_PATH: /logs/terraform-services.log
