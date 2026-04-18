@@ -738,6 +738,40 @@ $(echo -e "$NODE_IPS_HCL")}
 dns_main_nodes = [
 $(echo -e "$DNS_NODES_HCL")]
 
+# HA Configuration (keepalived VIP)
+$(
+  local dns_ha_enabled dns_ha_vip dns_ha_router_id dns_ha_password
+  local traefik_ha_enabled traefik_ha_vip traefik_ha_router_id traefik_ha_password
+
+  dns_ha_enabled=$(yamlGet "ha.dns.enabled" 2>/dev/null || echo "false")
+  dns_ha_vip=$(yamlGet "ha.dns.vip" 2>/dev/null || echo "")
+  dns_ha_router_id=$(yamlGet "ha.dns.vrrp_router_id" 2>/dev/null || echo "51")
+  dns_ha_password=$(yamlGet "ha.dns.vrrp_password" 2>/dev/null || echo "pihole-ha")
+
+  traefik_ha_enabled=$(yamlGet "ha.traefik.enabled" 2>/dev/null || echo "false")
+  traefik_ha_vip=$(yamlGet "ha.traefik.vip" 2>/dev/null || echo "")
+  traefik_ha_router_id=$(yamlGet "ha.traefik.vrrp_router_id" 2>/dev/null || echo "53")
+  traefik_ha_password=$(yamlGet "ha.traefik.vrrp_password" 2>/dev/null || echo "traefik-ha")
+
+  if [ "$dns_ha_enabled" = "true" ] && [ -n "$dns_ha_vip" ]; then
+    cat <<HAEOF
+enable_dns_ha_vip      = true
+dns_ha_vip_address     = "${dns_ha_vip}"
+dns_ha_vrrp_router_id  = ${dns_ha_router_id}
+dns_ha_vrrp_password   = "${dns_ha_password}"
+HAEOF
+  fi
+  echo ""
+  if [ "$traefik_ha_enabled" = "true" ] && [ -n "$traefik_ha_vip" ]; then
+    cat <<HAEOF
+nomad_traefik_ha_enabled        = true
+nomad_traefik_ha_vip            = "${traefik_ha_vip}"
+nomad_traefik_ha_vrrp_router_id = ${traefik_ha_router_id}
+nomad_traefik_ha_vrrp_password  = "${traefik_ha_password}"
+HAEOF
+  fi
+)
+
 # Vault — credentials written to terraform/vault.auto.tfvars after Vault deploys
 # (empty defaults here so terraform validate works before Vault exists)
 vault_address = ""

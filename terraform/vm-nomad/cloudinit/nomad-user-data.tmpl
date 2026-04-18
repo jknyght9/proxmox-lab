@@ -1,4 +1,10 @@
 #cloud-config
+# Bootstrap-only cloud-init for Nomad cluster VMs.
+# Sets up hostname, users, SSH keys, and base packages.
+# All runtime configuration (Nomad HCL, Vault WIF, keepalived, certs)
+# is managed by Terraform null_resource provisioners so it can be
+# reconfigured with `terraform apply` without recreating VMs.
+
 hostname: ${hostname}
 manage_etc_hosts: true
 
@@ -15,149 +21,9 @@ users:
 
 packages: [curl, jq, socat, ca-certificates]
 
-write_files:
-  - path: /etc/nomad.d/nomad.hcl
-    permissions: '0644'
-    content: |
-      datacenter = "${nomad_datacenter}"
-      region     = "${nomad_region}"
-      data_dir   = "/opt/nomad/data"
-      bind_addr  = "0.0.0.0"
-
-      advertise {
-        http = "{{ GetPrivateIP }}:4646"
-        rpc  = "{{ GetPrivateIP }}:4647"
-        serf = "{{ GetPrivateIP }}:4648"
-      }
-
-      server {
-        enabled          = true
-        bootstrap_expect = ${nomad_bootstrap_expect}
-
-        server_join {
-          retry_join     = [${nomad_servers}]
-          retry_max      = 10
-          retry_interval = "15s"
-        }
-      }
-
-      client {
-        enabled = true
-
-        host_volume "gluster-data" {
-          path      = "${gluster_mount}"
-          read_only = false
-        }
-      }
-
-      plugin "docker" {
-        config {
-          allow_privileged = true
-          volumes {
-            enabled = true
-          }
-        }
-      }
-
-      # raw_exec is used by per-job "wait-for-gluster" prestart guards that
-      # verify /srv/gluster/nomad-data is actually mounted and populated
-      # before the main task container is allowed to start. Tasks execute
-      # as the Nomad client's uid (root here) directly on the host, which
-      # is the cheapest way to stat a host-side sentinel file.
-      plugin "raw_exec" {
-        config {
-          enabled = true
-        }
-      }
-
-      consul {
-        auto_advertise   = false
-        server_auto_join = false
-        client_auto_join = false
-      }
-
-  # Vault WIF skeleton — address is a placeholder until Vault is deployed.
-  # configureNomadVaultIntegration updates the address and restarts Nomad.
-  - path: /etc/nomad.d/vault.hcl
-    permissions: '0644'
-    content: |
-      vault {
-        enabled = true
-        address = "https://127.0.0.1:8200"
-
-        default_identity {
-          aud  = ["vault.io"]
-          env  = false
-          file = true
-          ttl  = "1h"
-        }
-      }
-
-%{ if traefik_ha_enabled ~}
-  - path: /usr/local/bin/check-traefik-health.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      # Health check for Traefik - used by keepalived to determine VIP ownership
-      curl -sf http://127.0.0.1:8081/ping > /dev/null 2>&1
-      exit $?
-
-  - path: /etc/keepalived/keepalived.conf
-    permissions: '0644'
-    content: |
-      vrrp_script check_traefik {
-          script "/usr/local/bin/check-traefik-health.sh"
-          interval 2
-          weight -20
-          fall 3
-          rise 2
-      }
-
-      vrrp_instance TRAEFIK_VIP {
-          state ${ traefik_ha_node_index == 0 ? "MASTER" : "BACKUP" }
-          interface eth0
-          virtual_router_id ${traefik_ha_vrrp_router_id}
-          priority ${ 101 - traefik_ha_node_index }
-          advert_int 1
-
-          authentication {
-              auth_type PASS
-              auth_pass ${traefik_ha_vrrp_password}
-          }
-
-          virtual_ipaddress {
-              ${traefik_ha_vip}
-          }
-
-          track_script {
-              check_traefik
-          }
-      }
-%{ endif ~}
-
-  - path: /root/nomad-cert-install.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      set -e
-      mkdir -p /etc/nomad.d/tls
-      /root/.acme.sh/acme.sh --set-default-ca --server ${acme_dir}
-      FQDNS="${hostname}.${dns_postfix} ${sans}"
-      SAN_ARGS=""
-      for s in $FQDNS; do
-        echo "$s" | grep -q "\." && [ "$s" != "${hostname}.${dns_postfix}" ] && SAN_ARGS="$SAN_ARGS -d $s"
-      done
-      echo "$SAN_ARGS" > /root/.san_args
-      /root/.acme.sh/acme.sh --issue --alpn -d ${hostname}.${dns_postfix} $(cat /root/.san_args)
-      /root/.acme.sh/acme.sh --install-cert -d ${hostname}.${dns_postfix} \
-        --key-file       /etc/nomad.d/tls/nomad.key \
-        --fullchain-file /etc/nomad.d/tls/nomad.crt
-
 runcmd:
   - mkdir -p /opt/nomad/data
   - chown -R nomad:nomad /opt/nomad || true
-  # DNS starts with gateway (set in Terraform initialization.dns).
-  # deployAllServices switches to Pi-hole after Phase 4 via switchNomadDNS.
   - |
     bash -lc '
       systemctl enable --now systemd-timesyncd || true
@@ -179,5 +45,5 @@ runcmd:
       export HOME=/root; cd /root; echo "HOME=$HOME PWD=$PWD"
       command -v ~/.acme.sh/acme.sh >/dev/null || (curl -fsSL https://get.acme.sh | sh -s email=admin@${dns_postfix})
     '
-  # Only enable nomad - setup.sh will start it after GlusterFS is configured
+  # Only enable nomad — Terraform starts it after GlusterFS is configured
   - systemctl enable nomad

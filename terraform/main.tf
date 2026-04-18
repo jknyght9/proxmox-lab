@@ -38,6 +38,23 @@ module "nomad" {
 }
 
 # =============================================================================
+# Vault Nomad Job (deployed after Nomad cluster is healthy)
+# =============================================================================
+
+resource "nomad_job" "vault" {
+  count = local.nomad_configured ? 1 : 0
+
+  jobspec = templatefile("${path.module}/templates/vault.nomad.hcl.tpl", {
+    dns_postfix       = var.dns_postfix
+    vault_tls_enabled = local.vault_configured
+    vault_version     = var.vault_version
+  })
+
+  # Wait for healthy deployment before proceeding
+  detach = false
+}
+
+# =============================================================================
 # Main DNS Cluster (Pi-hole LXC, one per Proxmox node)
 # =============================================================================
 
@@ -89,6 +106,7 @@ module "kasm" {
 
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
 }
 
 # NOTE: Labnet SDN DNS cluster has been moved to feature/labnet-sdn branch.

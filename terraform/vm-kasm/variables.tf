@@ -39,6 +39,10 @@ variable "ssh_admin_public_key_file" {
   type = string
 }
 
+variable "ssh_admin_private_key_file" {
+  type = string
+}
+
 variable "vm_storage" {
   type    = string
   default = "local-lvm"

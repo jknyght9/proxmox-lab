@@ -29,22 +29,9 @@ resource "local_file" "nomad_user_data" {
   for_each = var.vm_configs
   filename = "${path.module}/rendered/${each.value.name}-user-data.yml"
   content = templatefile("${path.module}/cloudinit/nomad-user-data.tmpl", {
-    acme_dir               = "https://vault.${var.dns_postfix}/v1/pki_int/acme/directory"
-    dns_postfix            = var.dns_postfix
-    dns_primary_ip         = var.dns_primary_ip
-    hostname               = each.value.name
-    sans                   = "${each.value.name}.${var.dns_postfix}"
-    ssh_authorized_keys    = file(var.ssh_admin_public_key_file)
-    nomad_datacenter       = var.nomad_datacenter
-    nomad_region           = var.nomad_region
-    nomad_bootstrap_expect = length(var.vm_configs)
-    nomad_servers          = local.nomad_servers
-    gluster_mount          = var.gluster_mount_path
-    traefik_ha_enabled        = var.traefik_ha_enabled
-    traefik_ha_vip            = var.traefik_ha_vip
-    traefik_ha_node_index     = index(local.sorted_vm_keys, each.key)
-    traefik_ha_vrrp_router_id = var.traefik_ha_vrrp_router_id
-    traefik_ha_vrrp_password  = var.traefik_ha_vrrp_password
+    dns_postfix         = var.dns_postfix
+    hostname            = each.value.name
+    ssh_authorized_keys = file(var.ssh_admin_public_key_file)
   })
 }
 
@@ -140,6 +127,150 @@ resource "proxmox_virtual_environment_vm" "nomad" {
 
 # =============================================================================
 # GlusterFS Cluster Setup (replaces setupNomadCluster bash function)
+# =============================================================================
+# Nomad Configuration (managed by Terraform, not cloud-init)
+# =============================================================================
+
+# Write /etc/nomad.d/nomad.hcl on each node via SSH.
+# Re-triggers on any config variable change — no VM recreation needed.
+resource "null_resource" "nomad_config" {
+  for_each   = var.vm_configs
+  depends_on = [proxmox_virtual_environment_vm.nomad]
+
+  triggers = {
+    nomad_servers          = local.nomad_servers
+    nomad_datacenter       = var.nomad_datacenter
+    nomad_region           = var.nomad_region
+    gluster_mount          = var.gluster_mount_path
+    vm_ip                  = each.value.ip
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      echo '[+] Writing Nomad configuration on ${each.value.name}...'
+      sudo tee /etc/nomad.d/nomad.hcl > /dev/null <<'NOMADCONF'
+datacenter = "${var.nomad_datacenter}"
+region     = "${var.nomad_region}"
+data_dir   = "/opt/nomad/data"
+bind_addr  = "0.0.0.0"
+
+advertise {
+  http = "{{ GetPrivateIP }}:4646"
+  rpc  = "{{ GetPrivateIP }}:4647"
+  serf = "{{ GetPrivateIP }}:4648"
+}
+
+server {
+  enabled          = true
+  bootstrap_expect = ${length(var.vm_configs)}
+
+  server_join {
+    retry_join     = [${local.nomad_servers}]
+    retry_max      = 10
+    retry_interval = "15s"
+  }
+}
+
+client {
+  enabled = true
+
+  host_volume "gluster-data" {
+    path      = "${var.gluster_mount_path}"
+    read_only = false
+  }
+}
+
+plugin "docker" {
+  config {
+    allow_privileged = true
+    volumes {
+      enabled = true
+    }
+  }
+}
+
+plugin "raw_exec" {
+  config {
+    enabled = true
+  }
+}
+
+consul {
+  auto_advertise   = false
+  server_auto_join = false
+  client_auto_join = false
+}
+NOMADCONF
+
+      # Vault WIF skeleton — placeholder address until Vault is deployed.
+      # Layer 2 (terraform/services/) updates this with the real address.
+      sudo tee /etc/nomad.d/vault.hcl > /dev/null <<'VAULTCONF'
+vault {
+  enabled = true
+  address = "https://127.0.0.1:8200"
+
+  default_identity {
+    aud  = ["vault.io"]
+    env  = false
+    file = true
+    ttl  = "1h"
+  }
+}
+VAULTCONF
+
+      echo '[+] Nomad configuration written on ${each.value.name}'
+      EOT
+    ]
+  }
+}
+
+# Write ACME cert install script on each node
+resource "null_resource" "nomad_cert_script" {
+  for_each   = var.vm_configs
+  depends_on = [proxmox_virtual_environment_vm.nomad]
+
+  triggers = {
+    dns_postfix = var.dns_postfix
+    hostname    = each.value.name
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      sudo tee /root/nomad-cert-install.sh > /dev/null <<'CERTSCRIPT'
+#!/bin/bash
+set -e
+mkdir -p /etc/nomad.d/tls
+/root/.acme.sh/acme.sh --set-default-ca --server https://vault.${var.dns_postfix}/v1/pki_int/acme/directory
+/root/.acme.sh/acme.sh --issue --alpn -d ${each.value.name}.${var.dns_postfix}
+/root/.acme.sh/acme.sh --install-cert -d ${each.value.name}.${var.dns_postfix} \
+  --key-file       /etc/nomad.d/tls/nomad.key \
+  --fullchain-file /etc/nomad.d/tls/nomad.crt
+CERTSCRIPT
+      sudo chmod 755 /root/nomad-cert-install.sh
+      echo '[+] ACME cert script written on ${each.value.name}'
+      EOT
+    ]
+  }
+}
+
+# =============================================================================
+# GlusterFS Cluster Setup
 # =============================================================================
 
 # Step 1: Create brick directories on each node
@@ -307,13 +438,14 @@ resource "null_resource" "traefik_config" {
   }
 }
 
-# Step 5: Restart Nomad on each node (separate connections — no nested SSH)
+# Step 5: Restart Nomad on each node (after GlusterFS mount + config written)
 resource "null_resource" "nomad_restart" {
   for_each   = var.vm_configs
-  depends_on = [null_resource.gluster_mount]
+  depends_on = [null_resource.gluster_mount, null_resource.nomad_config]
 
   triggers = {
     gluster_mount = null_resource.gluster_mount[each.key].id
+    nomad_config  = null_resource.nomad_config[each.key].id
   }
 
   connection {
@@ -360,6 +492,114 @@ resource "null_resource" "nomad_cluster_health" {
       nomad server members
       exit 1
       EOT
+    ]
+  }
+}
+
+# ============================================================================
+# Traefik HA — keepalived VIP (configurable without VM recreation)
+# ============================================================================
+
+# Configure keepalived on each Nomad node when HA is enabled.
+# Keepalived is pre-installed by Packer; this resource writes the config
+# and starts/stops the service. Re-triggers on any HA setting change.
+resource "null_resource" "traefik_keepalived" {
+  for_each   = var.traefik_ha_enabled ? var.vm_configs : {}
+  depends_on = [null_resource.nomad_cluster_health]
+
+  triggers = {
+    ha_enabled = var.traefik_ha_enabled
+    vip        = var.traefik_ha_vip
+    router_id  = var.traefik_ha_vrrp_router_id
+    password   = var.traefik_ha_vrrp_password
+    node_index = index(local.sorted_vm_keys, each.key)
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      set -e
+      NODE_INDEX=${index(local.sorted_vm_keys, each.key)}
+      PRIORITY=$((101 - NODE_INDEX))
+      if [ $NODE_INDEX -eq 0 ]; then STATE="MASTER"; else STATE="BACKUP"; fi
+
+      echo "[+] Configuring Traefik keepalived on ${each.value.name} ($STATE, priority $PRIORITY)..."
+
+      sudo tee /usr/local/bin/check-traefik-health.sh > /dev/null <<'HEALTHSCRIPT'
+#!/bin/bash
+curl -sf http://127.0.0.1:8081/ping > /dev/null 2>&1
+exit $?
+HEALTHSCRIPT
+      sudo chmod 755 /usr/local/bin/check-traefik-health.sh
+
+      sudo mkdir -p /etc/keepalived
+      sudo tee /etc/keepalived/keepalived.conf > /dev/null <<KEEPCONF
+vrrp_script check_traefik {
+    script "/usr/local/bin/check-traefik-health.sh"
+    interval 2
+    weight -20
+    fall 3
+    rise 2
+}
+
+vrrp_instance TRAEFIK_VIP {
+    state $STATE
+    interface eth0
+    virtual_router_id ${var.traefik_ha_vrrp_router_id}
+    priority $PRIORITY
+    advert_int 1
+
+    authentication {
+        auth_type PASS
+        auth_pass ${var.traefik_ha_vrrp_password}
+    }
+
+    virtual_ipaddress {
+        ${var.traefik_ha_vip}
+    }
+
+    track_script {
+        check_traefik
+    }
+}
+KEEPCONF
+
+      sudo systemctl enable keepalived
+      sudo systemctl restart keepalived
+      echo "[+] Keepalived configured and started on ${each.value.name}"
+      EOT
+    ]
+  }
+}
+
+# Disable keepalived when HA is turned off
+resource "null_resource" "traefik_keepalived_disable" {
+  for_each   = !var.traefik_ha_enabled ? var.vm_configs : {}
+  depends_on = [null_resource.nomad_cluster_health]
+
+  triggers = {
+    ha_enabled = var.traefik_ha_enabled
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo systemctl disable keepalived 2>/dev/null || true",
+      "sudo systemctl stop keepalived 2>/dev/null || true",
+      "echo '[+] Keepalived disabled on ${each.value.name}'",
     ]
   }
 }

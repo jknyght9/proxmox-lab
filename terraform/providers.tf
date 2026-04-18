@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/vault"
       version = "~> 4.0"
     }
+    nomad = {
+      source  = "hashicorp/nomad"
+      version = "~> 2.4.0"
+    }
   }
 }
 
@@ -20,6 +24,13 @@ provider "proxmox" {
     agent    = true
     username = var.proxmox_ssh_username
   }
+}
+
+provider "nomad" {
+  # Nomad may not exist during initial bootstrap (terraform apply -target=module.nomad).
+  # Address defaults to localhost:4646 — set nomad_address in tfvars after cluster deploys.
+  # Resources gated by count = local.nomad_configured won't make API calls until then.
+  address = var.nomad_address
 }
 
 provider "vault" {

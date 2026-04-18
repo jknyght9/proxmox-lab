@@ -1,4 +1,10 @@
 #cloud-config
+# Bootstrap-only cloud-init for Kasm Workspaces VM.
+# Sets up hostname, users, SSH keys, base packages, swap, and acme.sh.
+# Kasm installation and certificate configuration are managed by
+# Terraform null_resource provisioners so they can be reconfigured
+# with `terraform apply` without recreating VMs.
+
 hostname: ${hostname}
 manage_etc_hosts: true
 
@@ -17,31 +23,6 @@ packages: [curl, jq, socat, ca-certificates]
 
 runcmd:
   - |
-    cat > /root/kasm-install.sh <<'EOF'
-    #!/bin/bash
-    set -e
-    /opt/kasm/current/bin/stop
-    /root/.acme.sh/acme.sh --set-default-ca --server ${acme_dir}
-    FQDNS="${hostname}.${dns_postfix} ${sans}"
-    SAN_ARGS=""
-    for s in $FQDNS; do
-      echo "$s" | grep -q "\." && [ "$s" != "${hostname}.${dns_postfix}" ] && SAN_ARGS="$SAN_ARGS -d $s"
-    done
-    echo "$SAN_ARGS" > /root/.san_args
-    /root/.acme.sh/acme.sh --issue --alpn -d ${hostname}.${dns_postfix} $(cat /root/.san_args)
-    KASM_CERT_DIR=/opt/kasm/current/certs
-    mkdir -p "$KASM_CERT_DIR"
-    for f in kasm_nginx.crt kasm_nginx.key; do
-      [ -f "$KASM_CERT_DIR/$f" ] && mv "$KASM_CERT_DIR/$f" "$KASM_CERT_DIR/$f.bak" || true
-    done
-    /root/.acme.sh/acme.sh --install-cert -d ${hostname}.${dns_postfix} \
-      --key-file       /opt/kasm/current/certs/kasm_nginx.key \
-      --fullchain-file /opt/kasm/current/certs/kasm_nginx.crt
-    chown kasm:kasm /opt/kasm/current/certs/kasm_nginx.*
-    /opt/kasm/current/bin/start || true
-    EOF
-    chmod +x /root/kasm-install.sh
-  - |
     bash -lc '
       systemctl enable --now systemd-timesyncd || true
       systemctl restart systemd-timesyncd || true
@@ -49,7 +30,6 @@ runcmd:
   - |
     bash -lc '
       echo "[time] waiting for NTP sync..."
-      # wait up to ~60s for NTP to sync
       for i in {1..30}; do
         if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -qi yes; then
           timedatectl status || true
@@ -68,31 +48,6 @@ runcmd:
     '
   - |
     bash -lc '
-      set -e
-      export HOME=/root; cd /root; echo "HOME=$HOME PWD=$PWD"
-      retry() { n=0; until "$@"; do n=$((n+1)); [ $n -ge 5 ] && return 1; sleep $((2*n)); done; }
-      if [ ! -x /opt/kasm/current/bin/start ]; then
-        curl -fsSLO ${kasm_download_url}
-        tar -xf kasm_release_${kasm_version}.tar.gz
-        cd ~/kasm_release
-        retry bash install.sh --accept-eula --admin-password ${kasm_admin_password}
-      fi
-    '
-  - |
-    bash -lc '
       export HOME=/root; cd /root; echo "HOME=$HOME PWD=$PWD"
       command -v ~/.acme.sh/acme.sh >/dev/null || (curl -fsSL https://get.acme.sh | sh -s email=admin@${dns_postfix})
-    '
-  - |
-    bash -lc '
-      set -e
-      printf "%s\n" "/opt/kasm/current/bin/stop && sleep 2 && /opt/kasm/current/bin/start" > /root/kasm-renew.sh
-      chmod +x /root/kasm-renew.sh
-    '
-  - |
-    bash -lc '
-      set -e
-      export HOME=/root
-      /root/.acme.sh/acme.sh --install-cronjob
-      (crontab -l 2>/dev/null; echo "0 3 * * * /root/.acme.sh/acme.sh --cron --home /root/.acme.sh --reloadcmd \"/root/kasm-renew.sh\"") | crontab -
     '

@@ -10,6 +10,7 @@
 
 locals {
   vault_configured = var.vault_address != ""
+  nomad_configured = var.nomad_address != ""
 }
 
 data "vault_kv_secret_v2" "pihole" {

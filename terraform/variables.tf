@@ -122,6 +122,18 @@ variable "ssh_admin_public_key_file" {
 # Vault Configuration
 # =============================================================================
 
+variable "nomad_address" {
+  type        = string
+  description = "Nomad API address (e.g., http://10.1.50.114:4646). Set after Nomad cluster is deployed."
+  default     = "http://127.0.0.1:4646"
+}
+
+variable "vault_version" {
+  type        = string
+  description = "HashiCorp Vault Docker image tag"
+  default     = "1.21.4"
+}
+
 variable "vault_address" {
   type        = string
   description = "Vault API address (e.g., https://10.1.50.114:8200)"
