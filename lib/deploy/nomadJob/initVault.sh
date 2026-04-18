@@ -141,6 +141,23 @@ EOF
   local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
   local NOMAD_ADDR="http://${VAULT_IP}:4646"
 
+  # Get DNS server IP — try hosts.json, then dns_primary from tfvars, then derive from network
+  local DNS_SERVER_IP=""
+  DNS_SERVER_IP=$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)
+  if [ -z "$DNS_SERVER_IP" ]; then
+    DNS_SERVER_IP=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null)
+  fi
+
+  # Get Nomad node IPs from Layer 1 terraform.tfvars vm_configs or state
+  local NOMAD_IPS_HCL=""
+  # Try terraform output first
+  NOMAD_IPS_HCL=$(docker compose run --rm -T terraform output -json 2>/dev/null | jq -r '.hosts.value.nomad // {} | to_entries[] | "  \(.key) = \"\(.value.ip)\""' 2>/dev/null) || true
+
+  # Fallback: parse from vm_configs defaults in variables.tf
+  if [ -z "$NOMAD_IPS_HCL" ]; then
+    NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null)
+  fi
+
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
 # Layer 2 — Auto-generated after Vault init
@@ -151,12 +168,12 @@ vault_address   = "${VAULT_ADDR_FINAL}"
 vault_token     = "${ROOT_TOKEN}"
 nomad_address   = "${NOMAD_ADDR}"
 dns_postfix     = "${DNS_POSTFIX}"
-dns_server_ip   = "$(jq -r '.external[] | select(.hostname == "dns-01") | .ip' hosts.json 2>/dev/null | head -1 | cut -d'/' -f1)"
+dns_server_ip   = "${DNS_SERVER_IP}"
 network_gateway = "$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
 network_cidr    = "$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
 
 nomad_node_ips = {
-$(jq -r '.external[] | select(.hostname | startswith("nomad")) | "  \(.hostname) = \"\(.ip)\""' hosts.json 2>/dev/null)
+${NOMAD_IPS_HCL}
 }
 
 ssh_admin_private_key_file      = "/crypto/labadmin"
