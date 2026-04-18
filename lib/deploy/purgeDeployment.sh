@@ -165,9 +165,13 @@ EOF
   " || true
   success "Labnet SDN removed"
 
-  # Step 8: Clean local files
+  # Step 8: Clean local files and Vault data
   doing "Step 8/10: Cleaning local configuration files..."
-  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json 2>/dev/null || true
+  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json terraform/services/terraform.tfvars 2>/dev/null || true
+  # Also wipe Vault data on GlusterFS so init state matches (no orphaned initialized Vault)
+  if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
+    sshRunAdmin "labadmin" "${CLUSTER_NODE_IPS[0]}" "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null" || true
+  fi
 
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
