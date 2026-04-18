@@ -188,6 +188,17 @@ EOF
     pressAnyKey
     docker compose build packer >/dev/null 2>&1
     docker compose run --rm -it packer init .
+
+    # Build base cloud image if it doesn't exist (required for cloning)
+    if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config $VMID_BASE_TEMPLATE" &>/dev/null; then
+      doing "Building base VM template (cloud image + guest agent)..."
+      docker compose run --rm -it packer build -only='base-*.*' .
+      success "Base template built"
+    else
+      info "Base template $VMID_BASE_TEMPLATE already exists — skipping"
+    fi
+
+    # Build Docker + Nomad templates (clone from base)
     docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
     success "Phase 1 complete: Packer templates built"
   fi
