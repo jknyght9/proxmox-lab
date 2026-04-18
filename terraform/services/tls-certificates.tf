@@ -24,22 +24,22 @@ resource "null_resource" "install_vault_cert" {
     cert_serial = vault_pki_secret_backend_cert.vault_listener.serial_number
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo mkdir -p /srv/gluster/nomad-data/vault-tls"
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
 
-      echo '${vault_pki_secret_backend_cert.vault_listener.certificate}' | \
-        ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo tee /srv/gluster/nomad-data/vault-tls/cert.pem > /dev/null"
-
-      echo '${vault_pki_secret_backend_cert.vault_listener.private_key}' | \
-        ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo tee /srv/gluster/nomad-data/vault-tls/key.pem > /dev/null"
-
-      ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem && sudo chmod 600 /srv/gluster/nomad-data/vault-tls/key.pem"
-    EOT
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /srv/gluster/nomad-data/vault-tls",
+      "echo '${vault_pki_secret_backend_cert.vault_listener.certificate}' | sudo tee /srv/gluster/nomad-data/vault-tls/cert.pem > /dev/null",
+      "echo '${vault_pki_secret_backend_cert.vault_listener.private_key}' | sudo tee /srv/gluster/nomad-data/vault-tls/key.pem > /dev/null",
+      "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem",
+      "sudo chmod 600 /srv/gluster/nomad-data/vault-tls/key.pem",
+      "echo '[+] Vault listener cert installed'",
+    ]
   }
 }
 
@@ -65,22 +65,22 @@ resource "null_resource" "install_traefik_cert" {
     cert_serial = vault_pki_secret_backend_cert.traefik_wildcard[0].serial_number
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo mkdir -p /srv/gluster/nomad-data/traefik/tls"
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
 
-      echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}' | \
-        ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo tee /srv/gluster/nomad-data/traefik/tls/cert.pem > /dev/null"
-
-      echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].private_key}' | \
-        ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo tee /srv/gluster/nomad-data/traefik/tls/key.pem > /dev/null"
-
-      ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem && sudo chmod 600 /srv/gluster/nomad-data/traefik/tls/key.pem"
-    EOT
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /srv/gluster/nomad-data/traefik/tls",
+      "echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}' | sudo tee /srv/gluster/nomad-data/traefik/tls/cert.pem > /dev/null",
+      "echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].private_key}' | sudo tee /srv/gluster/nomad-data/traefik/tls/key.pem > /dev/null",
+      "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem",
+      "sudo chmod 600 /srv/gluster/nomad-data/traefik/tls/key.pem",
+      "echo '[+] Traefik wildcard cert installed'",
+    ]
   }
 }
 
@@ -93,13 +93,18 @@ resource "null_resource" "traefik_tls_config" {
     cert_serial = vault_pki_secret_backend_cert.traefik_wildcard[0].serial_number
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo mkdir -p /srv/gluster/nomad-data/traefik/config"
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
 
-      cat <<'TLSYML' | ssh -o StrictHostKeyChecking=no -i ${var.ssh_admin_private_key_file} \
-        labadmin@${local.nomad01_ip} "sudo tee /srv/gluster/nomad-data/traefik/config/tls.yml > /dev/null"
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /srv/gluster/nomad-data/traefik/config",
+      <<-EOT
+      sudo tee /srv/gluster/nomad-data/traefik/config/tls.yml > /dev/null <<'TLSYML'
 tls:
   stores:
     default:
@@ -107,6 +112,9 @@ tls:
         certFile: /tls/cert.pem
         keyFile: /tls/key.pem
 TLSYML
-    EOT
+      EOT
+      ,
+      "echo '[+] Traefik TLS config deployed'",
+    ]
   }
 }

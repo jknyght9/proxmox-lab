@@ -41,8 +41,29 @@ module "nomad" {
 # Vault Nomad Job (deployed after Nomad cluster is healthy)
 # =============================================================================
 
+# Vault storage directories (must exist before the Nomad job starts)
+resource "null_resource" "vault_directories" {
+  count      = local.nomad_configured ? 1 : 0
+  depends_on = [module.nomad]
+
+  connection {
+    type        = "ssh"
+    host        = values(module.nomad.vm_ips)[0]
+    user        = "labadmin"
+    private_key = file(replace(var.ssh_admin_public_key_file, ".pub", ""))
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo mkdir -p /srv/gluster/nomad-data/vault /srv/gluster/nomad-data/vault-tls /srv/gluster/nomad-data/certs",
+      "sudo chmod 777 /srv/gluster/nomad-data/vault /srv/gluster/nomad-data/vault-tls",
+    ]
+  }
+}
+
 resource "nomad_job" "vault" {
-  count = local.nomad_configured ? 1 : 0
+  count      = local.nomad_configured ? 1 : 0
+  depends_on = [null_resource.vault_directories]
 
   jobspec = templatefile("${path.module}/templates/vault.nomad.hcl.tpl", {
     dns_postfix       = var.dns_postfix
@@ -50,7 +71,6 @@ resource "nomad_job" "vault" {
     vault_version     = var.vault_version
   })
 
-  # Wait for healthy deployment before proceeding
   detach = false
 }
 

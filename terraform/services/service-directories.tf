@@ -29,8 +29,9 @@ resource "null_resource" "service_directories" {
       echo '[+] Creating GlusterFS service directories...'
       GLUSTER="/srv/gluster/nomad-data"
 
-      # Core (always)
+      # Core (always) — Vault container runs as root but needs write access
       sudo mkdir -p $GLUSTER/vault $GLUSTER/vault-tls $GLUSTER/certs
+      sudo chmod 777 $GLUSTER/vault $GLUSTER/vault-tls
 
       %{if var.deploy_traefik}
       sudo mkdir -p $GLUSTER/traefik/config $GLUSTER/traefik/tls
