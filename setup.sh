@@ -216,12 +216,18 @@ EOF
   doing "Initializing Terraform Layer 1..."
   tf init || { error "Terraform init failed"; return 1; }
 
-  doing "Applying Terraform Layer 1 (this may take several minutes)..."
-  if ! tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"; then
+  # Deploy Nomad + DNS + Vault job first (Kasm needs Vault secrets, deployed later)
+  doing "Deploying Nomad cluster, DNS, and Vault (this may take several minutes)..."
+  if ! tf apply -auto-approve \
+    -var "nomad_address=http://${NOMAD01_IP}:4646" \
+    -target=module.nomad \
+    -target=module.dns-main \
+    -target=nomad_job.vault \
+    -target=null_resource.vault_directories; then
     error "Phase 2 failed: Terraform apply"
     return 1
   fi
-  success "Phase 2 complete: Infrastructure deployed"
+  success "Phase 2 complete: Nomad, DNS, and Vault deployed"
 
   # ============================================
   # PHASE 3: Initialize Vault
@@ -283,8 +289,8 @@ EOF
   tf-services apply -auto-approve
   success "Phase 4 complete: Services configured"
 
-  # Vault now has TLS cert — redeploy with TLS enabled
-  doing "Redeploying Vault with TLS enabled..."
+  # Full Layer 1 apply: Vault TLS redeploy + Kasm (now has real Vault passwords)
+  doing "Redeploying Vault with TLS and deploying Kasm..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
   # Unseal after restart (Vault seals on redeploy)
