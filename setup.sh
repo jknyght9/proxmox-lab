@@ -206,16 +206,21 @@ Deploying Nomad cluster, DNS, Kasm, and Vault container via Terraform.
 EOF
   pressAnyKey
 
-  # Set nomad_address so the Vault job can deploy
+  # Get first Nomad node IP from vm_configs defaults
   local NOMAD01_IP
-  NOMAD01_IP=$(grep -oP '(?<=ip = ")[^"]+' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+  NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
   if [ -z "${NOMAD01_IP:-}" ]; then
     NOMAD01_IP="10.1.50.114"
   fi
 
-  doing "Running Terraform Layer 1..."
-  tf init
-  tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
+  doing "Initializing Terraform Layer 1..."
+  tf init || { error "Terraform init failed"; return 1; }
+
+  doing "Applying Terraform Layer 1 (this may take several minutes)..."
+  if ! tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"; then
+    error "Phase 2 failed: Terraform apply"
+    return 1
+  fi
   success "Phase 2 complete: Infrastructure deployed"
 
   # ============================================
