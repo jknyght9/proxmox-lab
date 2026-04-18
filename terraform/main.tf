@@ -111,6 +111,7 @@ module "dns-main" {
 # =============================================================================
 
 module "kasm" {
+  count  = var.deploy_kasm ? 1 : 0
   source = "./vm-kasm"
 
   dns_postfix        = var.dns_postfix

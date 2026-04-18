@@ -289,8 +289,8 @@ EOF
   tf-services apply -auto-approve
   success "Phase 4 complete: Services configured"
 
-  # Full Layer 1 apply: Vault TLS redeploy + Kasm (now has real Vault passwords)
-  doing "Redeploying Vault with TLS and deploying Kasm..."
+  # Full Layer 1 apply: Vault TLS redeploy (Kasm optional — enable with deploy_kasm=true)
+  doing "Redeploying Vault with TLS enabled..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
   # Unseal after restart (Vault seals on redeploy)
@@ -377,17 +377,18 @@ function showMenu() {
   echo "    2) DNS (Pi-hole cluster)"
   echo "    3) Vault (deploy container)"
   echo "    4) Unseal Vault"
+  echo "    5) Kasm Workspaces (optional)"
   echo
   echo -e "  ${C_BOLD}Services (Layer 2)${C_RESET}"
-  echo "    5) Traefik (load balancer)"
-  echo "    6) Authentik (SSO / OIDC)"
-  echo "    7) Samba AD (domain controllers)"
-  echo "    8) Uptime Kuma (monitoring)"
-  echo "    9) LDAP Account Manager"
+  echo "    6) Traefik (load balancer)"
+  echo "    7) Authentik (SSO / OIDC)"
+  echo "    8) Samba AD (domain controllers)"
+  echo "    9) Uptime Kuma (monitoring)"
+  echo "   10) LDAP Account Manager"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
-  echo "   10) Rollback deployment"
-  echo "   11) Purge deployment"
+  echo "   11) Rollback deployment"
+  echo "   12) Purge deployment"
   echo "    0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
@@ -399,7 +400,6 @@ function showMenu() {
     echo "   d3) Apply Layer 1 (infrastructure)"
     echo "   d4) Apply Layer 2 (services)"
     echo "   d5) Deploy Nomad cluster only"
-    echo "   d6) Deploy Kasm only"
   fi
   echo
 }
@@ -414,9 +414,9 @@ fi
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d6]: ")" choice
+    read -rp "$(question "Select [0-12, d1-d5]: ")" choice
   else
-    read -rp "$(question "Select [0-11]: ")" choice
+    read -rp "$(question "Select [0-12]: ")" choice
   fi
 
   case $choice in
@@ -426,17 +426,18 @@ while true; do
     2)  ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main;;
     3)  ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault;;
     4)  unsealVault;;
+    5)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
 
     # Layer 2 — Services
-    5)  enableService "traefik";;
-    6)  enableService "authentik";;
-    7)  enableService "samba_dc";;
-    8)  enableService "uptime_kuma";;
-    9)  enableService "lam";;
+    6)  enableService "traefik";;
+    7)  enableService "authentik";;
+    8)  enableService "samba_dc";;
+    9)  enableService "uptime_kuma";;
+    10) enableService "lam";;
 
     # Management
-    10) ensureBootstrapComplete && rollbackManual;;
-    11) purgeDeployment;;
+    11) ensureBootstrapComplete && rollbackManual;;
+    12) purgeDeployment;;
 
     # Developer tools
     d1|D1) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                            else error "Invalid option"; fi;;
@@ -444,7 +445,6 @@ while true; do
     d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;            else error "Invalid option"; fi;;
     d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;  else error "Invalid option"; fi;;
     d5|D5) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
-    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.kasm;  else error "Invalid option"; fi;;
 
     0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;

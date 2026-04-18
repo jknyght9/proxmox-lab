@@ -128,6 +128,12 @@ variable "nomad_address" {
   default     = "http://127.0.0.1:4646"
 }
 
+variable "deploy_kasm" {
+  type        = bool
+  description = "Deploy Kasm Workspaces VM"
+  default     = false
+}
+
 variable "vault_version" {
   type        = string
   description = "HashiCorp Vault Docker image tag"
