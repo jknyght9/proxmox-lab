@@ -74,7 +74,7 @@ job "backup" {
 
       # Backup script template - credentials injected from Vault
       template {
-        data = <<'SCRIPT'
+        data = <<SCRIPT
 #!/bin/bash
 set -euo pipefail
 
@@ -90,7 +90,7 @@ SMB_PASSWORD="{{ .Data.data.smb_password }}"
 {{ end }}
 
 # Retention from environment (set by deployment)
-RETENTION_DAYS="${RETENTION_DAYS:-7}"
+RETENTION_DAYS="$${RETENTION_DAYS:-7}"
 
 # Backup directory structure
 BACKUP_DATE=$(date +%Y-%m-%d_%H%M%S)
@@ -131,8 +131,8 @@ backup_dir() {
 
   if [ -d "$source" ]; then
     echo "Backing up $name..."
-    tar -czf "$BACKUP_DIR/${name}.tar.gz" -C "$(dirname "$source")" "$(basename "$source")"
-    echo "  -> $BACKUP_DIR/${name}.tar.gz"
+    tar -czf "$BACKUP_DIR/$${name}.tar.gz" -C "$(dirname "$source")" "$(basename "$source")"
+    echo "  -> $BACKUP_DIR/$${name}.tar.gz"
   else
     echo "Skipping $name (directory not found: $source)"
   fi
