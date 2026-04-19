@@ -160,8 +160,8 @@ tls:
   stores:
     default:
       defaultCertificate:
-        certFile: /tls/cert.pem
-        keyFile: /tls/key.pem
+        certFile: /data/traefik/tls/cert.pem
+        keyFile: /data/traefik/tls/key.pem
 TLSYML
       EOT
       ,
