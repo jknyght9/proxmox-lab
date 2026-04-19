@@ -256,12 +256,21 @@ EOF
   pressAnyKey
 
   # If no credentials file exists, this is a fresh deploy — wipe any stale
-  # Vault data (survives VM recreation on shared NFS storage) and restart
+  # Vault data (survives VM recreation on shared NFS storage).
+  # Must: stop Vault → wipe data → redeploy, in that order.
   if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
-    doing "Fresh deploy detected — wiping stale Vault data..."
+    doing "Fresh deploy detected — stopping Vault, wiping stale data, redeploying..."
     ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
-      "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null; nomad job restart vault 2>/dev/null" || true
-    sleep 5
+      "nomad job stop -purge vault 2>/dev/null || true" || true
+    sleep 3
+    ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
+      "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/*" || true
+    # Redeploy Vault container fresh
+    doing "Redeploying Vault with clean state..."
+    tf apply -auto-approve \
+      -var "nomad_address=http://${NOMAD01_IP}:4646" \
+      -target=nomad_job.vault \
+      -target=null_resource.vault_directories || { error "Failed to redeploy Vault"; return 1; }
   fi
 
   # Wait for Vault to be reachable
