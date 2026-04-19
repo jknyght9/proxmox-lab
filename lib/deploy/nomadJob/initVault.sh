@@ -92,19 +92,54 @@ EOF
   else
     info "Vault already initialized"
 
-    # Check if sealed, unseal if needed
+    # Recovery: Vault is initialized but we have no credentials file.
+    # This means a previous deployment crashed after init but the unseal
+    # key was lost. Stop Vault, wipe data, redeploy, and re-init fresh.
+    if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+      warn "Vault initialized but no credentials file found"
+      warn "Previous deployment likely failed — recovering with fresh init..."
+
+      # Stop and purge the Vault job
+      doing "Stopping Vault..."
+      ssh -o StrictHostKeyChecking=no -i "${ADMIN_KEY_PATH:-${SCRIPT_DIR}/crypto/labadmin}" \
+        labadmin@${VAULT_IP} "nomad job stop -purge vault 2>/dev/null || true" || true
+      sleep 3
+
+      # Wipe Vault data on the VM
+      doing "Wiping stale Vault data..."
+      ssh -o StrictHostKeyChecking=no -i "${ADMIN_KEY_PATH:-${SCRIPT_DIR}/crypto/labadmin}" \
+        labadmin@${VAULT_IP} "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/*" || true
+
+      # Clear stale Layer 2 state
+      rm -f "${SCRIPT_DIR}/terraform/services/terraform.tfstate" "${SCRIPT_DIR}/terraform/services/terraform.tfstate.backup" 2>/dev/null || true
+
+      # Redeploy Vault container fresh
+      doing "Redeploying Vault..."
+      docker compose run --rm -T terraform apply -auto-approve \
+        -var "nomad_address=http://${VAULT_IP}:4646" \
+        -target=nomad_job.vault \
+        -target=null_resource.vault_directories || { error "Failed to redeploy Vault"; return 1; }
+
+      # Wait for Vault to start
+      sleep 5
+
+      # Recurse — Vault should now be uninitialized
+      doing "Retrying Vault initialization..."
+      initAndUnsealVault "$VAULT_IP"
+      return $?
+    fi
+
+    # Normal path: credentials file exists, unseal with saved key
     local IS_SEALED
     IS_SEALED=$(echo "$VAULT_STATUS" | jq -r '.sealed // true')
 
     if [ "$IS_SEALED" = "true" ]; then
-      doing "Vault is sealed, attempting to unseal..."
-      local UNSEAL_KEY=""
-      if [ -f "$VAULT_CREDENTIALS_FILE" ]; then
-        UNSEAL_KEY=$(jq -r '.unseal_key // empty' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
-      fi
+      doing "Vault is sealed, unsealing with saved key..."
+      local UNSEAL_KEY
+      UNSEAL_KEY=$(jq -r '.unseal_key // empty' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
       if [ -z "$UNSEAL_KEY" ]; then
-        read -rsp "$(question "Enter your Vault unseal key: ")" UNSEAL_KEY
-        echo
+        error "Unseal key missing from credentials file"
+        return 1
       fi
       curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/unseal" \
         -H "Content-Type: application/json" \
@@ -112,13 +147,6 @@ EOF
       success "Vault unsealed"
     else
       success "Vault is already unsealed"
-    fi
-
-    # Ensure credentials file exists with current address
-    if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
-      warn "No credentials file found — cannot update vault_address"
-      warn "If you have the root token, create $VAULT_CREDENTIALS_FILE manually"
-      return 1
     fi
 
     # Update vault_address if it changed (e.g., http -> https)

@@ -255,11 +255,6 @@ crypto/vault-credentials.json and Layer 2 tfvars will be generated.
 EOF
   pressAnyKey
 
-  # Fresh deploy: clear stale Layer 2 state (references old Vault mounts/certs)
-  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
-    rm -f terraform/services/terraform.tfstate terraform/services/terraform.tfstate.backup 2>/dev/null || true
-  fi
-
   # Wait for Vault to be reachable
   doing "Waiting for Vault to be reachable..."
   local vault_ready=false
