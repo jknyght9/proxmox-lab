@@ -82,8 +82,8 @@ resource "vault_pki_secret_backend_role" "acme_certs" {
   enforce_hostnames        = false
   server_flag              = true
   client_flag              = true
-  key_type                 = "ec"
-  key_bits                 = 256
+  key_type                 = "rsa"
+  key_bits                 = 2048
   ttl                      = "2160h"  # 90 days
   max_ttl                  = "8760h"  # 1 year
 }
