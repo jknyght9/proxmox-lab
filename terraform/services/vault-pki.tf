@@ -84,6 +84,7 @@ resource "vault_pki_secret_backend_role" "acme_certs" {
   client_flag              = true
   key_type                 = "rsa"
   key_bits                 = 2048
+  key_usage                = ["DigitalSignature", "KeyEncipherment"]
   ttl                      = "2160h"  # 90 days
   max_ttl                  = "8760h"  # 1 year
 }
