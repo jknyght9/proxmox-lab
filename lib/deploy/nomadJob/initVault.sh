@@ -67,15 +67,8 @@ function initAndUnsealVault() {
 
     success "Vault initialized"
 
-    # Unseal
-    doing "Unsealing Vault..."
-    curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/unseal" \
-      -H "Content-Type: application/json" \
-      -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
-
-    success "Vault unsealed"
-
-    # Save credentials
+    # Save credentials IMMEDIATELY — if anything fails after this,
+    # we still have the unseal key and root token on disk
     mkdir -p "$(dirname "$VAULT_CREDENTIALS_FILE")"
     cat > "$VAULT_CREDENTIALS_FILE" <<EOF
 {
@@ -87,6 +80,14 @@ function initAndUnsealVault() {
 EOF
     chmod 600 "$VAULT_CREDENTIALS_FILE"
     success "Credentials saved to $VAULT_CREDENTIALS_FILE"
+
+    # Unseal
+    doing "Unsealing Vault..."
+    curl -skf --connect-timeout 5 --max-time 10 -X PUT "${VAULT_ADDR}/v1/sys/unseal" \
+      -H "Content-Type: application/json" \
+      -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
+
+    success "Vault unsealed"
 
   else
     info "Vault already initialized"
