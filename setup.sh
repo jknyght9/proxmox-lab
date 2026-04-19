@@ -265,6 +265,8 @@ EOF
     sleep 3
     ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
       "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/*" || true
+    # Clear stale Layer 2 state (references deleted Vault mounts/certs)
+    rm -f terraform/services/terraform.tfstate terraform/services/terraform.tfstate.backup 2>/dev/null || true
     # Redeploy Vault container fresh
     doing "Redeploying Vault with clean state..."
     tf apply -auto-approve \
