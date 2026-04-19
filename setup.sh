@@ -255,24 +255,9 @@ crypto/vault-credentials.json and Layer 2 tfvars will be generated.
 EOF
   pressAnyKey
 
-  # If no credentials file exists, this is a fresh deploy — wipe any stale
-  # Vault data (survives VM recreation on shared NFS storage).
-  # Must: stop Vault → wipe data → redeploy, in that order.
+  # Fresh deploy: clear stale Layer 2 state (references old Vault mounts/certs)
   if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
-    doing "Fresh deploy detected — stopping Vault, wiping stale data, redeploying..."
-    ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
-      "nomad job stop -purge vault 2>/dev/null || true" || true
-    sleep 3
-    ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
-      "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/*" || true
-    # Clear stale Layer 2 state (references deleted Vault mounts/certs)
     rm -f terraform/services/terraform.tfstate terraform/services/terraform.tfstate.backup 2>/dev/null || true
-    # Redeploy Vault container fresh
-    doing "Redeploying Vault with clean state..."
-    tf apply -auto-approve \
-      -var "nomad_address=http://${NOMAD01_IP}:4646" \
-      -target=nomad_job.vault \
-      -target=null_resource.vault_directories || { error "Failed to redeploy Vault"; return 1; }
   fi
 
   # Wait for Vault to be reachable

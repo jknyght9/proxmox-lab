@@ -53,21 +53,8 @@ EOF
   warn "Starting complete deployment purge..."
   echo
 
-  # Step 0: Stop Vault and wipe data (must happen while Nomad VMs still exist)
-  doing "Stopping Vault and wiping data on GlusterFS..."
-  local nomad01_ip
-  nomad01_ip=$(sed -n 's/.*"nomad01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null | head -1)
-  if [ -n "$nomad01_ip" ]; then
-    # Stop the Vault Nomad job first so the container releases its data
-    sshRunAdmin "labadmin" "$nomad01_ip" "nomad job stop -purge vault 2>/dev/null" 2>/dev/null || true
-    sleep 2
-    sshRunAdmin "labadmin" "$nomad01_ip" "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null" 2>/dev/null || true
-    success "Vault stopped and data wiped"
-  else
-    info "Could not determine nomad01 IP — skipping Vault data wipe"
-  fi
-
   # Step 1: Purge all VMs, LXC containers, and Packer templates
+  # GlusterFS data lives on VM disks — destroying VMs wipes everything.
   doing "Step 1/10: Purging all VMs, LXC containers, and templates..."
   purgeClusterResources --auto --include-templates || true
 
