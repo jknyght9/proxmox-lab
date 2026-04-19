@@ -93,6 +93,31 @@ resource "null_resource" "pihole_nebula_sync" {
   }
 }
 
+# Switch Nomad VMs to use Pi-hole DNS (they boot with gateway DNS)
+resource "null_resource" "nomad_dns_config" {
+  for_each   = var.dns_server_ip != "" ? var.nomad_node_ips : {}
+  depends_on = [null_resource.pihole_dns_records]
+
+  triggers = {
+    dns_server = local.dns_target_ip
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo resolvectl dns eth0 ${local.dns_target_ip}",
+      "sudo resolvectl domain eth0 ${var.dns_postfix}",
+      "echo '[+] DNS set to ${local.dns_target_ip} on ${each.key}'",
+    ]
+  }
+}
+
 # Update Proxmox nodes to use Pi-hole DNS
 resource "null_resource" "proxmox_dns_config" {
   for_each   = var.dns_server_ip != "" ? var.proxmox_node_ips : {}
