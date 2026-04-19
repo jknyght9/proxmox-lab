@@ -106,6 +106,28 @@ variable "deploy_tailscale" {
 }
 
 # =============================================================================
+# HA Configuration (VIP addresses)
+# =============================================================================
+
+variable "traefik_ha_vip" {
+  type        = string
+  description = "Traefik keepalived VIP (e.g., 10.1.50.100/24). Empty if HA disabled."
+  default     = ""
+}
+
+variable "dns_ha_vip" {
+  type        = string
+  description = "DNS keepalived VIP (e.g., 10.1.50.3/24). Empty if HA disabled."
+  default     = ""
+}
+
+variable "proxmox_node_ips" {
+  type        = map(string)
+  description = "Map of Proxmox node names to IPs (for DNS records)"
+  default     = {}
+}
+
+# =============================================================================
 # AD Configuration (used by samba-dc, lam, domain-join)
 # =============================================================================
 

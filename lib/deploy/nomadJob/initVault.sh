@@ -201,6 +201,15 @@ ssh_admin_private_key_file      = "/crypto/labadmin"
 ssh_admin_public_key_file       = "/crypto/labadmin.pub"
 ssh_enterprise_private_key_file = "/crypto/labenterpriseadmin"
 
+# HA VIPs (for DNS records)
+traefik_ha_vip = "$(sed -n 's/^nomad_traefik_ha_vip.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
+dns_ha_vip     = "$(sed -n 's/^dns_ha_vip_address.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
+
+# Proxmox nodes (for DNS records)
+proxmox_node_ips = {
+$(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null || true)
+}
+
 # Service toggles — set to true to deploy
 deploy_traefik = true
 EOF

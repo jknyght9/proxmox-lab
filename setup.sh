@@ -420,6 +420,7 @@ function showMenu() {
     echo "   d3) Apply Layer 1 (infrastructure)"
     echo "   d4) Apply Layer 2 (services)"
     echo "   d5) Deploy Nomad cluster only"
+    echo "   d6) Rebuild DNS records"
   fi
   echo
 }
@@ -434,7 +435,7 @@ fi
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d5]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d6]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -464,6 +465,7 @@ while true; do
     d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;            else error "Invalid option"; fi;;
     d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;  else error "Invalid option"; fi;;
     d5|D5) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
+    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync -target=null_resource.proxmox_dns_config; else error "Invalid option"; fi;;
 
     0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;

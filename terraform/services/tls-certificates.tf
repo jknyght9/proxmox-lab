@@ -16,9 +16,20 @@ resource "vault_pki_secret_backend_cert" "vault_listener" {
   ttl         = "8760h" # 1 year
 }
 
-# Deploy Vault listener cert to GlusterFS
+# Write cert + chain to a local temp file, then upload via file provisioner
+resource "local_file" "vault_cert_pem" {
+  filename = "${path.module}/rendered/vault-cert.pem"
+  content  = "${vault_pki_secret_backend_cert.vault_listener.certificate}\n${vault_pki_secret_backend_cert.vault_listener.ca_chain}"
+}
+
+resource "local_file" "vault_key_pem" {
+  filename        = "${path.module}/rendered/vault-key.pem"
+  content         = vault_pki_secret_backend_cert.vault_listener.private_key
+  file_permission = "0600"
+}
+
 resource "null_resource" "install_vault_cert" {
-  depends_on = [vault_pki_secret_backend_cert.vault_listener]
+  depends_on = [local_file.vault_cert_pem, local_file.vault_key_pem]
 
   triggers = {
     cert_serial = vault_pki_secret_backend_cert.vault_listener.serial_number
@@ -32,12 +43,26 @@ resource "null_resource" "install_vault_cert" {
   }
 
   provisioner "remote-exec" {
+    inline = ["sudo mkdir -p /srv/gluster/nomad-data/vault-tls"]
+  }
+
+  provisioner "file" {
+    source      = local_file.vault_cert_pem.filename
+    destination = "/tmp/vault-cert.pem"
+  }
+
+  provisioner "file" {
+    source      = local_file.vault_key_pem.filename
+    destination = "/tmp/vault-key.pem"
+  }
+
+  provisioner "remote-exec" {
     inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/vault-tls",
-      "printf '%s\\n%s\\n' '${vault_pki_secret_backend_cert.vault_listener.certificate}' '${vault_pki_secret_backend_cert.vault_listener.ca_chain}' | sudo tee /srv/gluster/nomad-data/vault-tls/cert.pem > /dev/null",
-      "echo '${vault_pki_secret_backend_cert.vault_listener.private_key}' | sudo tee /srv/gluster/nomad-data/vault-tls/key.pem > /dev/null",
+      "sudo cp /tmp/vault-cert.pem /srv/gluster/nomad-data/vault-tls/cert.pem",
+      "sudo cp /tmp/vault-key.pem /srv/gluster/nomad-data/vault-tls/key.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/key.pem",
+      "rm -f /tmp/vault-cert.pem /tmp/vault-key.pem",
       "echo '[+] Vault listener cert installed (full chain)'",
     ]
   }
@@ -56,10 +81,22 @@ resource "vault_pki_secret_backend_cert" "traefik_wildcard" {
   ttl         = "8760h" # 1 year
 }
 
-# Deploy Traefik wildcard cert to GlusterFS
+resource "local_file" "traefik_cert_pem" {
+  count    = var.deploy_traefik ? 1 : 0
+  filename = "${path.module}/rendered/traefik-cert.pem"
+  content  = "${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}\n${vault_pki_secret_backend_cert.traefik_wildcard[0].ca_chain}"
+}
+
+resource "local_file" "traefik_key_pem" {
+  count           = var.deploy_traefik ? 1 : 0
+  filename        = "${path.module}/rendered/traefik-key.pem"
+  content         = vault_pki_secret_backend_cert.traefik_wildcard[0].private_key
+  file_permission = "0600"
+}
+
 resource "null_resource" "install_traefik_cert" {
   count      = var.deploy_traefik ? 1 : 0
-  depends_on = [vault_pki_secret_backend_cert.traefik_wildcard]
+  depends_on = [local_file.traefik_cert_pem, local_file.traefik_key_pem]
 
   triggers = {
     cert_serial = vault_pki_secret_backend_cert.traefik_wildcard[0].serial_number
@@ -73,13 +110,27 @@ resource "null_resource" "install_traefik_cert" {
   }
 
   provisioner "remote-exec" {
+    inline = ["sudo mkdir -p /srv/gluster/nomad-data/traefik/tls"]
+  }
+
+  provisioner "file" {
+    source      = local_file.traefik_cert_pem[0].filename
+    destination = "/tmp/traefik-cert.pem"
+  }
+
+  provisioner "file" {
+    source      = local_file.traefik_key_pem[0].filename
+    destination = "/tmp/traefik-key.pem"
+  }
+
+  provisioner "remote-exec" {
     inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/traefik/tls",
-      "printf '%s\\n%s\\n' '${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}' '${vault_pki_secret_backend_cert.traefik_wildcard[0].ca_chain}' | sudo tee /srv/gluster/nomad-data/traefik/tls/cert.pem > /dev/null",
-      "echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].private_key}' | sudo tee /srv/gluster/nomad-data/traefik/tls/key.pem > /dev/null",
+      "sudo cp /tmp/traefik-cert.pem /srv/gluster/nomad-data/traefik/tls/cert.pem",
+      "sudo cp /tmp/traefik-key.pem /srv/gluster/nomad-data/traefik/tls/key.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/key.pem",
-      "echo '[+] Traefik wildcard cert installed'",
+      "rm -f /tmp/traefik-cert.pem /tmp/traefik-key.pem",
+      "echo '[+] Traefik wildcard cert installed (full chain)'",
     ]
   }
 }
