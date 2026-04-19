@@ -34,11 +34,11 @@ resource "null_resource" "install_vault_cert" {
   provisioner "remote-exec" {
     inline = [
       "sudo mkdir -p /srv/gluster/nomad-data/vault-tls",
-      "echo '${vault_pki_secret_backend_cert.vault_listener.certificate}' | sudo tee /srv/gluster/nomad-data/vault-tls/cert.pem > /dev/null",
+      "printf '%s\\n%s\\n' '${vault_pki_secret_backend_cert.vault_listener.certificate}' '${vault_pki_secret_backend_cert.vault_listener.ca_chain}' | sudo tee /srv/gluster/nomad-data/vault-tls/cert.pem > /dev/null",
       "echo '${vault_pki_secret_backend_cert.vault_listener.private_key}' | sudo tee /srv/gluster/nomad-data/vault-tls/key.pem > /dev/null",
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/key.pem",
-      "echo '[+] Vault listener cert installed'",
+      "echo '[+] Vault listener cert installed (full chain)'",
     ]
   }
 }
@@ -75,7 +75,7 @@ resource "null_resource" "install_traefik_cert" {
   provisioner "remote-exec" {
     inline = [
       "sudo mkdir -p /srv/gluster/nomad-data/traefik/tls",
-      "echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}' | sudo tee /srv/gluster/nomad-data/traefik/tls/cert.pem > /dev/null",
+      "printf '%s\\n%s\\n' '${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}' '${vault_pki_secret_backend_cert.traefik_wildcard[0].ca_chain}' | sudo tee /srv/gluster/nomad-data/traefik/tls/cert.pem > /dev/null",
       "echo '${vault_pki_secret_backend_cert.traefik_wildcard[0].private_key}' | sudo tee /srv/gluster/nomad-data/traefik/tls/key.pem > /dev/null",
       "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/key.pem",
