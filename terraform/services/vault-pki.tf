@@ -21,8 +21,8 @@ resource "vault_pki_secret_backend_root_cert" "root" {
   type        = "internal"
   common_name = "Proxmox Lab Root CA"
   issuer_name = "proxmox-lab-root"
-  key_type    = "ec"
-  key_bits    = 256
+  key_type    = "rsa"
+  key_bits    = 4096
   ttl         = "87600h" # 10 years
 }
 
@@ -45,8 +45,8 @@ resource "vault_pki_secret_backend_intermediate_cert_request" "int" {
   backend     = vault_mount.pki_int.path
   type        = "internal"
   common_name = "Proxmox Lab Intermediate CA"
-  key_type    = "ec"
-  key_bits    = 256
+  key_type    = "rsa"
+  key_bits    = 4096
 }
 
 resource "vault_pki_secret_backend_root_sign_intermediate" "int" {
