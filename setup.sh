@@ -255,6 +255,15 @@ crypto/vault-credentials.json and Layer 2 tfvars will be generated.
 EOF
   pressAnyKey
 
+  # If no credentials file exists, this is a fresh deploy — wipe any stale
+  # Vault data (survives VM recreation on shared NFS storage) and restart
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    doing "Fresh deploy detected — wiping stale Vault data..."
+    ssh -o StrictHostKeyChecking=no -i "$ADMIN_KEY_PATH" labadmin@${NOMAD01_IP} \
+      "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null; nomad job restart vault 2>/dev/null" || true
+    sleep 5
+  fi
+
   # Wait for Vault to be reachable
   doing "Waiting for Vault to be reachable..."
   local vault_ready=false
