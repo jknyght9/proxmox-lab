@@ -53,13 +53,16 @@ EOF
   warn "Starting complete deployment purge..."
   echo
 
-  # Step 0: Wipe Vault data on GlusterFS (must happen while Nomad VMs still exist)
-  doing "Wiping Vault data on GlusterFS..."
+  # Step 0: Stop Vault and wipe data (must happen while Nomad VMs still exist)
+  doing "Stopping Vault and wiping data on GlusterFS..."
   local nomad01_ip
   nomad01_ip=$(sed -n 's/.*"nomad01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null | head -1)
   if [ -n "$nomad01_ip" ]; then
+    # Stop the Vault Nomad job first so the container releases its data
+    sshRunAdmin "labadmin" "$nomad01_ip" "nomad job stop -purge vault 2>/dev/null" 2>/dev/null || true
+    sleep 2
     sshRunAdmin "labadmin" "$nomad01_ip" "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null" 2>/dev/null || true
-    success "Vault data wiped"
+    success "Vault stopped and data wiped"
   else
     info "Could not determine nomad01 IP — skipping Vault data wipe"
   fi
@@ -178,7 +181,9 @@ EOF
 
   # Step 8: Clean local files
   doing "Step 8/10: Cleaning local configuration files..."
-  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json terraform/services/terraform.tfvars 2>/dev/null || true
+  rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json 2>/dev/null || true
+  # Clean Layer 2 state + config (Vault was wiped, state is invalid)
+  rm -f terraform/services/terraform.tfvars terraform/services/terraform.tfstate terraform/services/terraform.tfstate.backup 2>/dev/null || true
 
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
