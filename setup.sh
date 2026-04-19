@@ -319,11 +319,12 @@ EOF
   tf-services apply -auto-approve
   success "Layer 2 complete: Vault configured, Traefik deployed"
 
-  # Full Layer 1 apply: DNS (with real passwords from Vault) + Vault TLS redeploy
+  # Full Layer 1 apply: DNS (with real passwords) + Vault TLS redeploy
+  # detach=true so terraform doesn't wait for sealed Vault health check
   doing "Deploying DNS and enabling Vault TLS..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
-  # Unseal after restart (Vault seals on redeploy)
+  # Vault seals on TLS redeploy — wait for it to come up, then unseal
   doing "Waiting for Vault to restart with TLS..."
   sleep 5
   for i in {1..30}; do
@@ -333,16 +334,24 @@ EOF
     sleep 2
   done
 
-  # Update vault_address to HTTPS and unseal
+  # Unseal and update address to HTTPS
+  local UNSEAL_KEY
+  UNSEAL_KEY=$(jq -r '.unseal_key' "$VAULT_CREDENTIALS_FILE")
+  doing "Unsealing Vault (TLS)..."
+  curl -sk -X PUT "https://${NOMAD01_IP}:8200/v1/sys/unseal" \
+    -H "Content-Type: application/json" \
+    -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
+  success "Vault unsealed on HTTPS"
+
+  # Update credentials and Layer 2 tfvars with HTTPS address
   local tmp; tmp=$(mktemp)
   jq --arg addr "https://${NOMAD01_IP}:8200" '.vault_address = $addr' "$VAULT_CREDENTIALS_FILE" > "$tmp" && mv "$tmp" "$VAULT_CREDENTIALS_FILE"
   chmod 600 "$VAULT_CREDENTIALS_FILE"
-
-  # Regenerate Layer 2 tfvars with HTTPS address
   DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
   initAndUnsealVault "$NOMAD01_IP"
 
-  # Re-apply Layer 2 with updated Vault address
+  # Re-apply Layer 2 with HTTPS Vault address
+  doing "Re-applying Layer 2 with Vault HTTPS..."
   tf-services apply -auto-approve
 
   echo

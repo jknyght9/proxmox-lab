@@ -71,7 +71,9 @@ resource "nomad_job" "vault" {
     vault_version     = var.vault_version
   })
 
-  detach = false
+  # Vault starts sealed after every restart — it can't pass health checks
+  # until manually unsealed. Use detach=true so terraform doesn't block.
+  detach = true
 }
 
 # =============================================================================
