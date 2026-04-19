@@ -396,19 +396,18 @@ function showMenu() {
   echo -e "  ${C_BOLD}Infrastructure (Layer 1)${C_RESET}"
   echo "    2) DNS (Pi-hole cluster)"
   echo "    3) Vault (deploy container)"
-  echo "    4) Unseal Vault"
-  echo "    5) Kasm Workspaces (optional)"
+  echo "    4) Kasm Workspaces (optional)"
   echo
   echo -e "  ${C_BOLD}Services (Layer 2)${C_RESET}"
-  echo "    6) Traefik (load balancer)"
-  echo "    7) Authentik (SSO / OIDC)"
-  echo "    8) Samba AD (domain controllers)"
-  echo "    9) Uptime Kuma (monitoring)"
-  echo "   10) LDAP Account Manager"
+  echo "    5) Traefik (load balancer)"
+  echo "    6) Authentik (SSO / OIDC)"
+  echo "    7) Samba AD (domain controllers)"
+  echo "    8) Uptime Kuma (monitoring)"
+  echo "    9) LDAP Account Manager"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
-  echo "   11) Rollback deployment"
-  echo "   12) Purge deployment"
+  echo "   10) Rollback deployment"
+  echo "   11) Purge deployment"
   echo "    0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
@@ -434,9 +433,9 @@ fi
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-12, d1-d5]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d5]: ")" choice
   else
-    read -rp "$(question "Select [0-12]: ")" choice
+    read -rp "$(question "Select [0-11]: ")" choice
   fi
 
   case $choice in
@@ -445,19 +444,18 @@ while true; do
     # Layer 1 — Infrastructure
     2)  ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main;;
     3)  ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault;;
-    4)  unsealVault;;
-    5)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
+    4)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
 
     # Layer 2 — Services
-    6)  enableService "traefik";;
-    7)  enableService "authentik";;
-    8)  enableService "samba_dc";;
-    9)  enableService "uptime_kuma";;
-    10) enableService "lam";;
+    5)  enableService "traefik";;
+    6)  enableService "authentik";;
+    7)  enableService "samba_dc";;
+    8)  enableService "uptime_kuma";;
+    9)  enableService "lam";;
 
     # Management
-    11) ensureBootstrapComplete && rollbackManual;;
-    12) purgeDeployment;;
+    10) ensureBootstrapComplete && rollbackManual;;
+    11) purgeDeployment;;
 
     # Developer tools
     d1|D1) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                            else error "Invalid option"; fi;;
