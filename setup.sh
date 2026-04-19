@@ -165,9 +165,9 @@ function deployAll() {
 Full Services Deployment
 
 Phase 1: Build Packer templates (base + Docker/Nomad)
-Phase 2: Deploy infrastructure (Nomad VMs, GlusterFS, DNS, Kasm)
+Phase 2: Deploy Nomad cluster + Vault container
 Phase 3: Initialize Vault (init, unseal, save credentials)
-Phase 4: Configure services (PKI, secrets, Traefik, DNS records)
+Phase 4: Configure services (PKI, secrets, Traefik) + deploy DNS
 ############################################################################
 
 EOF
@@ -227,18 +227,18 @@ EOF
   doing "Initializing Terraform Layer 1..."
   tf init || { error "Terraform init failed"; return 1; }
 
-  # Deploy Nomad + DNS + Vault job first (Kasm needs Vault secrets, deployed later)
-  doing "Deploying Nomad cluster, DNS, and Vault (this may take several minutes)..."
+  # Deploy Nomad cluster + Vault job only — DNS deploys after Vault
+  # has real passwords (avoids placeholder passwords and rebuild)
+  doing "Deploying Nomad cluster and Vault (this may take several minutes)..."
   if ! tf apply -auto-approve \
     -var "nomad_address=http://${NOMAD01_IP}:4646" \
     -target=module.nomad \
-    -target=module.dns-main \
     -target=nomad_job.vault \
     -target=null_resource.vault_directories; then
     error "Phase 2 failed: Terraform apply"
     return 1
   fi
-  success "Phase 2 complete: Nomad, DNS, and Vault deployed"
+  success "Phase 2 complete: Nomad cluster and Vault deployed"
 
   # ============================================
   # PHASE 3: Initialize Vault
@@ -305,7 +305,8 @@ EOF
 Phase 4: Service Configuration
 
 Configuring Vault PKI, JWT auth, policies, secrets, and deploying
-Traefik via Terraform Layer 2.
+Traefik via Terraform Layer 2. Then deploying DNS and enabling
+Vault TLS via Layer 1 (now with real Vault passwords).
 ############################################################################
 
 EOF
@@ -314,12 +315,12 @@ EOF
   doing "Initializing Terraform Layer 2..."
   tf-services init
 
-  doing "Running Terraform Layer 2..."
+  doing "Running Terraform Layer 2 (PKI, secrets, Traefik)..."
   tf-services apply -auto-approve
-  success "Phase 4 complete: Services configured"
+  success "Layer 2 complete: Vault configured, Traefik deployed"
 
-  # Full Layer 1 apply: Vault TLS redeploy (Kasm optional — enable with deploy_kasm=true)
-  doing "Redeploying Vault with TLS enabled..."
+  # Full Layer 1 apply: DNS (with real passwords from Vault) + Vault TLS redeploy
+  doing "Deploying DNS and enabling Vault TLS..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
   # Unseal after restart (Vault seals on redeploy)
