@@ -53,6 +53,17 @@ EOF
   warn "Starting complete deployment purge..."
   echo
 
+  # Step 0: Wipe Vault data on GlusterFS (must happen while Nomad VMs still exist)
+  doing "Wiping Vault data on GlusterFS..."
+  local nomad01_ip
+  nomad01_ip=$(sed -n 's/.*"nomad01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null | head -1)
+  if [ -n "$nomad01_ip" ]; then
+    sshRunAdmin "labadmin" "$nomad01_ip" "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null" 2>/dev/null || true
+    success "Vault data wiped"
+  else
+    info "Could not determine nomad01 IP — skipping Vault data wipe"
+  fi
+
   # Step 1: Purge all VMs, LXC containers, and Packer templates
   doing "Step 1/10: Purging all VMs, LXC containers, and templates..."
   purgeClusterResources --auto --include-templates || true
@@ -165,13 +176,9 @@ EOF
   " || true
   success "Labnet SDN removed"
 
-  # Step 8: Clean local files and Vault data
+  # Step 8: Clean local files
   doing "Step 8/10: Cleaning local configuration files..."
   rm -f hosts.json .bootstrap-complete terraform/vault.auto.tfvars crypto/vault-credentials.json crypto/proxmox-credentials.json terraform/services/terraform.tfvars 2>/dev/null || true
-  # Also wipe Vault data on GlusterFS so init state matches (no orphaned initialized Vault)
-  if [ ${#CLUSTER_NODE_IPS[@]} -gt 0 ]; then
-    sshRunAdmin "labadmin" "${CLUSTER_NODE_IPS[0]}" "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* 2>/dev/null" || true
-  fi
 
   # Remove auto-generated sections from terraform.tfvars (keep manual config)
   if [ -f "terraform/terraform.tfvars" ]; then
