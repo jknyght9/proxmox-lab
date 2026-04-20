@@ -55,11 +55,22 @@ resource "null_resource" "pihole_dns_records" {
     host        = var.dns_server_ip
     user        = "root"
     private_key = file(var.ssh_admin_private_key_file)
+    timeout     = "10m"
   }
 
   provisioner "remote-exec" {
     inline = [
       <<-EOT
+      # Wait for Pi-hole to be ready (may still be provisioning)
+      echo '[+] Waiting for pihole-FTL...'
+      for i in $(seq 1 60); do
+        command -v pihole-FTL >/dev/null 2>&1 && break
+        sleep 5
+      done
+      if ! command -v pihole-FTL >/dev/null 2>&1; then
+        echo '[!] pihole-FTL not found after 5 minutes'
+        exit 1
+      fi
       echo '[+] Updating Pi-hole DNS records...'
       pihole-FTL --config dns.hosts '${jsonencode(local.dns_records)}'
       pihole-FTL --config dns.cnameRecords '[]'
