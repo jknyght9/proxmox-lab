@@ -1,27 +1,24 @@
-output "hosts" {
-  value = {
-    nomad    = try(module.nomad.nomad-hosts, {})
-    dns-main = try(module.dns-main.dns-hosts, {})
-  }
+output "nomad_ips" {
+  description = "Nomad cluster node IPs"
+  value       = module.nomad.vm_ips
 }
 
-output "host-records" {
-  value = {
-    external = flatten([
-      for group_hosts in [
-        try(module.nomad.nomad-hosts, {}),
-        try(module.dns-main.dns-hosts, {})
-      ] : [
-        for name, details in group_hosts : {
-          hostname = details.hostname
-          ip       = details.ip
-        }
-      ]
-    ])
-  }
+output "nomad_master" {
+  description = "Nomad primary node IP (nomad01)"
+  value       = module.nomad.master_ip
 }
 
-output "dns-primary-ip" {
-  description = "Primary DNS server IP for other services"
-  value       = module.dns-main.primary_ip
+output "dns_ips" {
+  description = "Pi-hole DNS container IPs"
+  value       = try({ for k, v in module.dns-main.dns-hosts : k => v.ip }, {})
+}
+
+output "vault_address" {
+  description = "Vault API address"
+  value       = var.vault_address != "" ? var.vault_address : "http://${module.nomad.master_ip}:8200"
+}
+
+output "kasm_ip" {
+  description = "Kasm Workspaces IP"
+  value       = try(module.kasm[0].vm_ips["kasm01"], "not deployed")
 }
