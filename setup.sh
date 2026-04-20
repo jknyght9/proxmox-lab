@@ -182,9 +182,21 @@ EOF
   NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
   NOMAD01_IP="${NOMAD01_IP:-10.1.50.114}"
 
-  doing "Applying HA configuration..."
+  doing "Applying HA configuration (Layer 1)..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
   success "HA configuration applied"
+
+  # Update Layer 2 tfvars with VIP addresses for DNS records
+  local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
+  if [ -f "$SERVICES_TFVARS" ]; then
+    sed -i.bak "s|^traefik_ha_vip.*|traefik_ha_vip = \"${traefik_ha_vip}\"|" "$SERVICES_TFVARS"
+    sed -i.bak "s|^dns_ha_vip.*|dns_ha_vip     = \"${dns_ha_vip}\"|" "$SERVICES_TFVARS"
+    rm -f "$SERVICES_TFVARS.bak"
+
+    doing "Updating DNS records with VIP addresses (Layer 2)..."
+    tf-services apply -auto-approve
+    success "DNS records updated with HA VIPs"
+  fi
 }
 
 # Enable a service toggle and apply Layer 2
