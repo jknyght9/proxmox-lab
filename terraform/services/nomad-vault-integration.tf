@@ -9,6 +9,7 @@ resource "null_resource" "nomad_vault_config" {
 
   triggers = {
     vault_address = var.vault_address
+    root_ca       = vault_pki_secret_backend_root_cert.root.issuing_ca
   }
 
   connection {
