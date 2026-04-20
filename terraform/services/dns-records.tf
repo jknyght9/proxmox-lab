@@ -31,6 +31,9 @@ locals {
       "${local.traefik_ip} ca ca.${var.dns_postfix}",
     ],
 
+    # Kasm Workspaces (direct IP, not behind Traefik)
+    var.kasm_ip != "" ? ["${var.kasm_ip} kasm kasm.${var.dns_postfix}"] : [],
+
     # Proxmox node records
     [for name, ip in var.proxmox_node_ips :
       "${ip} ${name} ${name}.${var.dns_postfix}"],

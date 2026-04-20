@@ -214,6 +214,9 @@ proxmox_node_ips = {
 $(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null || true)
 }
 
+# Kasm IP (for DNS record, set when Kasm is deployed)
+kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null || true)"
+
 # Service toggles — set to true to deploy
 deploy_traefik = true
 EOF

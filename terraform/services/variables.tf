@@ -70,6 +70,12 @@ variable "ssh_enterprise_private_key_file" {
 # Service Toggles
 # =============================================================================
 
+variable "kasm_ip" {
+  type        = string
+  description = "Kasm Workspaces VM IP (for DNS record). Empty if not deployed."
+  default     = ""
+}
+
 variable "deploy_dns_records" {
   type        = bool
   description = "Configure Pi-hole DNS records (requires DNS containers to be deployed first)"
