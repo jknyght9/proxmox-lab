@@ -41,6 +41,7 @@ services:
   terraform:
     image: hashicorp/terraform
     userns_mode: host  # Bypass userns-remap for volume write access
+    network_mode: host
     container_name: terraform
     working_dir: /terraform
     volumes:
@@ -53,6 +54,7 @@ services:
   terraform-services:
     image: hashicorp/terraform
     userns_mode: host
+    network_mode: host
     container_name: terraform-services
     working_dir: /services
     volumes:
