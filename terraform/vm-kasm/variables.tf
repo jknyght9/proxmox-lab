@@ -13,8 +13,9 @@ variable "kasm_admin_password" {
 }
 
 variable "kasm_version" {
-  type    = string
-  default = "1.16.1.98d6d9"
+  type        = string
+  description = "Kasm Workspaces version (format: X.Y.Z.hash from kasmweb.com/downloads)"
+  default     = "1.18.0.09f70a"
 }
 
 variable "proxmox_endpoint" {
