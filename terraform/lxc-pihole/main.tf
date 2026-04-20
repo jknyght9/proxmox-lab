@@ -116,7 +116,8 @@ resource "null_resource" "direct_provision" {
   depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_privileged]
 
   triggers = {
-    vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
+    vmid       = proxmox_virtual_environment_container.dns[each.key].vm_id
+    privileged = var.enable_ha_vip ? null_resource.enable_privileged[each.key].id : "unprivileged"
   }
 
   connection {
