@@ -9,8 +9,6 @@
 # Usage:
 #   ./setup.sh               # interactive menu
 #   ./setup.sh --dev         # includes developer tools
-#   ./setup.sh --debug       # verbose output (show all command output)
-#   ./setup.sh --dev --debug # both
 
 set -euo pipefail
 export TERM=xterm
@@ -45,12 +43,9 @@ source "$SCRIPT_DIR/lib/deploy/nomadJob/unsealVault.sh"
 # Argument parsing
 # -----------------------------------------------------------------------------
 DEV_MODE=false
-DEBUG_MODE=false
 for arg in "$@"; do
-  [[ "$arg" == "--dev" ]]   && DEV_MODE=true
-  [[ "$arg" == "--debug" ]] && DEBUG_MODE=true
+  [[ "$arg" == "--dev" ]] && DEV_MODE=true
 done
-export DEBUG_MODE
 
 # -----------------------------------------------------------------------------
 # Global state
@@ -435,11 +430,6 @@ function showMenu() {
 }
 
 header
-
-if [ "$DEBUG_MODE" = "true" ]; then
-  warn "Debug mode enabled — full command output will be shown"
-  echo
-fi
 
 while true; do
   showMenu
