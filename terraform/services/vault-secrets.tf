@@ -26,9 +26,10 @@ resource "random_password" "pihole_root" {
 }
 
 resource "random_password" "kasm_admin" {
-  length  = 20
-  special = true
-  keepers = { service = "kasm" }
+  length           = 20
+  special          = true
+  override_special = "!@#%^&*"  # Avoid shell-unsafe chars: ()=<>?:;'"
+  keepers          = { service = "kasm" }
 }
 
 resource "random_password" "packer_root" {
