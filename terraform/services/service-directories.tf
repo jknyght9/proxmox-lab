@@ -10,7 +10,7 @@ resource "null_resource" "service_directories" {
       "vault-tls",
       "certs",
       var.deploy_traefik    ? "traefik,traefik/config,traefik/tls" : "",
-      var.deploy_authentik  ? "authentik,authentik/postgres,authentik/data,authentik/data/media,authentik/branding" : "",
+      var.deploy_authentik  ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
       var.deploy_samba_dc   ? "" : "",  # samba uses /opt/samba-dc01 on host, not gluster
       var.deploy_uptime_kuma ? "uptime-kuma" : "",
     ]))
@@ -38,10 +38,12 @@ resource "null_resource" "service_directories" {
       %{endif}
 
       %{if var.deploy_authentik}
-      sudo mkdir -p $GLUSTER/authentik/postgres $GLUSTER/authentik/data/media $GLUSTER/authentik/branding
-      [ -f $GLUSTER/authentik/branding/background.png ] || sudo touch $GLUSTER/authentik/branding/background.png
-      [ -f $GLUSTER/authentik/branding/logo.svg ] || sudo touch $GLUSTER/authentik/branding/logo.svg
+      sudo mkdir -p $GLUSTER/authentik/postgres $GLUSTER/authentik/data/media
       sudo chown -R 1000:1000 $GLUSTER/authentik/data
+      # Branding disabled — uncomment to enable custom branding
+      # sudo mkdir -p $GLUSTER/authentik/branding
+      # [ -f $GLUSTER/authentik/branding/background.png ] || sudo touch $GLUSTER/authentik/branding/background.png
+      # [ -f $GLUSTER/authentik/branding/logo.svg ] || sudo touch $GLUSTER/authentik/branding/logo.svg
       %{endif}
 
       %{if var.deploy_uptime_kuma}
