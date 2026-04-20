@@ -70,6 +70,12 @@ variable "ssh_enterprise_private_key_file" {
 # Service Toggles
 # =============================================================================
 
+variable "deploy_dns_records" {
+  type        = bool
+  description = "Configure Pi-hole DNS records (requires DNS containers to be deployed first)"
+  default     = false
+}
+
 variable "deploy_traefik" {
   type    = bool
   default = true

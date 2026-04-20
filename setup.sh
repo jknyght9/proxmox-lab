@@ -332,8 +332,17 @@ EOF
   DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
   initAndUnsealVault "$NOMAD01_IP"
 
-  # Re-apply Layer 2 with HTTPS Vault address
-  doing "Re-applying Layer 2 with Vault HTTPS..."
+  # Enable DNS records now that containers are deployed
+  local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
+  if ! grep -q "deploy_dns_records" "$SERVICES_TFVARS" 2>/dev/null; then
+    echo "deploy_dns_records = true" >> "$SERVICES_TFVARS"
+  else
+    sed -i.bak 's/deploy_dns_records.*/deploy_dns_records = true/' "$SERVICES_TFVARS"
+    rm -f "$SERVICES_TFVARS.bak"
+  fi
+
+  # Re-apply Layer 2 with HTTPS Vault address + DNS records
+  doing "Re-applying Layer 2 (HTTPS + DNS records)..."
   tf-services apply -auto-approve
 
   echo

@@ -42,8 +42,8 @@ locals {
 }
 
 resource "null_resource" "pihole_dns_records" {
-  # Only run if DNS server is available
-  count = var.dns_server_ip != "" ? 1 : 0
+  # Only run when DNS containers are deployed and ready
+  count = var.deploy_dns_records ? 1 : 0
 
   triggers = {
     records_hash = sha256(jsonencode(local.dns_records))
@@ -71,7 +71,7 @@ resource "null_resource" "pihole_dns_records" {
 
 # Trigger Nebula-Sync to propagate to replica Pi-holes
 resource "null_resource" "pihole_nebula_sync" {
-  count      = var.dns_server_ip != "" ? 1 : 0
+  count      = var.deploy_dns_records ? 1 : 0
   depends_on = [null_resource.pihole_dns_records]
 
   triggers = {
@@ -95,7 +95,7 @@ resource "null_resource" "pihole_nebula_sync" {
 
 # Switch Nomad VMs to use Pi-hole DNS (they boot with gateway DNS)
 resource "null_resource" "nomad_dns_config" {
-  for_each   = var.dns_server_ip != "" ? var.nomad_node_ips : {}
+  for_each   = var.deploy_dns_records ? var.nomad_node_ips : {}
   depends_on = [null_resource.pihole_dns_records]
 
   triggers = {
@@ -120,7 +120,7 @@ resource "null_resource" "nomad_dns_config" {
 
 # Update Proxmox nodes to use Pi-hole DNS
 resource "null_resource" "proxmox_dns_config" {
-  for_each   = var.dns_server_ip != "" ? var.proxmox_node_ips : {}
+  for_each   = var.deploy_dns_records ? var.proxmox_node_ips : {}
   depends_on = [null_resource.pihole_dns_records]
 
   triggers = {
