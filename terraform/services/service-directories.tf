@@ -38,8 +38,7 @@ resource "null_resource" "service_directories" {
       %{endif}
 
       %{if var.deploy_authentik}
-      sudo mkdir -p $GLUSTER/authentik/{postgres,data/media,branding}
-      # Placeholder branding files (prevents Docker bind-mount creating dirs)
+      sudo mkdir -p $GLUSTER/authentik/postgres $GLUSTER/authentik/data/media $GLUSTER/authentik/branding
       [ -f $GLUSTER/authentik/branding/background.png ] || sudo touch $GLUSTER/authentik/branding/background.png
       [ -f $GLUSTER/authentik/branding/logo.svg ] || sudo touch $GLUSTER/authentik/branding/logo.svg
       sudo chown -R 1000:1000 $GLUSTER/authentik/data
