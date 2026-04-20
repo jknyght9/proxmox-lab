@@ -197,6 +197,10 @@ nomad_node_ips = {
 ${NOMAD_IPS_HCL}
 }
 
+# AD Configuration (derived from dns_postfix)
+ad_realm  = "$(echo "${DNS_POSTFIX}" | tr '[:lower:]' '[:upper:]')"
+ad_domain = "$(echo "${DNS_POSTFIX}" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')"
+
 ssh_admin_private_key_file      = "/crypto/labadmin"
 ssh_admin_public_key_file       = "/crypto/labadmin.pub"
 ssh_enterprise_private_key_file = "/crypto/labenterpriseadmin"
