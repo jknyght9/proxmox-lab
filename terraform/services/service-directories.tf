@@ -72,7 +72,8 @@ resource "null_resource" "samba_directories" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo mkdir -p ${each.value.dir}/{samba,samba/private,krb5,smb.conf}",
+      "sudo mkdir -p ${each.value.dir}/samba/private ${each.value.dir}/krb5",
+      "[ -f ${each.value.dir}/smb.conf ] || sudo touch ${each.value.dir}/smb.conf",
       "echo '[+] Samba DC directory prepared at ${each.value.dir} on ${each.value.node}'",
     ]
   }
