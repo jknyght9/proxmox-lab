@@ -127,20 +127,20 @@ resource "null_resource" "kasm_install" {
     inline = [
       <<-EOT
       set -e
-      export HOME=/root
-      cd /root
-
       if [ -x /opt/kasm/current/bin/start ]; then
         echo '[+] Kasm already installed, skipping'
         exit 0
       fi
 
       echo '[+] Installing Kasm Workspaces ${var.kasm_version}...'
-      retry() { n=0; until "$@"; do n=$((n+1)); [ $n -ge 5 ] && return 1; sleep $((2*n)); done; }
-      sudo curl -fsSLO https://kasm-static-content.s3.amazonaws.com/kasm_release_${var.kasm_version}.tar.gz
-      sudo tar -xf kasm_release_${var.kasm_version}.tar.gz
-      cd /root/kasm_release
-      sudo retry bash install.sh --accept-eula --admin-password '${var.kasm_admin_password}'
+      sudo bash -c '
+        set -e
+        cd /root
+        curl -fsSLO https://kasm-static-content.s3.amazonaws.com/kasm_release_${var.kasm_version}.tar.gz
+        tar -xf kasm_release_${var.kasm_version}.tar.gz
+        cd /root/kasm_release
+        bash install.sh --accept-eula --admin-password "'"'${var.kasm_admin_password}'"'"
+      '
       echo '[+] Kasm installation complete'
       EOT
     ]
