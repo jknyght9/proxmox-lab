@@ -72,6 +72,7 @@ resource "nomad_job" "lam" {
     vault_jwt_auth_backend_role.lam,
     vault_kv_secret_v2.cluster_config,
     null_resource.nomad_vault_config,
+    null_resource.lam_bootstrap,
   ]
 
   jobspec = templatefile("${path.module}/templates/lam.nomad.hcl.tpl", {

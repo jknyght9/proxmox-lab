@@ -52,18 +52,48 @@ resource "null_resource" "service_directories" {
 
       %{if var.deploy_lam}
       sudo mkdir -p $GLUSTER/lam/config $GLUSTER/lam/session
-      if [ ! -f $GLUSTER/lam/config/config.cfg ]; then
-        echo '[+] Bootstrapping LAM default config from container...'
-        sudo docker pull ghcr.io/ldapaccountmanager/lam:stable
-        sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:stable
-        sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $GLUSTER/lam/config/
-        sudo docker rm lam-bootstrap
-        sudo chmod -R 777 $GLUSTER/lam
-        echo '[+] LAM config bootstrapped'
-      fi
       %{endif}
 
       echo '[+] Service directories created'
+      EOT
+    ]
+  }
+}
+
+# LAM config bootstrap — extract defaults from container image
+resource "null_resource" "lam_bootstrap" {
+  count      = var.deploy_lam ? 1 : 0
+  depends_on = [null_resource.service_directories]
+
+  triggers = {
+    deploy_lam = var.deploy_lam
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      set -e
+      GLUSTER="/srv/gluster/nomad-data"
+      if [ -f $GLUSTER/lam/config/config.cfg ]; then
+        echo '[+] LAM config already exists, skipping bootstrap'
+        exit 0
+      fi
+      echo '[+] Bootstrapping LAM default config from container...'
+      sudo docker rm -f lam-bootstrap 2>/dev/null || true
+      sudo docker pull ghcr.io/ldapaccountmanager/lam:stable
+      sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:stable
+      sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $GLUSTER/lam/config/
+      sudo docker rm lam-bootstrap
+      sudo chmod -R 777 $GLUSTER/lam
+      echo '[+] LAM config bootstrapped'
+      ls -la $GLUSTER/lam/config/
       EOT
     ]
   }
