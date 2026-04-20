@@ -26,8 +26,9 @@ resource "proxmox_virtual_environment_container" "dns" {
   node_name   = each.value.target_node
   vm_id       = each.value.vmid
   tags        = ["terraform", "lxc", "dns", var.cluster_name]
-  # HA with keepalived requires NET_ADMIN capability, which needs privileged mode
-  unprivileged = !var.enable_ha_vip
+  # Always create unprivileged — HA privileged mode is set post-creation
+  # via null_resource using root SSH (API tokens can't create privileged LXCs)
+  unprivileged  = true
   start_on_boot = true
   started       = true
 
@@ -77,31 +78,34 @@ resource "proxmox_virtual_environment_container" "dns" {
   }
 }
 
-# Enable nesting feature for privileged containers (required for Pi-hole FTL)
-# API tokens can't set features at creation time for privileged containers,
-# so we add it after creation via pct set on the Proxmox host
-resource "null_resource" "enable_nesting" {
+# Convert to privileged + enable nesting when HA is enabled.
+# Must be done via root SSH because API tokens can't modify privilege mode.
+# Also enables nesting (required for Pi-hole FTL in privileged mode).
+resource "null_resource" "enable_privileged" {
   for_each   = var.enable_ha_vip ? local.nodes_map : {}
   depends_on = [proxmox_virtual_environment_container.dns]
 
   triggers = {
-    vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
+    vmid       = proxmox_virtual_environment_container.dns[each.key].vm_id
+    ha_enabled = var.enable_ha_vip
   }
 
   connection {
     type        = "ssh"
     user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)  # Enterprise key for Proxmox access
+    private_key = file(var.ssh_enterprise_private_key_file)
     host        = each.value.ssh_host
   }
 
   provisioner "remote-exec" {
     inline = [
-      "echo '[+] Enabling nesting feature for container ${proxmox_virtual_environment_container.dns[each.key].vm_id}...'",
-      "pct set ${proxmox_virtual_environment_container.dns[each.key].vm_id} -features nesting=1",
-      "pct reboot ${proxmox_virtual_environment_container.dns[each.key].vm_id}",
+      "echo '[+] Converting container ${proxmox_virtual_environment_container.dns[each.key].vm_id} to privileged mode...'",
+      "pct stop ${proxmox_virtual_environment_container.dns[each.key].vm_id} 2>/dev/null || true",
+      "sleep 3",
+      "pct set ${proxmox_virtual_environment_container.dns[each.key].vm_id} -unprivileged 0 -features nesting=1",
+      "pct start ${proxmox_virtual_environment_container.dns[each.key].vm_id}",
       "sleep 5",
-      "echo '[+] Nesting enabled and container rebooted'"
+      "echo '[+] Container ${each.key} is now privileged with nesting enabled'"
     ]
   }
 }
@@ -109,7 +113,7 @@ resource "null_resource" "enable_nesting" {
 # Direct SSH provisioning (only for non-SDN networks)
 resource "null_resource" "direct_provision" {
   for_each   = var.is_sdn_network ? {} : local.nodes_map
-  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
+  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_privileged]
 
   triggers = {
     vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
@@ -374,7 +378,7 @@ resource "null_resource" "configure_local_dns" {
 # SDN provisioning via pct exec (only for SDN networks)
 resource "null_resource" "sdn_provision" {
   for_each   = var.is_sdn_network ? local.nodes_map : {}
-  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_nesting]
+  depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_privileged]
 
   triggers = {
     vmid = proxmox_virtual_environment_container.dns[each.key].vm_id
