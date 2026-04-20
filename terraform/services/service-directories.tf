@@ -50,6 +50,19 @@ resource "null_resource" "service_directories" {
       sudo mkdir -p $GLUSTER/uptime-kuma
       %{endif}
 
+      %{if var.deploy_lam}
+      sudo mkdir -p $GLUSTER/lam/config $GLUSTER/lam/session
+      if [ ! -f $GLUSTER/lam/config/config.cfg ]; then
+        echo '[+] Bootstrapping LAM default config from container...'
+        sudo docker pull ghcr.io/ldapaccountmanager/lam:stable
+        sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:stable
+        sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $GLUSTER/lam/config/
+        sudo docker rm lam-bootstrap
+        sudo chmod -R 777 $GLUSTER/lam
+        echo '[+] LAM config bootstrapped'
+      fi
+      %{endif}
+
       echo '[+] Service directories created'
       EOT
     ]
