@@ -106,6 +106,87 @@ function deployService() {
   fi
 }
 
+# Toggle HA — reads settings from bootstrap.yml, writes to terraform.tfvars, applies Layer 1
+function toggleHA() {
+  ensureBootstrapComplete || return 1
+
+  # Read HA settings from bootstrap.yml
+  _bootstrap_init_vars 2>/dev/null || true
+
+  local dns_ha_enabled dns_ha_vip dns_ha_router_id dns_ha_password
+  local traefik_ha_enabled traefik_ha_vip traefik_ha_router_id traefik_ha_password
+
+  dns_ha_enabled=$(yamlGet "ha.dns.enabled" 2>/dev/null || echo "false")
+  dns_ha_vip=$(yamlGet "ha.dns.vip" 2>/dev/null || echo "")
+  dns_ha_router_id=$(yamlGet "ha.dns.vrrp_router_id" 2>/dev/null || echo "51")
+  dns_ha_password=$(yamlGet "ha.dns.vrrp_password" 2>/dev/null || echo "pihole-ha")
+
+  traefik_ha_enabled=$(yamlGet "ha.traefik.enabled" 2>/dev/null || echo "false")
+  traefik_ha_vip=$(yamlGet "ha.traefik.vip" 2>/dev/null || echo "")
+  traefik_ha_router_id=$(yamlGet "ha.traefik.vrrp_router_id" 2>/dev/null || echo "53")
+  traefik_ha_password=$(yamlGet "ha.traefik.vrrp_password" 2>/dev/null || echo "traefik-ha")
+
+  if [ "$dns_ha_enabled" != "true" ] && [ "$traefik_ha_enabled" != "true" ]; then
+    error "No HA settings found in bootstrap.yml"
+    info "Add ha.dns and/or ha.traefik sections to bootstrap.yml first"
+    return 1
+  fi
+
+  local TFVARS="${SCRIPT_DIR}/terraform/terraform.tfvars"
+
+  echo
+  info "HA Configuration from bootstrap.yml:"
+  if [ "$dns_ha_enabled" = "true" ]; then
+    info "  DNS HA:     VIP=${dns_ha_vip} RouterID=${dns_ha_router_id}"
+  else
+    info "  DNS HA:     disabled"
+  fi
+  if [ "$traefik_ha_enabled" = "true" ]; then
+    info "  Traefik HA: VIP=${traefik_ha_vip} RouterID=${traefik_ha_router_id}"
+  else
+    info "  Traefik HA: disabled"
+  fi
+  echo
+
+  # Remove existing HA lines from tfvars
+  sed -i.bak '/^enable_dns_ha_vip/d; /^dns_ha_vip/d; /^dns_ha_vrrp/d; /^nomad_traefik_ha/d' "$TFVARS"
+  rm -f "$TFVARS.bak"
+
+  # Write HA settings
+  if [ "$dns_ha_enabled" = "true" ] && [ -n "$dns_ha_vip" ]; then
+    cat >> "$TFVARS" <<EOF
+
+# DNS HA (keepalived VIP)
+enable_dns_ha_vip      = true
+dns_ha_vip_address     = "${dns_ha_vip}"
+dns_ha_vrrp_router_id  = ${dns_ha_router_id}
+dns_ha_vrrp_password   = "${dns_ha_password}"
+EOF
+  fi
+
+  if [ "$traefik_ha_enabled" = "true" ] && [ -n "$traefik_ha_vip" ]; then
+    cat >> "$TFVARS" <<EOF
+
+# Traefik HA (keepalived VIP)
+nomad_traefik_ha_enabled        = true
+nomad_traefik_ha_vip            = "${traefik_ha_vip}"
+nomad_traefik_ha_vrrp_router_id = ${traefik_ha_router_id}
+nomad_traefik_ha_vrrp_password  = "${traefik_ha_password}"
+EOF
+  fi
+
+  success "HA settings written to terraform.tfvars"
+
+  # Get nomad address for apply
+  local NOMAD01_IP
+  NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+  NOMAD01_IP="${NOMAD01_IP:-10.1.50.114}"
+
+  doing "Applying HA configuration..."
+  tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
+  success "HA configuration applied"
+}
+
 # Enable a service toggle and apply Layer 2
 function enableService() {
   local service_name="$1"
@@ -402,17 +483,18 @@ function showMenu() {
   echo "    2) DNS (Pi-hole cluster)"
   echo "    3) Vault (deploy container)"
   echo "    4) Kasm Workspaces (optional)"
+  echo "    5) Enable HA (keepalived VIPs)"
   echo
   echo -e "  ${C_BOLD}Services (Layer 2)${C_RESET}"
-  echo "    5) Traefik (load balancer)"
-  echo "    6) Authentik (SSO / OIDC)"
-  echo "    7) Samba AD (domain controllers)"
-  echo "    8) Uptime Kuma (monitoring)"
-  echo "    9) LDAP Account Manager"
+  echo "    6) Traefik (load balancer)"
+  echo "    7) Authentik (SSO / OIDC)"
+  echo "    8) Samba AD (domain controllers)"
+  echo "    9) Uptime Kuma (monitoring)"
+  echo "   10) LDAP Account Manager"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
-  echo "   10) Rollback deployment"
-  echo "   11) Purge deployment"
+  echo "   11) Rollback deployment"
+  echo "   12) Purge deployment"
   echo "    0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
@@ -434,9 +516,9 @@ header
 while true; do
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d6]: ")" choice
+    read -rp "$(question "Select [0-12, d1-d6]: ")" choice
   else
-    read -rp "$(question "Select [0-11]: ")" choice
+    read -rp "$(question "Select [0-12]: ")" choice
   fi
 
   case $choice in
@@ -446,17 +528,18 @@ while true; do
     2)  ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main;;
     3)  ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault;;
     4)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
+    5)  toggleHA;;
 
     # Layer 2 — Services
-    5)  enableService "traefik";;
-    6)  enableService "authentik";;
-    7)  enableService "samba_dc";;
-    8)  enableService "uptime_kuma";;
-    9)  enableService "lam";;
+    6)  enableService "traefik";;
+    7)  enableService "authentik";;
+    8)  enableService "samba_dc";;
+    9)  enableService "uptime_kuma";;
+    10) enableService "lam";;
 
     # Management
-    10) ensureBootstrapComplete && rollbackManual;;
-    11) purgeDeployment;;
+    11) ensureBootstrapComplete && rollbackManual;;
+    12) purgeDeployment;;
 
     # Developer tools
     d1|D1) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                            else error "Invalid option"; fi;;
