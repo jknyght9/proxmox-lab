@@ -44,4 +44,4 @@ http:
     pihole:
       loadBalancer:
         servers:
-          - url: "http://${dns01_ip}:80"
+          - url: "http://${dns01_ip}:8080"
