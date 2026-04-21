@@ -65,6 +65,13 @@ resource "random_password" "authentik_admin" {
   keepers          = { service = "authentik" }
 }
 
+resource "random_password" "authentik_api_token" {
+  count   = var.deploy_authentik ? 1 : 0
+  length  = 40
+  special = false
+  keepers = { service = "authentik" }
+}
+
 resource "random_password" "authentik_postgres" {
   count   = var.deploy_authentik ? 1 : 0
   length  = 24
@@ -128,6 +135,7 @@ resource "vault_kv_secret_v2" "authentik" {
     POSTGRES_PASSWORD    = random_password.authentik_postgres[0].result
     admin_password       = random_password.authentik_admin[0].result
     admin_email          = "admin@${var.dns_postfix}"
+    api_token            = random_password.authentik_api_token[0].result
   })
 }
 

@@ -83,6 +83,13 @@ variable "pihole_admin_password" {
   default     = ""
 }
 
+variable "authentik_api_token" {
+  type        = string
+  sensitive   = true
+  description = "Authentik API token (bootstrap token for provider auth)"
+  default     = "not-configured"
+}
+
 variable "deploy_dns_records" {
   type        = bool
   description = "Configure Pi-hole DNS records (requires DNS containers to be deployed first)"

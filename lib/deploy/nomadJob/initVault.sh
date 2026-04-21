@@ -217,8 +217,11 @@ $(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null 
 # Kasm IP (for DNS record, set when Kasm is deployed)
 kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null || true)"
 
-# Pi-hole admin password (for pihole provider API access — read from Vault)
+# Pi-hole admin password (for API access — read from Vault)
 pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/services/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
+
+# Authentik API token (for authentik provider — read from Vault)
+authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
 
 # Roaming profiles (from bootstrap.yml)
 profile_server       = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_server 2>/dev/null || true)"

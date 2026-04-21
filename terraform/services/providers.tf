@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/nomad"
       version = "~> 2.4.0"
     }
+    authentik = {
+      source  = "goauthentik/authentik"
+      version = "~> 2025.2"
+    }
     # NOTE: ryanwholey/pihole provider is incompatible with Pi-hole v6.6+
     # (uses legacy PHP API, not the new /api/ REST endpoint)
     # DNS records managed via null_resource + pihole-FTL CLI instead
@@ -23,5 +27,11 @@ provider "vault" {
 
 provider "nomad" {
   address = var.nomad_address
+}
+
+provider "authentik" {
+  url      = "https://auth.${var.dns_postfix}"
+  token    = var.authentik_api_token
+  insecure = true # Internal CA
 }
 

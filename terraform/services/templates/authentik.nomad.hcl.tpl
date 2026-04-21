@@ -111,6 +111,7 @@ AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
 AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
+AUTHENTIK_BOOTSTRAP_TOKEN={{ .Data.data.api_token }}
 {{ end }}
 AUTHENTIK_HOST=https://auth.${dns_postfix}
 AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
@@ -183,6 +184,7 @@ AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
 AUTHENTIK_BOOTSTRAP_EMAIL={{ .Data.data.admin_email }}
+AUTHENTIK_BOOTSTRAP_TOKEN={{ .Data.data.api_token }}
 {{ end }}
 AUTHENTIK_HOST=https://auth.${dns_postfix}
 AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
