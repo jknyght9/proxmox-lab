@@ -483,6 +483,97 @@ function rebuildTemplates() {
 }
 
 # -----------------------------------------------------------------------------
+# Bootstrap change detection
+# -----------------------------------------------------------------------------
+CONFIG_CHANGES_DETECTED=false
+CONFIG_CHANGE_SUMMARY=""
+
+function detectBootstrapChanges() {
+  CONFIG_CHANGES_DETECTED=false
+  CONFIG_CHANGE_SUMMARY=""
+
+  # Only check if both files exist (deployed state)
+  [ -f "$SCRIPT_DIR/bootstrap.yml" ] || return 0
+  [ -f "$SCRIPT_DIR/terraform/terraform.tfvars" ] || return 0
+
+  _bootstrap_init_vars 2>/dev/null || return 0
+
+  local changes=()
+
+  # --- HA settings ---
+  local bs_dns_ha; bs_dns_ha=$(yamlGet ha_dns_enabled 2>/dev/null || echo "false")
+  local bs_traefik_ha; bs_traefik_ha=$(yamlGet ha_traefik_enabled 2>/dev/null || echo "false")
+  local tf_dns_ha; tf_dns_ha=$(grep -c "^enable_dns_ha_vip.*=.*true" "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null || echo "0")
+  local tf_traefik_ha; tf_traefik_ha=$(grep -c "^nomad_traefik_ha_enabled.*=.*true" "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null || echo "0")
+
+  if [ "$bs_dns_ha" = "true" ] && [ "$tf_dns_ha" = "0" ]; then
+    changes+=("Enable DNS HA (VIP: $(yamlGet ha_dns_vip 2>/dev/null))")
+  elif [ "$bs_dns_ha" != "true" ] && [ "$tf_dns_ha" != "0" ]; then
+    changes+=("Disable DNS HA")
+  fi
+
+  if [ "$bs_traefik_ha" = "true" ] && [ "$tf_traefik_ha" = "0" ]; then
+    changes+=("Enable Traefik HA (VIP: $(yamlGet ha_traefik_vip 2>/dev/null))")
+  elif [ "$bs_traefik_ha" != "true" ] && [ "$tf_traefik_ha" != "0" ]; then
+    changes+=("Disable Traefik HA")
+  fi
+
+  # --- Profile settings ---
+  local bs_profile; bs_profile=$(yamlGet profile_server 2>/dev/null || true)
+  if [ -f "$SCRIPT_DIR/terraform/services/terraform.tfvars" ]; then
+    local tf_profile; tf_profile=$(sed -n 's/^profile_server.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/services/terraform.tfvars" 2>/dev/null)
+    if [ -n "$bs_profile" ] && [ "$bs_profile" != "$tf_profile" ]; then
+      changes+=("Profile server: ${bs_profile}")
+    fi
+  fi
+
+  # --- HA VIP address changes ---
+  local bs_dns_vip; bs_dns_vip=$(yamlGet ha_dns_vip 2>/dev/null || true)
+  local tf_dns_vip; tf_dns_vip=$(sed -n 's/^dns_ha_vip_address.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null)
+  if [ -n "$bs_dns_vip" ] && [ "$bs_dns_ha" = "true" ] && [ "$bs_dns_vip" != "$tf_dns_vip" ]; then
+    changes+=("DNS VIP: ${tf_dns_vip:-none} → ${bs_dns_vip}")
+  fi
+
+  local bs_traefik_vip; bs_traefik_vip=$(yamlGet ha_traefik_vip 2>/dev/null || true)
+  local tf_traefik_vip; tf_traefik_vip=$(sed -n 's/^nomad_traefik_ha_vip.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null)
+  if [ -n "$bs_traefik_vip" ] && [ "$bs_traefik_ha" = "true" ] && [ "$bs_traefik_vip" != "$tf_traefik_vip" ]; then
+    changes+=("Traefik VIP: ${tf_traefik_vip:-none} → ${bs_traefik_vip}")
+  fi
+
+  if [ ${#changes[@]} -gt 0 ]; then
+    CONFIG_CHANGES_DETECTED=true
+    CONFIG_CHANGE_SUMMARY=$(printf '    - %s\n' "${changes[@]}")
+  fi
+}
+
+function applyConfigChanges() {
+  info "Applying configuration changes from bootstrap.yml..."
+  echo
+
+  # Apply HA changes (reuses existing toggleHA logic)
+  toggleHA
+
+  # Update Layer 2 profile settings
+  local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
+  if [ -f "$SERVICES_TFVARS" ]; then
+    local bs_profile; bs_profile=$(yamlGet profile_server 2>/dev/null || true)
+    local bs_share; bs_share=$(yamlGet profile_share 2>/dev/null || echo "profiles")
+    local bs_drive; bs_drive=$(yamlGet profile_drive_letter 2>/dev/null || echo "P")
+
+    sed -i.bak "s|^profile_server.*|profile_server       = \"${bs_profile}\"|" "$SERVICES_TFVARS"
+    sed -i.bak "s|^profile_share.*|profile_share        = \"${bs_share}\"|" "$SERVICES_TFVARS"
+    sed -i.bak "s|^profile_drive_letter.*|profile_drive_letter = \"${bs_drive}\"|" "$SERVICES_TFVARS"
+    rm -f "$SERVICES_TFVARS.bak"
+
+    doing "Applying Layer 2 changes..."
+    tf-services apply -auto-approve
+  fi
+
+  CONFIG_CHANGES_DETECTED=false
+  success "Configuration changes applied"
+}
+
+# -----------------------------------------------------------------------------
 # Menu
 # -----------------------------------------------------------------------------
 function showMenu() {
@@ -525,7 +616,18 @@ function showMenu() {
 
 header
 
+# Detect bootstrap.yml changes on startup
+detectBootstrapChanges
+
 while true; do
+  # Show config change alert if detected
+  if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then
+    echo
+    echo -e "  ${C_BOLD}\033[1;33m⚠  Configuration changes detected in bootstrap.yml:${C_RESET}"
+    echo "$CONFIG_CHANGE_SUMMARY"
+    echo -e "    ${C_BOLD}*) Apply configuration changes${C_RESET}"
+  fi
+
   showMenu
   if [ "$DEV_MODE" = true ]; then
     read -rp "$(question "Select [0-12, d1-d6]: ")" choice
@@ -560,6 +662,9 @@ while true; do
     d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;  else error "Invalid option"; fi;;
     d5|D5) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
     d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync -target=null_resource.proxmox_dns_config; else error "Invalid option"; fi;;
+
+    # Config change apply
+    \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
 
     0|q|Q) echo; info "Goodbye."; break;;
     *)     error "Invalid option: $choice";;
