@@ -8,10 +8,9 @@ terraform {
       source  = "hashicorp/nomad"
       version = "~> 2.4.0"
     }
-    pihole = {
-      source  = "ryanwholey/pihole"
-      version = "~> 0.0.6"
-    }
+    # NOTE: ryanwholey/pihole provider is incompatible with Pi-hole v6.6+
+    # (uses legacy PHP API, not the new /api/ REST endpoint)
+    # DNS records managed via null_resource + pihole-FTL CLI instead
   }
 }
 
@@ -26,7 +25,3 @@ provider "nomad" {
   address = var.nomad_address
 }
 
-provider "pihole" {
-  url      = var.deploy_dns_records ? "http://${var.dns_server_ip}" : "http://127.0.0.1"
-  password = var.deploy_dns_records ? var.pihole_admin_password : "not-configured"
-}
