@@ -9,6 +9,10 @@
 #   # Edit bootstrap.yml with your values
 #   ./setup.sh
 
+# =============================================================================
+# Required
+# =============================================================================
+
 proxmox:
   ip: "192.168.1.100"          # IP of any Proxmox node (cluster auto-detected)
   password: "changeme"          # Root password (used once to create API token)
@@ -21,10 +25,46 @@ network:
 dns_suffix: "mylab.lan"        # Domain suffix for all services
 
 # Optional: override auto-detected storage pools
-# If omitted, bootstrap discovers available pools and picks the best option:
-#   - Clusters: prefers shared storage (NFS, Ceph, GlusterFS)
-#   - Standalone: uses local-lvm
-#   - LXC containers: always local-lvm (file-level storage not supported)
+# If omitted, bootstrap discovers available pools and picks the best option.
 # storage:
 #   templates: "nfs-templates"  # Storage for Packer templates (VM images)
 #   runtime: "local-lvm"        # Storage for running VMs and LXC containers
+
+# =============================================================================
+# High Availability (optional — uncomment to enable keepalived VIPs)
+# Requires: 3-node cluster. VIPs float between nodes for failover.
+# =============================================================================
+
+# ha_dns_enabled: true
+# ha_dns_vip: "192.168.1.3/24"       # Virtual IP for DNS failover
+# ha_dns_vrrp_router_id: 51          # Unique VRRP ID (1-255, must not conflict)
+# ha_dns_vrrp_password: "pihole-ha"  # VRRP auth password (max 8 chars)
+# ha_traefik_enabled: true
+# ha_traefik_vip: "192.168.1.100/24" # Virtual IP for Traefik/services failover
+# ha_traefik_vrrp_router_id: 53
+# ha_traefik_vrrp_password: "traefik-ha"
+
+# =============================================================================
+# Roaming Profiles (optional — maps network drive on domain login)
+# Requires: Samba AD deployed, file server with SMB share
+# =============================================================================
+
+# profile_server: "truenas.mylab.lan"  # File server IP or FQDN
+# profile_share: "profiles"            # SMB share name for user profiles
+# profile_drive_letter: "P"            # Drive letter to map (Windows)
+
+# =============================================================================
+# Authentik SSO (optional — automatic LDAP sync from Samba AD)
+# Requires: Authentik and Samba AD deployed
+# =============================================================================
+
+# authentik_ad_sync: true              # Enable LDAP user/group sync
+# authentik_sync_interval: 300         # Sync interval in seconds (5 min default)
+
+# =============================================================================
+# TrueNAS Integration (optional — AD join, profile shares)
+# Requires: TrueNAS accessible on network, API key generated
+# =============================================================================
+
+# truenas_ip: "192.168.1.50"          # TrueNAS management IP
+# truenas_api_key: ""                  # API key (stored in Vault after first use)
