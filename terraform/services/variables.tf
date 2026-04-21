@@ -76,6 +76,13 @@ variable "kasm_ip" {
   default     = ""
 }
 
+variable "pihole_admin_password" {
+  type        = string
+  sensitive   = true
+  description = "Pi-hole admin password (for API access)"
+  default     = ""
+}
+
 variable "deploy_dns_records" {
   type        = bool
   description = "Configure Pi-hole DNS records (requires DNS containers to be deployed first)"
