@@ -220,6 +220,11 @@ kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terra
 # Pi-hole admin password (for pihole provider API access — read from Vault)
 pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/services/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
 
+# Roaming profiles (from bootstrap.yml)
+profile_server       = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_server 2>/dev/null || true)"
+profile_share        = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_share 2>/dev/null || echo "profiles")"
+profile_drive_letter = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_drive_letter 2>/dev/null || echo "P")"
+
 # Service toggles — set to true to deploy
 deploy_traefik = true
 EOF
