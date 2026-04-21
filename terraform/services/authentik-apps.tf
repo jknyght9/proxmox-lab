@@ -167,6 +167,44 @@ resource "authentik_application" "lam" {
   policy_engine_mode = "any"
 }
 
+# --- Kasm SAML Provider ---
+
+variable "kasm_saml_config_id" {
+  type        = string
+  description = "Kasm SAML configuration ID (from Kasm Admin UI → Authentication → SAML). Leave empty to skip."
+  default     = ""
+}
+
+resource "authentik_provider_saml" "kasm" {
+  count              = var.deploy_authentik && var.kasm_saml_config_id != "" ? 1 : 0
+  name               = "Kasm Workspaces"
+  authorization_flow = data.authentik_flow.default_authorization[0].id
+  invalidation_flow  = data.authentik_flow.default_invalidation[0].id
+
+  acs_url  = "https://kasm.${var.dns_postfix}/api/acs/?id=${var.kasm_saml_config_id}"
+  issuer   = "authentik"
+  audience = "authentik"
+
+  name_id_mapping = data.authentik_property_mapping_provider_saml.email[0].id
+  signing_kp      = data.authentik_certificate_key_pair.default[0].id
+}
+
+data "authentik_property_mapping_provider_saml" "email" {
+  count   = var.deploy_authentik ? 1 : 0
+  managed = "goauthentik.io/providers/saml/upn"
+}
+
+resource "authentik_application" "kasm" {
+  count              = var.deploy_authentik && var.kasm_saml_config_id != "" ? 1 : 0
+  name               = "Kasm Workspaces"
+  slug               = "kasm"
+  protocol_provider  = authentik_provider_saml.kasm[0].id
+  meta_launch_url    = "https://kasm.${var.dns_postfix}/#/sso"
+  meta_icon          = "https://kasm.${var.dns_postfix}/img/favicon.ico"
+  policy_engine_mode = "any"
+  # No group binding — available to all users
+}
+
 # --- Access Policies (restrict admin apps to admin group) ---
 
 resource "authentik_policy_binding" "pihole_admin" {
