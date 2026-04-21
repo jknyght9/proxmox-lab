@@ -4,7 +4,7 @@
 # - JOIN=false: Provision new AD domain (DC01)
 # - JOIN=true: Join existing domain as replica (DC02)
 
-job "samba-dc" {
+job "samba-ad" {
   datacenters = ["dc1"]
   type        = "service"
 
@@ -22,7 +22,7 @@ job "samba-dc" {
 
     # Vault integration - fetch secrets at runtime using Workload Identity
     vault {
-      role        = "samba-dc"
+      role        = "samba-ad"
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
@@ -46,7 +46,7 @@ job "samba-dc" {
       port "gcs"      { static = 3269 }  # Global Catalog SSL
     }
 
-    task "samba-dc" {
+    task "samba-ad" {
       driver = "docker"
 
       # Graceful shutdown for AD replication consistency
@@ -93,7 +93,7 @@ EOH
       }
 
       service {
-        name     = "samba-dc01"
+        name     = "dc01"
         port     = "ldaps"
         provider = "nomad"
 
@@ -111,7 +111,7 @@ EOH
       }
 
       service {
-        name     = "samba-dc01-kerberos"
+        name     = "dc01-kerberos"
         port     = "kerberos"
         provider = "nomad"
 
@@ -139,7 +139,7 @@ EOH
 
     # Vault integration - fetch secrets at runtime using Workload Identity
     vault {
-      role        = "samba-dc"
+      role        = "samba-ad"
       change_mode = "noop"  # Don't restart on secret change - AD is stateful
     }
 
@@ -163,7 +163,7 @@ EOH
       port "gcs"      { static = 3269 }
     }
 
-    task "samba-dc" {
+    task "samba-ad" {
       driver = "docker"
 
       # Graceful shutdown for AD replication consistency
@@ -211,7 +211,7 @@ EOH
       }
 
       service {
-        name     = "samba-dc02"
+        name     = "dc02"
         port     = "ldaps"
         provider = "nomad"
 
@@ -229,7 +229,7 @@ EOH
       }
 
       service {
-        name     = "samba-dc02-kerberos"
+        name     = "dc02-kerberos"
         port     = "kerberos"
         provider = "nomad"
 

@@ -51,10 +51,10 @@ resource "vault_jwt_auth_backend_role" "authentik" {
   bound_claims   = { nomad_job_id = "authentik" }
 }
 
-resource "vault_jwt_auth_backend_role" "samba_dc" {
-  count          = var.deploy_samba_dc ? 1 : 0
+resource "vault_jwt_auth_backend_role" "samba_ad" {
+  count          = var.deploy_samba_ad ? 1 : 0
   backend        = vault_jwt_auth_backend.nomad.path
-  role_name      = "samba-dc"
+  role_name      = "samba-ad"
   role_type      = "jwt"
   bound_audiences = ["vault.io"]
   user_claim     = "/nomad_job_id"
@@ -65,10 +65,10 @@ resource "vault_jwt_auth_backend_role" "samba_dc" {
     nomad_task      = "nomad_task"
   }
   token_type     = "service"
-  token_policies = ["samba-dc"]
+  token_policies = ["samba-ad"]
   token_period   = 3600
   token_ttl      = 3600
-  bound_claims   = { nomad_job_id = "samba-dc" }
+  bound_claims   = { nomad_job_id = "samba-ad" }
 }
 
 resource "vault_jwt_auth_backend_role" "backup" {

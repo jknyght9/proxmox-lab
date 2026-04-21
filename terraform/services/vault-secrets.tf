@@ -73,7 +73,7 @@ resource "random_password" "authentik_postgres" {
 }
 
 resource "random_password" "samba_admin" {
-  count   = var.deploy_samba_dc ? 1 : 0
+  count   = var.deploy_samba_ad ? 1 : 0
   length  = 24
   special = true
   keepers = { service = "samba-ad" }
@@ -132,7 +132,7 @@ resource "vault_kv_secret_v2" "authentik" {
 }
 
 resource "vault_kv_secret_v2" "samba_ad" {
-  count = var.deploy_samba_dc ? 1 : 0
+  count = var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path
   name  = "samba-ad"
   data_json = jsonencode({

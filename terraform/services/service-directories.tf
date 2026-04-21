@@ -11,7 +11,7 @@ resource "null_resource" "service_directories" {
       "certs",
       var.deploy_traefik    ? "traefik,traefik/config,traefik/tls" : "",
       var.deploy_authentik  ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
-      var.deploy_samba_dc   ? "" : "",  # samba uses /opt/samba-dc01 on host, not gluster
+      var.deploy_samba_ad   ? "" : "",  # samba uses /opt/samba-dc01 on host, not gluster
       var.deploy_uptime_kuma ? "uptime-kuma" : "",
     ]))
   }
@@ -101,7 +101,7 @@ resource "null_resource" "lam_bootstrap" {
 
 # Samba DC uses local storage on each node, not GlusterFS
 resource "null_resource" "samba_directories" {
-  for_each = var.deploy_samba_dc ? {
+  for_each = var.deploy_samba_ad ? {
     dc01 = { node = "nomad01", ip = var.nomad_node_ips["nomad01"], dir = "/opt/samba-dc01" }
     dc02 = length(var.nomad_node_ips) > 1 ? { node = "nomad02", ip = var.nomad_node_ips["nomad02"], dir = "/opt/samba-dc02" } : null
   } : {}

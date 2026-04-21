@@ -92,7 +92,7 @@ variable "deploy_authentik" {
   default = false
 }
 
-variable "deploy_samba_dc" {
+variable "deploy_samba_ad" {
   type    = bool
   default = false
 }

@@ -34,19 +34,19 @@ resource "nomad_job" "authentik" {
   detach = false
 }
 
-resource "nomad_job" "samba_dc" {
-  count      = var.deploy_samba_dc ? 1 : 0
+resource "nomad_job" "samba_ad" {
+  count      = var.deploy_samba_ad ? 1 : 0
   depends_on = [
     null_resource.samba_directories,
-    vault_policy.samba_dc,
-    vault_jwt_auth_backend_role.samba_dc,
+    vault_policy.samba_ad,
+    vault_jwt_auth_backend_role.samba_ad,
     vault_kv_secret_v2.samba_ad,
     vault_kv_secret_v2.cluster_config,
     vault_kv_secret_v2.nomad_nodes,
     null_resource.nomad_vault_config,
   ]
 
-  jobspec = templatefile("${path.module}/templates/samba-dc.nomad.hcl.tpl", {
+  jobspec = templatefile("${path.module}/templates/samba-ad.nomad.hcl.tpl", {
     ad_realm = var.ad_realm
   })
   detach = false

@@ -500,7 +500,7 @@ function showMenu() {
   echo -e "  ${C_BOLD}Services (Layer 2)${C_RESET}"
   echo "    6) Traefik (load balancer)"
   echo "    7) Authentik (SSO / OIDC)"
-  echo "    8) Samba AD (domain controllers)"
+  echo "    8) Samba AD"
   echo "    9) Uptime Kuma (monitoring)"
   echo "   10) LDAP Account Manager"
   echo
@@ -545,7 +545,7 @@ while true; do
     # Layer 2 — Services
     6)  enableService "traefik";;
     7)  enableService "authentik";;
-    8)  enableService "samba_dc";;
+    8)  enableService "samba_ad";;
     9)  enableService "uptime_kuma";;
     10) enableService "lam";;
 

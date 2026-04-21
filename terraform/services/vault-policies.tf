@@ -14,10 +14,10 @@ resource "vault_policy" "authentik" {
   policy = file("${path.module}/../../nomad/vault-policies/authentik.hcl")
 }
 
-resource "vault_policy" "samba_dc" {
-  count  = var.deploy_samba_dc ? 1 : 0
-  name   = "samba-dc"
-  policy = file("${path.module}/../../nomad/vault-policies/samba-dc.hcl")
+resource "vault_policy" "samba_ad" {
+  count  = var.deploy_samba_ad ? 1 : 0
+  name   = "samba-ad"
+  policy = file("${path.module}/../../nomad/vault-policies/samba-ad.hcl")
 }
 
 resource "vault_policy" "backup" {
@@ -39,7 +39,7 @@ resource "vault_policy" "tailscale" {
 }
 
 resource "vault_policy" "domain_join" {
-  count  = var.deploy_samba_dc ? 1 : 0
+  count  = var.deploy_samba_ad ? 1 : 0
   name   = "domain-join"
   policy = file("${path.module}/../../nomad/vault-policies/domain-join.hcl")
 }
