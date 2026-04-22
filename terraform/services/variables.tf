@@ -102,8 +102,15 @@ variable "deploy_traefik" {
 }
 
 variable "deploy_authentik" {
-  type    = bool
-  default = false
+  type        = bool
+  description = "Deploy Authentik Nomad job"
+  default     = false
+}
+
+variable "configure_authentik" {
+  type        = bool
+  description = "Configure Authentik apps/providers (requires Authentik to be running first)"
+  default     = false
 }
 
 variable "deploy_samba_ad" {

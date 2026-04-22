@@ -6,13 +6,13 @@
 # Requires: Authentik running + Samba AD running + authentik-sync account created.
 
 data "vault_kv_secret_v2" "authentik_token" {
-  count = var.deploy_authentik && var.deploy_samba_ad ? 1 : 0
+  count = var.configure_authentik && var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path
   name  = "authentik"
 }
 
 resource "authentik_source_ldap" "samba_ad" {
-  count = var.deploy_authentik && var.deploy_samba_ad ? 1 : 0
+  count = var.configure_authentik && var.deploy_samba_ad ? 1 : 0
   depends_on = [
     null_resource.ad_service_accounts,
     nomad_job.authentik,

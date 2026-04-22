@@ -14,7 +14,7 @@
 
 # Use Domain Admins group if AD is synced, otherwise create an Authentik-native admin group
 resource "authentik_group" "admins" {
-  count        = var.deploy_authentik ? 1 : 0
+  count        = var.configure_authentik ? 1 : 0
   name         = "Infrastructure Admins"
   is_superuser = false
 }
@@ -22,24 +22,24 @@ resource "authentik_group" "admins" {
 # --- Authorization Flow (reuse default) ---
 
 data "authentik_flow" "default_authorization" {
-  count = var.deploy_authentik ? 1 : 0
+  count = var.configure_authentik ? 1 : 0
   slug  = "default-provider-authorization-implicit-consent"
 }
 
 data "authentik_flow" "default_authentication" {
-  count = var.deploy_authentik ? 1 : 0
+  count = var.configure_authentik ? 1 : 0
   slug  = "default-authentication-flow"
 }
 
 data "authentik_flow" "default_invalidation" {
-  count = var.deploy_authentik ? 1 : 0
+  count = var.configure_authentik ? 1 : 0
   slug  = "default-invalidation-flow"
 }
 
 # --- Proxy Providers (forward auth via Traefik) ---
 
 resource "authentik_provider_proxy" "pihole" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Pi-hole"
   authorization_flow = data.authentik_flow.default_authorization[0].id
   invalidation_flow  = data.authentik_flow.default_invalidation[0].id
@@ -48,7 +48,7 @@ resource "authentik_provider_proxy" "pihole" {
 }
 
 resource "authentik_provider_proxy" "traefik" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Traefik"
   authorization_flow = data.authentik_flow.default_authorization[0].id
   invalidation_flow  = data.authentik_flow.default_invalidation[0].id
@@ -57,7 +57,7 @@ resource "authentik_provider_proxy" "traefik" {
 }
 
 resource "authentik_provider_proxy" "nomad" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Nomad"
   authorization_flow = data.authentik_flow.default_authorization[0].id
   invalidation_flow  = data.authentik_flow.default_invalidation[0].id
@@ -86,7 +86,7 @@ resource "authentik_provider_proxy" "lam" {
 # --- Vault OIDC Provider ---
 
 resource "authentik_provider_oauth2" "vault" {
-  count               = var.deploy_authentik ? 1 : 0
+  count               = var.configure_authentik ? 1 : 0
   name                = "Vault"
   authorization_flow  = data.authentik_flow.default_authorization[0].id
   invalidation_flow   = data.authentik_flow.default_invalidation[0].id
@@ -100,14 +100,14 @@ resource "authentik_provider_oauth2" "vault" {
 }
 
 data "authentik_certificate_key_pair" "default" {
-  count = var.deploy_authentik ? 1 : 0
+  count = var.configure_authentik ? 1 : 0
   name  = "authentik Self-signed Certificate"
 }
 
 # --- Applications ---
 
 resource "authentik_application" "pihole" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Pi-hole"
   slug               = "pihole"
   protocol_provider  = authentik_provider_proxy.pihole[0].id
@@ -118,7 +118,7 @@ resource "authentik_application" "pihole" {
 }
 
 resource "authentik_application" "traefik" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Traefik"
   slug               = "traefik"
   protocol_provider  = authentik_provider_proxy.traefik[0].id
@@ -128,7 +128,7 @@ resource "authentik_application" "traefik" {
 }
 
 resource "authentik_application" "nomad" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Nomad"
   slug               = "nomad"
   protocol_provider  = authentik_provider_proxy.nomad[0].id
@@ -138,7 +138,7 @@ resource "authentik_application" "nomad" {
 }
 
 resource "authentik_application" "vault" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Vault"
   slug               = "vault"
   protocol_provider  = authentik_provider_oauth2.vault[0].id
@@ -170,28 +170,28 @@ resource "authentik_application" "lam" {
 # --- Access Policies (restrict admin apps to admin group) ---
 
 resource "authentik_policy_binding" "pihole_admin" {
-  count  = var.deploy_authentik ? 1 : 0
+  count  = var.configure_authentik ? 1 : 0
   target = authentik_application.pihole[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0
 }
 
 resource "authentik_policy_binding" "traefik_admin" {
-  count  = var.deploy_authentik ? 1 : 0
+  count  = var.configure_authentik ? 1 : 0
   target = authentik_application.traefik[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0
 }
 
 resource "authentik_policy_binding" "nomad_admin" {
-  count  = var.deploy_authentik ? 1 : 0
+  count  = var.configure_authentik ? 1 : 0
   target = authentik_application.nomad[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0
 }
 
 resource "authentik_policy_binding" "vault_admin" {
-  count  = var.deploy_authentik ? 1 : 0
+  count  = var.configure_authentik ? 1 : 0
   target = authentik_application.vault[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0

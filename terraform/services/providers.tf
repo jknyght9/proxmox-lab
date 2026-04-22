@@ -30,8 +30,12 @@ provider "nomad" {
 }
 
 provider "authentik" {
-  url      = "https://auth.${var.dns_postfix}"
+  # Use Traefik VIP or nomad01 IP directly (Docker Desktop can't resolve internal DNS)
+  url      = var.traefik_ha_vip != "" ? "https://${split("/", var.traefik_ha_vip)[0]}" : "https://${var.nomad_node_ips["nomad01"]}"
   token    = var.authentik_api_token
   insecure = true # Internal CA
+  headers = {
+    Host = "auth.${var.dns_postfix}"
+  }
 }
 

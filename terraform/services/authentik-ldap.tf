@@ -13,7 +13,7 @@
 # --- LDAP Provider ---
 
 resource "authentik_provider_ldap" "kasm" {
-  count       = var.deploy_authentik ? 1 : 0
+  count       = var.configure_authentik ? 1 : 0
   name        = "Kasm LDAP"
   base_dn     = "dc=${join(",dc=", split(".", var.dns_postfix))}"
   bind_flow   = data.authentik_flow.default_authentication[0].id
@@ -23,7 +23,7 @@ resource "authentik_provider_ldap" "kasm" {
 # --- Kasm Application (LDAP, available to all users) ---
 
 resource "authentik_application" "kasm" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "Kasm Workspaces"
   slug               = "kasm"
   protocol_provider  = authentik_provider_ldap.kasm[0].id
@@ -35,7 +35,7 @@ resource "authentik_application" "kasm" {
 # --- LDAP Outpost ---
 
 resource "authentik_outpost" "ldap" {
-  count              = var.deploy_authentik ? 1 : 0
+  count              = var.configure_authentik ? 1 : 0
   name               = "ldap-outpost"
   type               = "ldap"
   protocol_providers = [authentik_provider_ldap.kasm[0].id]
@@ -47,7 +47,7 @@ resource "authentik_outpost" "ldap" {
 # outpost container with that token using nomad job run.
 
 resource "null_resource" "authentik_ldap_deploy" {
-  count      = var.deploy_authentik ? 1 : 0
+  count      = var.configure_authentik ? 1 : 0
   depends_on = [authentik_outpost.ldap, nomad_job.authentik]
 
   triggers = {

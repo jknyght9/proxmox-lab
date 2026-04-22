@@ -222,6 +222,37 @@ function enableService() {
 
   doing "Enabling $service_name..."
   tf-services apply -auto-approve
+
+  # Authentik needs a second apply to configure apps/providers after it's running
+  if [ "$service_name" = "authentik" ]; then
+    doing "Waiting for Authentik to start..."
+    local NOMAD01_IP
+    NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+    for i in {1..30}; do
+      if curl -sk --connect-timeout 3 "https://${NOMAD01_IP}:9443/-/health/live/" >/dev/null 2>&1; then
+        success "Authentik is healthy"
+        break
+      fi
+      sleep 10
+    done
+
+    # Now update the API token from Vault and enable configuration
+    local VAULT_ADDR ROOT_TOKEN API_TOKEN
+    VAULT_ADDR=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+    ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+    API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+
+    sed -i.bak "s/^authentik_api_token.*/authentik_api_token = \"${API_TOKEN}\"/" "$tfvars"
+    sed -i.bak "s/^configure_authentik.*/configure_authentik = true/" "$tfvars"
+    rm -f "$tfvars.bak"
+    if ! grep -q "^configure_authentik" "$tfvars"; then
+      echo "configure_authentik = true" >> "$tfvars"
+    fi
+
+    doing "Configuring Authentik applications and providers..."
+    tf-services apply -auto-approve
+    success "Authentik configured"
+  fi
 }
 
 # -----------------------------------------------------------------------------
