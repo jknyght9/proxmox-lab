@@ -66,7 +66,7 @@ resource "authentik_provider_proxy" "nomad" {
 }
 
 resource "authentik_provider_proxy" "uptime_kuma" {
-  count              = var.deploy_authentik && var.deploy_uptime_kuma ? 1 : 0
+  count              = var.configure_authentik && var.deploy_uptime_kuma ? 1 : 0
   name               = "Uptime Kuma"
   authorization_flow = data.authentik_flow.default_authorization[0].id
   invalidation_flow  = data.authentik_flow.default_invalidation[0].id
@@ -75,7 +75,7 @@ resource "authentik_provider_proxy" "uptime_kuma" {
 }
 
 resource "authentik_provider_proxy" "lam" {
-  count              = var.deploy_authentik && var.deploy_lam ? 1 : 0
+  count              = var.configure_authentik && var.deploy_lam ? 1 : 0
   name               = "LDAP Account Manager"
   authorization_flow = data.authentik_flow.default_authorization[0].id
   invalidation_flow  = data.authentik_flow.default_invalidation[0].id
@@ -148,7 +148,7 @@ resource "authentik_application" "vault" {
 }
 
 resource "authentik_application" "uptime_kuma" {
-  count              = var.deploy_authentik && var.deploy_uptime_kuma ? 1 : 0
+  count              = var.configure_authentik && var.deploy_uptime_kuma ? 1 : 0
   name               = "Uptime Kuma"
   slug               = "uptime-kuma"
   protocol_provider  = authentik_provider_proxy.uptime_kuma[0].id
@@ -158,7 +158,7 @@ resource "authentik_application" "uptime_kuma" {
 }
 
 resource "authentik_application" "lam" {
-  count              = var.deploy_authentik && var.deploy_lam ? 1 : 0
+  count              = var.configure_authentik && var.deploy_lam ? 1 : 0
   name               = "LDAP Account Manager"
   slug               = "lam"
   protocol_provider  = authentik_provider_proxy.lam[0].id
@@ -198,14 +198,14 @@ resource "authentik_policy_binding" "vault_admin" {
 }
 
 resource "authentik_policy_binding" "uptime_kuma_admin" {
-  count  = var.deploy_authentik && var.deploy_uptime_kuma ? 1 : 0
+  count  = var.configure_authentik && var.deploy_uptime_kuma ? 1 : 0
   target = authentik_application.uptime_kuma[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0
 }
 
 resource "authentik_policy_binding" "lam_admin" {
-  count  = var.deploy_authentik && var.deploy_lam ? 1 : 0
+  count  = var.configure_authentik && var.deploy_lam ? 1 : 0
   target = authentik_application.lam[0].uuid
   group  = authentik_group.admins[0].id
   order  = 0
