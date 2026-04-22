@@ -220,10 +220,20 @@ function enableService() {
     echo "${var_name} = true" >> "$tfvars"
   fi
 
+  # Authentik: ensure configure_authentik=false for first apply (deploy job only)
+  if [ "$service_name" = "authentik" ]; then
+    if grep -q "^configure_authentik" "$tfvars"; then
+      sed -i.bak "s/^configure_authentik.*/configure_authentik = false/" "$tfvars"
+      rm -f "$tfvars.bak"
+    else
+      echo "configure_authentik = false" >> "$tfvars"
+    fi
+  fi
+
   doing "Enabling $service_name..."
   tf-services apply -auto-approve
 
-  # Authentik needs a second apply to configure apps/providers after it's running
+  # Authentik: second apply to configure apps/providers after it's running
   if [ "$service_name" = "authentik" ]; then
     doing "Waiting for Authentik to start..."
     local NOMAD01_IP
