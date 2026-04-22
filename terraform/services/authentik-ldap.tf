@@ -148,6 +148,33 @@ JOBSPEC
       rm -f /tmp/authentik-ldap.nomad.hcl
 
       echo '[+] Authentik LDAP outpost deployed on all nodes (port 3389)'
+      cat <<'KASMHELP'
+
+============================================================
+  Kasm LDAP Configuration (Manual — Kasm Admin UI)
+============================================================
+
+  Kasm Admin → Access Management → Authentication → LDAP
+  → Add Configuration
+
+  Name:                    Authentik LDAP
+  URL:                     ldap://NOMAD_IP:3389
+  Search Base:             DC_BASE_DN
+  Search Filter:           (cn=%(user)s)
+  Group Search Filter:     (objectClass=group)
+  Group Member Attribute:  member
+  Search Subtree:          enabled
+  Auto Create App User:    enabled
+  Service Account DN:      (leave empty — direct bind)
+  Service Account Password: (leave empty)
+
+  Replace NOMAD_IP with any Nomad node IP (system job on all):
+KASMHELP
+      echo "    ${local.nomad01_ip}:3389"
+      echo "  Replace DC_BASE_DN with:"
+      echo "    dc=${join(",dc=", split(".", var.dns_postfix))}"
+      echo ""
+      echo "============================================================"
       EOT
     ]
   }
