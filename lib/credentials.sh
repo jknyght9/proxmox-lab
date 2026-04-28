@@ -114,10 +114,10 @@ function hasServicePasswords() {
 # Idempotent — overwrites existing entries with current local values.
 #
 # Writes:
-#   secret/services/pihole    - admin_password, root_password
-#   secret/services/kasm      - admin_password
-#   secret/services/packer    - root_password, ssh_password, template_password
-#   secret/services/ssh-keys  - labadmin (private), labadmin_pub (public),
+#   secret/pihole    - admin_password, root_password
+#   secret/kasm      - admin_password
+#   secret/packer    - root_password, ssh_password, template_password
+#   secret/ssh-keys  - labadmin (private), labadmin_pub (public),
 #                               enterprise (private), enterprise_pub (public)
 #
 # Globals read: CRYPTO_DIR, VAULT_CREDENTIALS_FILE
@@ -153,13 +153,13 @@ function syncSecretsToVault() {
     --arg root "$(jq -r '.pihole_root_password' "$PASSWORDS_FILE")" \
     '{data: {admin_password: $admin, root_password: $root}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/pihole" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/pihole" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$PIHOLE_PAYLOAD" > /dev/null; then
-    success "  secret/services/pihole"
+    success "  secret/pihole"
   else
-    warn "  Failed to write secret/services/pihole"
+    warn "  Failed to write secret/pihole"
   fi
 
   # Kasm
@@ -168,13 +168,13 @@ function syncSecretsToVault() {
     --arg admin "$(jq -r '.kasm_admin_password' "$PASSWORDS_FILE")" \
     '{data: {admin_password: $admin}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/kasm" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/kasm" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$KASM_PAYLOAD" > /dev/null; then
-    success "  secret/services/kasm"
+    success "  secret/kasm"
   else
-    warn "  Failed to write secret/services/kasm"
+    warn "  Failed to write secret/kasm"
   fi
 
   # Packer
@@ -185,13 +185,13 @@ function syncSecretsToVault() {
     --arg template "$(jq -r '.template_password' "$PASSWORDS_FILE")" \
     '{data: {root_password: $root, ssh_password: $ssh, template_password: $template}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/packer" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/packer" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$PACKER_PAYLOAD" > /dev/null; then
-    success "  secret/services/packer"
+    success "  secret/packer"
   else
-    warn "  Failed to write secret/services/packer"
+    warn "  Failed to write secret/packer"
   fi
 
   # SSH keys — store both key pairs for disaster recovery
@@ -205,13 +205,13 @@ function syncSecretsToVault() {
     --arg enterprise_pub "$(cat "$CRYPTO_DIR/labenterpriseadmin.pub" 2>/dev/null || echo "")" \
     '{data: {labadmin: $labadmin, labadmin_pub: $labadmin_pub, enterprise: $enterprise, enterprise_pub: $enterprise_pub}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/services/ssh-keys" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/ssh-keys" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$SSH_PAYLOAD" > /dev/null; then
-    success "  secret/services/ssh-keys"
+    success "  secret/ssh-keys"
   else
-    warn "  Failed to write secret/services/ssh-keys"
+    warn "  Failed to write secret/ssh-keys"
   fi
 
   # Cluster configuration — used by Nomad jobs (samba-dc, lam) via Vault templates

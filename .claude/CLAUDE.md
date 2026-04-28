@@ -24,25 +24,23 @@ $EDITOR bootstrap.yml
 
 ### Setup Menu Options
 ```
- 1) New installation             - Reads bootstrap.yml, discovers cluster, full deploy
- 2) Deploy all services          - DNS, CA, Nomad, Kasm
- 3) Deploy critical services     - DNS and CA only
- 4) Deploy Traefik               - Nomad job for load balancing
- 5) Deploy Vault                 - Nomad job for secrets management
- 6) Deploy Authentik             - Nomad job for SSO/identity provider
- 7) Deploy Uptime Kuma           - Nomad job for service health monitoring
- 8) Rollback (Terraform)         - Terraform destroy for services
- 9) Purge (Emergency)            - Direct VM/LXC destruction via SSH
-10) Purge entire deployment      - Reset nodes to pre-install state
+ 1) Deploy all services           - Full deploy: Nomad, Vault, DNS, Traefik, Authentik
+ 2) Enable HA (keepalived VIPs)   - Toggle HA from bootstrap.yml settings
 ```
 
-### Beta Features (--dev flag required)
+### Optional Services
 ```
-b1) Deploy Samba AD              - Nomad job for Active Directory DCs
-b2) Configure Authentik AD Sync  - Set up AD -> Authentik user sync
-b3) Configure automated backups  - Periodic Nomad job for NFS/SMB backups
-b4) Deploy LDAP Account Manager  - Nomad job for LAM web UI
-b5) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
+ 3) Kasm Workspaces               - Remote desktop platform
+ 4) Samba AD + LAM                - Active Directory + LDAP Account Manager
+ 5) Uptime Kuma                   - Service health monitoring
+ 6) Netbox                        - Inventory management (DCIM/IPAM)
+```
+
+### Management
+```
+ 7) Rollback services (Layer 2)      - Destroy Nomad jobs, Vault config, secrets, DNS records
+ 8) Rollback infrastructure (L1 + 2) - Destroy all VMs/LXCs (wipes GlusterFS data)
+ 9) Purge entire deployment          - Emergency reset via SSH (bypasses Terraform)
 ```
 
 ### Developer Menu (--dev flag)
@@ -50,13 +48,17 @@ b5) Deploy Vault with CA         - Vault PKI + TLS bootstrap (migration)
 ./setup.sh --dev
 ```
 ```
-d1) Build DNS records             - Update Pi-hole with host records
-d2) Regenerate CA                 - Recreate CA certificates
-d3) Update root certificates      - Push CA cert to Proxmox nodes
-d4) Reset Proxmox API credentials - Purge and recreate hashicorp@pam user/token (re-runs bootstrap)
-d5) Deploy Nomad only             - Requires critical services
-d6) Deploy Kasm only              - Requires critical services + docker template
-d7) Deploy Tailscale Subnet Router - System job on all Nomad nodes
+ d1) Rebuild base templates       - Debian, Fedora, Ubuntu cloud images
+ d2) Rebuild service templates    - Docker + Nomad (clones from base)
+ d3) Reset Proxmox user/token/role - Purge and recreate hashicorp@pam
+ d4) Deploy infrastructure        - Full Layer 1 (Nomad, Vault, DNS)
+ d5) Deploy services              - Full Layer 2 (Traefik, Authentik, secrets)
+ d6) Deploy Nomad cluster only    - Targeted Layer 1
+ d7) Deploy DNS only              - Targeted Layer 1
+ d8) Deploy Vault only            - Targeted Layer 1 + init/unseal
+ d9) Deploy Traefik only          - Targeted Layer 2
+d10) Deploy Authentik only        - Targeted Layer 2 (two-phase)
+d11) Rebuild DNS records          - Targeted Layer 2
 ```
 
 **Note:** To change network/HA/DNS settings, edit `bootstrap.yml` and re-run option 1

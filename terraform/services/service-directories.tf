@@ -13,6 +13,9 @@ resource "null_resource" "service_directories" {
       var.deploy_authentik  ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
       var.deploy_samba_ad   ? "" : "",  # samba uses /opt/samba-dc01 on host, not gluster
       var.deploy_uptime_kuma ? "uptime-kuma" : "",
+      var.deploy_lam        ? "lam,lam/config,lam/session" : "",
+      var.deploy_netbox     ? "netbox,netbox/postgres,netbox/redis,netbox/data/media" : "",
+      "docs,docs/site",
     ]))
   }
 
@@ -54,6 +57,12 @@ resource "null_resource" "service_directories" {
       sudo mkdir -p $GLUSTER/lam/config $GLUSTER/lam/session
       %{endif}
 
+      %{if var.deploy_netbox}
+      sudo mkdir -p $GLUSTER/netbox/postgres $GLUSTER/netbox/redis $GLUSTER/netbox/data/media
+      %{endif}
+
+      sudo mkdir -p $GLUSTER/docs/site
+
       echo '[+] Service directories created'
       EOT
     ]
@@ -87,8 +96,8 @@ resource "null_resource" "lam_bootstrap" {
       fi
       echo '[+] Bootstrapping LAM default config from container...'
       sudo docker rm -f lam-bootstrap 2>/dev/null || true
-      sudo docker pull ghcr.io/ldapaccountmanager/lam:stable
-      sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:stable
+      sudo docker pull ghcr.io/ldapaccountmanager/lam:9.5.2
+      sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:9.5.2
       sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $GLUSTER/lam/config/
       sudo docker rm lam-bootstrap
       sudo chmod -R 777 $GLUSTER/lam

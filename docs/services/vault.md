@@ -1,13 +1,13 @@
 # Vault
 
-HashiCorp Vault provides centralized secrets management for all Nomad services. It stores sensitive data such as database passwords and API keys, and integrates with Nomad via Workload Identity Federation (WIF) so that running jobs can securely retrieve secrets without long-lived tokens.
+HashiCorp Vault provides secrets management and internal PKI for the lab. It is deployed by Layer 1 Terraform and configured by Layer 2.
 
 ## Overview
 
 | Property | Value |
 |----------|-------|
 | **Nomad Job** | `vault` |
-| **Image** | `hashicorp/vault:1.15` |
+| **Image** | `hashicorp/vault:1.21.4` |
 | **Type** | `service` (count 1) |
 | **Node** | Pinned to `nomad01` |
 | **Ports** | 8200 (API/UI), 8201 (Cluster) |
@@ -15,7 +15,7 @@ HashiCorp Vault provides centralized secrets management for all Nomad services. 
 | **Storage** | Docker bind mount `/srv/gluster/nomad-data/vault:/data/vault` |
 | **Privileged** | Yes (required for GlusterFS writes) |
 | **Resources** | 200 MHz CPU, 256 MB memory |
-| **Menu Option** | 8 (Deploy Vault) |
+| **TLS** | Enabled after Phase 2 bootstrap (self-signed via its own PKI) |
 
 ## Deployment
 

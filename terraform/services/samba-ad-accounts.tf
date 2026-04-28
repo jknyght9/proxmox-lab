@@ -72,16 +72,19 @@ resource "null_resource" "ad_service_accounts" {
       <<-EOT
       set -e
       echo '[+] Waiting for Samba AD to be ready...'
+      # Find container by name prefix (Nomad labels may not be present with host networking)
+      CONTAINER=""
       for i in $(seq 1 30); do
-        if docker exec $(docker ps -q --filter label=com.hashicorp.nomad.job_name=samba-ad --filter label=com.hashicorp.nomad.task_name=samba-ad | head -1) samba-tool domain level show >/dev/null 2>&1; then
+        CONTAINER=$(docker ps --format '{{.ID}} {{.Names}}' | grep 'samba-ad' | head -1 | awk '{print $1}')
+        if [ -n "$CONTAINER" ] && docker exec "$CONTAINER" samba-tool domain level show >/dev/null 2>&1; then
           echo '[+] Samba AD is ready'
           break
         fi
         echo "    Waiting... ($i/30)"
+        CONTAINER=""
         sleep 10
       done
 
-      CONTAINER=$(docker ps -q --filter label=com.hashicorp.nomad.job_name=samba-ad --filter label=com.hashicorp.nomad.task_name=samba-ad | head -1)
       if [ -z "$CONTAINER" ]; then
         echo '[!] Samba AD container not found'
         exit 1

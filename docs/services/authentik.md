@@ -1,6 +1,6 @@
 # Authentik
 
-Authentik is a self-hosted identity provider that provides single sign-on (SSO) for lab services. It supports OAuth2, OpenID Connect (OIDC), SAML, and LDAP protocols. Authentik runs as a multi-task Nomad job with PostgreSQL, Redis, and two Authentik processes (server and worker), all pinned to nomad01.
+Authentik is a self-hosted identity provider that provides single sign-on (SSO) for lab services. It supports OAuth2, OpenID Connect (OIDC), SAML, and LDAP protocols.
 
 ## Overview
 
@@ -9,24 +9,23 @@ Authentik is a self-hosted identity provider that provides single sign-on (SSO) 
 | **Nomad Job** | `authentik` |
 | **Type** | `service` (count 1) |
 | **Node** | Pinned to `nomad01` |
-| **Vault Role** | `authentik` (WIF, restart on secret change) |
-| **Ports** | 9000 (HTTP), 9443 (HTTPS), 5432 (PostgreSQL), 6379 (Redis) |
+| **Vault Role** | `authentik` (WIF) |
+| **Ports** | 9000 (HTTP), 9443 (HTTPS), 5432 (PostgreSQL) |
 | **Network Mode** | Host |
-| **Storage** | Docker bind mounts on GlusterFS |
-| **Menu Option** | 9 (Deploy Authentik) |
+| **Storage** | `/srv/gluster/nomad-data/authentik/` (GlusterFS) |
+| **Version** | 2026.2+ (Redis removed in 2025.10 — PostgreSQL handles caching) |
 
 ### Task Resource Allocation
 
 | Task | Image | CPU | Memory |
 |------|-------|-----|--------|
 | PostgreSQL | `postgres:16-alpine` | 200 MHz | 512 MB |
-| Redis | `redis:7-alpine` | 100 MHz | 128 MB |
-| Server | `ghcr.io/goauthentik/server:2025.12` | 500 MHz | 1024 MB |
-| Worker | `ghcr.io/goauthentik/server:2025.12` | 300 MHz | 512 MB |
+| Server | `ghcr.io/goauthentik/server:2026.x` | 500 MHz | 1024 MB |
+| Worker | `ghcr.io/goauthentik/server:2026.x` | 300 MHz | 512 MB |
 
 ## Deployment
 
-Deploy Authentik using the setup menu:
+Authentik is deployed as part of the core stack (option 1). It is also deployed automatically during the first run. To deploy or redeploy independently:
 
 ```bash
 ./setup.sh

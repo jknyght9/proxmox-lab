@@ -1,6 +1,97 @@
 # Architecture Overview
 
-This page provides a high-level view of the Proxmox Lab infrastructure, built on a Nomad-based container orchestration platform with GlusterFS distributed storage.
+This page describes the two-layer Terraform architecture, module structure, and design principles of Proxmox Lab.
+
+## Two-Layer Terraform Architecture
+
+The project uses a deliberately separated two-layer architecture. This separation exists because Vault must be initialized by an imperative script before Terraform can use it as a provider — you cannot declaratively create the very token you need to authenticate with.
+
+```
+Layer 1: terraform/
+  Provisions physical infrastructure (VMs, LXC containers)
+  Provider: bpg/proxmox
+  Knows nothing about what runs inside those VMs
+
+Layer 2: terraform/services/
+  Configures services running on the infrastructure
+  Providers: hashicorp/vault, hashicorp/nomad
+  Requires Vault to be initialized (from Layer 1) before it can run
+```
+
+### Layer 1 — Infrastructure
+
+Directory: `terraform/`
+
+| Resource | Type | VMID | Module |
+|----------|------|------|--------|
+| nomad01, nomad02, nomad03 | Proxmox VMs | 905-907 | `vm-nomad/` |
+| dns-01, dns-02, dns-03 | Proxmox LXC | 910-912 | `lxc-pihole/` |
+| kasm01 (optional) | Proxmox VM | 930 | `vm-kasm/` |
+| vault | Nomad job | — | `main.tf` |
+
+Layer 1 also deploys the Vault Nomad job (TLS disabled initially) so it is available for Layer 2 to configure.
+
+### Layer 2 — Services
+
+Directory: `terraform/services/`
+
+| Resource type | Examples |
+|---------------|---------|
+| Vault mounts | `secret/` (KV v2), `pki/`, `pki_int/` |
+| Vault auth backends | `jwt-nomad` (Workload Identity Federation) |
+| Vault JWT roles | authentik, samba-ad, backup, lam, netbox, tailscale |
+| Vault policies | per-service read policies |
+| Vault KV secrets | randomly generated passwords for all services |
+| Nomad jobs | traefik, authentik, samba-ad, uptime-kuma, lam, netbox, backup, tailscale |
+| DNS records | custom entries in Pi-hole via SSH |
+| Authentik apps | configured via REST API (Authentik provider has provider bugs) |
+| NAS domain joins | TrueNAS and Synology via REST API |
+| Netbox inventory | populated via REST API |
+
+## Deployment Flow
+
+```
+bootstrap.yml
+     |
+     v
+runBootstrap()
+  discovers Proxmox cluster, creates API token
+  generates terraform.tfvars and packer vars
+     |
+     v
+Packer builds (Phase 1)
+  9999: base-ubuntu (cloud image)
+  9001: ubuntu-docker (Docker, GlusterFS)
+  9002: ubuntu-nomad  (Nomad, Consul, keepalived)
+     |
+     v
+Layer 1: terraform apply — partial (Phase 2)
+  module.nomad: 3 VMs with GlusterFS
+  nomad_job.vault (TLS disabled)
+     |
+     v
+initAndUnsealVault() (Phase 3)
+  initializes Vault, saves unseal key + root token
+  writes terraform/services/terraform.tfvars
+     |
+     v
+Layer 2: terraform apply (Phase 4)
+  Vault PKI (root + intermediate CA)
+  JWT auth + per-service roles and policies
+  KV secrets (generated passwords)
+  Traefik wildcard TLS cert from pki_int
+  Nomad job: traefik (system job, all nodes)
+     |
+     v
+Layer 1: terraform apply — full (Phase 4 continued)
+  module.dns-main: Pi-hole LXCs (passwords from Vault)
+  nomad_job.vault: redeploy with TLS enabled
+     |
+     v
+Layer 2: terraform apply — again
+  DNS records in Pi-hole
+  Authentik job + application configuration
+```
 
 ## System Architecture
 

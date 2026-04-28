@@ -19,6 +19,39 @@
 #   - Saves unseal_key, root_token, vault_address to VAULT_CREDENTIALS_FILE
 #   - Writes terraform/services/terraform.tfvars with vault/nomad addresses
 
+# generateNASServersTfvars - Parse nas_servers from bootstrap.yml into HCL
+#
+# Reads the nas_servers list from bootstrap.yml and outputs HCL for the
+# nas_servers variable in Layer 2 tfvars.
+function generateNASServersTfvars() {
+  local BOOTSTRAP="${SCRIPT_DIR}/bootstrap.yml"
+
+  if ! command -v yq >/dev/null 2>&1 || [ ! -f "$BOOTSTRAP" ]; then
+    echo "nas_servers = []"
+    return 0
+  fi
+
+  local COUNT
+  COUNT=$(yq '.nas_servers | length // 0' "$BOOTSTRAP" 2>/dev/null || echo 0)
+
+  if [ "$COUNT" -eq 0 ] || [ "$COUNT" = "null" ]; then
+    echo "nas_servers = []"
+    return 0
+  fi
+
+  echo "nas_servers = ["
+  for i in $(seq 0 $((COUNT - 1))); do
+    echo "  {"
+    for key in name type address api_key admin_user admin_password; do
+      local val
+      val=$(yq ".nas_servers[$i].$key // \"\"" "$BOOTSTRAP" 2>/dev/null)
+      [ -n "$val" ] && [ "$val" != "null" ] && [ "$val" != '""' ] && echo "    $key = $val"
+    done
+    echo "  },"
+  done
+  echo "]"
+}
+
 function initAndUnsealVault() {
   local VAULT_IP="${1:-}"
 
@@ -105,10 +138,11 @@ EOF
         labadmin@${VAULT_IP} "nomad job stop -purge vault 2>/dev/null || true" || true
       sleep 3
 
-      # Wipe Vault data on the VM
-      doing "Wiping stale Vault data..."
+      # Wipe Vault data and all service data that depends on Vault secrets
+      # (Authentik DB has bootstrap token/passwords baked in from old Vault)
+      doing "Wiping stale Vault and service data..."
       ssh -o StrictHostKeyChecking=no -i "${ADMIN_KEY_PATH:-${SCRIPT_DIR}/crypto/labadmin}" \
-        labadmin@${VAULT_IP} "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/*" || true
+        labadmin@${VAULT_IP} "sudo rm -rf /srv/gluster/nomad-data/vault/* /srv/gluster/nomad-data/vault-tls/* /srv/gluster/nomad-data/authentik/postgres/* /srv/gluster/nomad-data/authentik/data/*" || true
 
       # Clear stale Layer 2 state
       rm -f "${SCRIPT_DIR}/terraform/services/terraform.tfstate" "${SCRIPT_DIR}/terraform/services/terraform.tfstate.backup" 2>/dev/null || true
@@ -175,9 +209,15 @@ EOF
   DNS_SERVER_IP=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
 
   # Get Nomad node IPs — parse from vm_configs defaults in variables.tf
-  # (more reliable than terraform output which may fail in Docker context)
   local NOMAD_IPS_HCL=""
   NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null || true)
+
+  # Build VM inventory from Layer 1 vm_configs (nomad + kasm)
+  # Parses the HCL map defaults in variables.tf — each VM is a single line
+  local VM_INVENTORY_HCL=""
+  VM_INVENTORY_HCL=$(for f in "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf"; do
+    [ -f "$f" ] && sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' "$f"
+  done | sort 2>/dev/null || true)
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
@@ -195,6 +235,17 @@ network_cidr    = "$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE" 2
 
 nomad_node_ips = {
 ${NOMAD_IPS_HCL}
+}
+
+# VM inventory (from Layer 1 vm_configs — for Netbox)
+vm_inventory = {
+${VM_INVENTORY_HCL}
+}
+
+# LXC inventory (from dns_main_nodes in terraform.tfvars)
+lxc_inventory = {
+$(awk '/dns_main_nodes/,/]/' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null | \
+  awk '/hostname/{h=$3} /target_node/{t=$3} /ip/{print "  " h " = { ip = " $3 ", target_node = " t ", role = \"dns\" }"}' 2>/dev/null || true)
 }
 
 # AD Configuration (derived from dns_postfix)
@@ -218,18 +269,26 @@ $(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null 
 kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null || true)"
 
 # Pi-hole admin password (for API access — read from Vault)
-pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/services/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
+pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
 
 # Authentik API token (for authentik provider — read from Vault)
 authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
 
 # Roaming profiles (from bootstrap.yml)
-profile_server       = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_server 2>/dev/null || true)"
-profile_share        = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_share 2>/dev/null || echo "profiles")"
-profile_drive_letter = "$(type yamlGet >/dev/null 2>&1 && yamlGet profile_drive_letter 2>/dev/null || echo "P")"
+profile_server       = "$(command -v yq >/dev/null && yq -r '.profile_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+profile_share        = "$(command -v yq >/dev/null && yq -r '.profile_share // "profiles"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "profiles")"
+profile_drive_letter = "$(command -v yq >/dev/null && yq -r '.profile_drive_letter // "P"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "P")"
 
 # Service toggles — set to true to deploy
 deploy_traefik = true
+
+# NAS servers (from bootstrap.yml)
+$(generateNASServersTfvars)
+
+# UniFi Controller (from bootstrap.yml)
+unifi_address = "$(command -v yq >/dev/null && yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+unifi_api_key = "$(command -v yq >/dev/null && yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+unifi_site    = "$(command -v yq >/dev/null && yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
 EOF
 
   chmod 600 "$SERVICES_TFVARS"

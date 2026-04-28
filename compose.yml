@@ -14,7 +14,7 @@ services:
       - 8000:8000
     command: serve -a 0.0.0.0:8000
   nomad:
-    image: hashicorp/nomad:1.9
+    image: hashicorp/nomad:1.10
     container_name: nomad
     working_dir: /nomad
     volumes:
@@ -39,7 +39,7 @@ services:
     tty: true
   # NOTE: step-ca removed — CA is now provided by Vault PKI secrets engine
   terraform:
-    image: hashicorp/terraform
+    image: hashicorp/terraform:1.14
     userns_mode: host  # Bypass userns-remap for volume write access
     network_mode: host
     container_name: terraform
@@ -52,7 +52,7 @@ services:
       TF_LOG: INFO
       TF_LOG_PATH: /logs/terraform.log
   terraform-services:
-    image: hashicorp/terraform
+    image: hashicorp/terraform:1.14
     userns_mode: host
     network_mode: host
     container_name: terraform-services
@@ -61,6 +61,8 @@ services:
       - ./crypto:/crypto:ro
       - ./terraform/services:/services:z
       - ./nomad:/nomad:ro
+      - ./docs:/docs:ro
+      - ./mkdocs.yml:/mkdocs.yml:ro
       - ./logs:/logs:z
     environment:
       TF_LOG: INFO

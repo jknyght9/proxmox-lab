@@ -8,6 +8,9 @@ resource "vault_policy" "nomad_server" {
   policy = file("${path.module}/../../nomad/vault-policies/nomad-server.hcl")
 }
 
+# oidc-admin policy is created via authentik_apps null_resource (not Terraform)
+# because the OIDC auth backend setup depends on Authentik being running first.
+
 resource "vault_policy" "authentik" {
   count  = var.deploy_authentik ? 1 : 0
   name   = "authentik"
@@ -36,6 +39,12 @@ resource "vault_policy" "tailscale" {
   count  = var.deploy_tailscale ? 1 : 0
   name   = "tailscale"
   policy = file("${path.module}/../../nomad/vault-policies/tailscale.hcl")
+}
+
+resource "vault_policy" "netbox" {
+  count  = var.deploy_netbox ? 1 : 0
+  name   = "netbox"
+  policy = file("${path.module}/../../nomad/vault-policies/netbox.hcl")
 }
 
 resource "vault_policy" "domain_join" {

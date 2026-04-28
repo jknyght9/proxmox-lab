@@ -46,7 +46,7 @@ job "uptime-kuma" {
         # the image — no external DB sidecar required. Data layout under
         # /app/data differs from 1.x (MariaDB files vs SQLite kuma.db),
         # so a first-time start against an empty directory is expected.
-        image        = "louislam/uptime-kuma:2"
+        image        = "louislam/uptime-kuma:2.2.1"
         network_mode = "host"
         volumes = [
           "/srv/gluster/nomad-data/uptime-kuma:/app/data",

@@ -2,46 +2,35 @@ site_name: Proxmox Lab
 site_url: https://jknyght9.github.io/proxmox-lab
 site_author: Jacob Stauffer | CISSP
 site_description: >-
-  An Infrastructure as Code proof of concept using Proxmox
+  Infrastructure-as-Code for Proxmox VE — automated deployment of a self-hosted home lab
 repo_name: jknyght9/proxmox-lab
 repo_url: https://github.com/jknyght9/proxmox-lab
 
 theme:
   name: material
-  #name: readthedocs
-  highlightjs: true
-  hljs_languages:
-    - yaml
-    - bash
   palette:
-    # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
-    # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
+
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
-  - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
-  - pymdownx.emoji:
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.tasklist:
       clickable_checkbox: true
   - pymdownx.highlight:
@@ -50,8 +39,6 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.tilde
-  - pymdownx.arithmatex:
-      generic: true
   - pymdownx.snippets
   - pymdownx.superfences:
       custom_fences:
@@ -62,41 +49,32 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
-      - Introduction: getting-started/introduction.md
       - Prerequisites: getting-started/prerequisites.md
-      - Pre-Flight Checklist: getting-started/checklist.md
-      - Quick Start: getting-started/quick-start.md
+      - Bootstrap Configuration: getting-started/bootstrap.md
+      - First Deployment: getting-started/first-deploy.md
   - Architecture:
       - Overview: architecture/overview.md
-      - Network Topology: architecture/network-topology.md
-      - Service Relationships: architecture/service-relationships.md
-      - Certificate Chain: architecture/certificate-chain.md
-  - Configuration:
-      - Terraform Variables: configuration/terraform-variables.md
-      - Packer Variables: configuration/packer-variables.md
-      - Module Reference: configuration/module-reference.md
-      - Cloud-Init Templates: configuration/cloudinit-templates.md
-  - Modules:
-      - Nomad Cluster: modules/nomad-cluster.md
-      - Kasm Workspaces: modules/kasm.md
-      - Pi-hole DNS: modules/pihole.md
-      - Step-CA: modules/step-ca.md
+      - Networking: architecture/networking.md
+      - Secrets Management: architecture/secrets.md
   - Services:
-      - Traefik: services/traefik.md
       - Vault: services/vault.md
+      - Traefik: services/traefik.md
       - Authentik: services/authentik.md
+      - Pi-hole DNS: services/pihole-dns.md
       - Samba AD: services/samba-ad.md
+      - Kasm Workspaces: services/kasm.md
+      - Netbox: services/netbox.md
+      - Uptime Kuma: services/uptime-kuma.md
+  - Tutorials:
+      - Import Root CA: tutorials/import-root-ca.md
+      - Kasm AD Authentication: tutorials/kasm-ad-auth.md
+      - NAS Domain Join: tutorials/nas-domain-join.md
+      - HA Configuration: tutorials/ha-configuration.md
+      - Managing AD Users: tutorials/adding-ad-users.md
   - Operations:
-      - Accessing Services: operations/accessing-services.md
-      - DNS Management: operations/dns-management.md
-      - Certificate Operations: operations/certificate-operations.md
-      - Nomad Operations: operations/nomad-operations.md
-      - Backup & Recovery: operations/backup-recovery.md
-  - Troubleshooting:
-      - Common Issues: troubleshooting/common-issues.md
-      - Error Reference: troubleshooting/error-reference.md
-      - Diagnostic Commands: troubleshooting/diagnostic-commands.md
-      - FAQ: troubleshooting/faq.md
-  - Reference:
-      - Glossary: reference/glossary.md
-      - External Resources: reference/external-resources.md
+      - Menu Reference: operations/menu-reference.md
+      - Rollback and Purge: operations/rollback-purge.md
+      - Troubleshooting: operations/troubleshooting.md
+      - Dependency Manifest: operations/dependencies.md
+  - Developer Guide:
+      - Adding Services: developer/adding-services.md

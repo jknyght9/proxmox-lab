@@ -177,4 +177,5 @@ function scpToAdmin() {
 }
 
 # Prompt user to press any key to continue
-function pressAnyKey()  { read -n 1 -s -p "$(question "Press any key to continue")"; echo; }
+# function pressAnyKey()  { read -n 1 -s -p "$(question "Press any key to continue")"; echo; }
+function pressAnyKey() { :; }  # Disabled for automated testing

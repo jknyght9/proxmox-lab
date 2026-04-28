@@ -54,7 +54,7 @@ job "authentik" {
       user = "root"
 
       config {
-        image        = "postgres:16"
+        image        = "postgres:17"
         network_mode = "host"
         volumes = [
           "/srv/gluster/nomad-data/authentik/postgres:/var/lib/postgresql/data",
@@ -92,7 +92,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2026.2"
+        image        = "ghcr.io/goauthentik/server:2026.2.2"
         network_mode = "host"
         args         = ["server"]
         volumes = [
@@ -168,7 +168,7 @@ EOH
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/server:2026.2"
+        image        = "ghcr.io/goauthentik/server:2026.2.2"
         network_mode = "host"
         args         = ["worker"]
         volumes = [

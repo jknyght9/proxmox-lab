@@ -33,6 +33,15 @@ http:
         - authentik
       tls: {}
 
+    traefik-dashboard:
+      rule: "Host(`traefik.${dns_postfix}`)"
+      entryPoints:
+        - websecure
+      service: traefik-dashboard
+      middlewares:
+        - authentik
+      tls: {}
+
   services:
     nomad:
       loadBalancer:
@@ -44,4 +53,9 @@ http:
     pihole:
       loadBalancer:
         servers:
-          - url: "http://${dns01_ip}:8080"
+          - url: "http://${dns01_ip}:80"
+
+    traefik-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://${nomad01_ip}:8081"

@@ -37,7 +37,7 @@ job "tailscale" {
       driver = "docker"
 
       config {
-        image        = "tailscale/tailscale:latest"
+        image        = "tailscale/tailscale:v1.92.4"
         network_mode = "host"
         privileged   = true
 

@@ -2,7 +2,7 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.78"
+      version = "~> 0.104"
     }
     vault = {
       source  = "hashicorp/vault"
@@ -10,7 +10,7 @@ terraform {
     }
     nomad = {
       source  = "hashicorp/nomad"
-      version = "~> 2.4.0"
+      version = "~> 2.6.0"
     }
   }
 }

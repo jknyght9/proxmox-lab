@@ -16,14 +16,12 @@ The deployed infrastructure requires approximately:
 | Component | CPU | RAM | Disk |
 |-----------|-----|-----|------|
 | Nomad Node (x3) | 4 cores each | 8 GB each | 100 GB each |
-| Kasm | 4 cores | 8 GB | 100 GB |
-| DNS (x3) | 2 cores each | 1 GB each | 4 GB each |
-| DNS Labnet (x2) | 2 cores each | 1 GB each | 4 GB each |
-| Step-CA | 2 cores | 2 GB | 8 GB |
-| **Total (max)** | **28 cores** | **42 GB** | **428 GB** |
+| Kasm (optional) | 4 cores | 8 GB | 100 GB |
+| DNS LXC (x3) | 2 cores each | 512 MB each | 4 GB each |
+| **Total (core)** | **18 cores** | **26 GB** | **312 GB** |
 
 !!! tip "Resource Optimization"
-    These are default values. You can reduce resources by modifying the Terraform variables if you have limited hardware. For a minimal deployment, use menu option 4 (critical services only) to deploy just DNS and Step-CA, then add Nomad later.
+    These are default values. You can reduce resources by modifying the Terraform variables if you have limited hardware. The number of DNS nodes matches the number of Proxmox cluster nodes (one per node).
 
 ## Software Requirements
 

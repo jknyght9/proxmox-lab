@@ -86,11 +86,40 @@ resource "random_password" "samba_admin" {
   keepers = { service = "samba-ad" }
 }
 
+resource "random_password" "netbox_secret_key" {
+  count   = var.deploy_netbox ? 1 : 0
+  length  = 50
+  special = false
+  keepers = { service = "netbox" }
+}
+
+resource "random_password" "netbox_postgres" {
+  count   = var.deploy_netbox ? 1 : 0
+  length  = 24
+  special = false
+  keepers = { service = "netbox" }
+}
+
+resource "random_password" "netbox_admin" {
+  count            = var.deploy_netbox ? 1 : 0
+  length           = 20
+  special          = true
+  override_special = "!@#%^&*"
+  keepers          = { service = "netbox" }
+}
+
+resource "random_password" "netbox_api_token" {
+  count   = var.deploy_netbox ? 1 : 0
+  length  = 40
+  special = false
+  keepers = { service = "netbox" }
+}
+
 # --- Write Secrets to Vault KV ---
 
 resource "vault_kv_secret_v2" "pihole" {
   mount = vault_mount.secret.path
-  name  = "services/pihole"
+  name  = "pihole"
   data_json = jsonencode({
     admin_password = random_password.pihole_admin.result
     root_password  = random_password.pihole_root.result
@@ -99,7 +128,7 @@ resource "vault_kv_secret_v2" "pihole" {
 
 resource "vault_kv_secret_v2" "kasm" {
   mount = vault_mount.secret.path
-  name  = "services/kasm"
+  name  = "kasm"
   data_json = jsonencode({
     admin_password = random_password.kasm_admin.result
   })
@@ -107,7 +136,7 @@ resource "vault_kv_secret_v2" "kasm" {
 
 resource "vault_kv_secret_v2" "packer" {
   mount = vault_mount.secret.path
-  name  = "services/packer"
+  name  = "packer"
   data_json = jsonencode({
     root_password     = random_password.packer_root.result
     ssh_password      = random_password.packer_ssh.result
@@ -117,7 +146,7 @@ resource "vault_kv_secret_v2" "packer" {
 
 resource "vault_kv_secret_v2" "ssh_keys" {
   mount = vault_mount.secret.path
-  name  = "services/ssh-keys"
+  name  = "ssh-keys"
   data_json = jsonencode({
     labadmin       = file(var.ssh_admin_private_key_file)
     labadmin_pub   = file(var.ssh_admin_public_key_file)
@@ -131,11 +160,51 @@ resource "vault_kv_secret_v2" "authentik" {
   mount = vault_mount.secret.path
   name  = "authentik"
   data_json = jsonencode({
-    AUTHENTIK_SECRET_KEY = random_password.authentik_secret_key[0].result
-    POSTGRES_PASSWORD    = random_password.authentik_postgres[0].result
+    secret_key        = random_password.authentik_secret_key[0].result
+    postgres_password = random_password.authentik_postgres[0].result
     admin_password       = random_password.authentik_admin[0].result
     admin_email          = "admin@${var.dns_postfix}"
     api_token            = random_password.authentik_api_token[0].result
+  })
+}
+
+resource "vault_kv_secret_v2" "netbox" {
+  count = var.deploy_netbox ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "netbox"
+  data_json = jsonencode({
+    secret_key        = random_password.netbox_secret_key[0].result
+    postgres_password = random_password.netbox_postgres[0].result
+    admin_password    = random_password.netbox_admin[0].result
+    admin_email       = "admin@${var.dns_postfix}"
+    api_token         = random_password.netbox_api_token[0].result
+  })
+}
+
+# Placeholder for Netbox OIDC — populated by authentik_apps after Authentik is running.
+# Must exist before Netbox starts so the Vault template doesn't block.
+resource "vault_kv_secret_v2" "netbox_oidc" {
+  count = var.deploy_netbox ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "netbox-oidc"
+  data_json = jsonencode({
+    oidc_client_id     = ""
+    oidc_client_secret = ""
+    oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
+resource "vault_kv_secret_v2" "unifi" {
+  count = var.unifi_address != "" ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "unifi"
+  data_json = jsonencode({
+    address = var.unifi_address
+    api_key = var.unifi_api_key
+    site    = var.unifi_site
   })
 }
 

@@ -43,7 +43,7 @@ job "traefik" {
       }
 
       config {
-        image        = "traefik:v3.6"
+        image        = "traefik:v3.6.14"
         network_mode = "host"
         dns_servers  = ["${dns_server}"]
         args = [
@@ -54,6 +54,9 @@ job "traefik" {
           "--ping=true",
           "--ping.entryPoint=traefik",
           "--entrypoints.web.address=:80",
+          "--entrypoints.web.http.redirections.entryPoint.to=websecure",
+          "--entrypoints.web.http.redirections.entryPoint.scheme=https",
+          "--entrypoints.web.http.redirections.entryPoint.permanent=true",
           "--entrypoints.websecure.address=:443",
           "--entrypoints.traefik.address=:8081",
           "--providers.nomad=true",

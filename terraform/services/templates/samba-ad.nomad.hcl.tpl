@@ -57,6 +57,10 @@ job "samba-ad" {
         network_mode = "host"
         privileged   = true
 
+        # Override hostname to dc01 (network_mode=host inherits nomad01)
+        entrypoint = ["/bin/bash", "-c"]
+        args       = ["hostname dc01 && /entrypoint.sh"]
+
         # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
         # which GlusterFS FUSE doesn't provide. Each DC stores data locally.
         volumes = [
@@ -173,6 +177,10 @@ EOH
         image        = "ghcr.io/jknyght9/samba-ad-dc:latest"
         network_mode = "host"
         privileged   = true
+
+        # Override hostname to dc02 (network_mode=host inherits nomad02)
+        entrypoint = ["/bin/bash", "-c"]
+        args       = ["hostname dc02 && /entrypoint.sh"]
 
         # Use local storage (not GlusterFS) - Samba AD requires POSIX ACL support
         volumes = [

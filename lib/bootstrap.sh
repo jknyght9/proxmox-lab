@@ -21,77 +21,20 @@ _bootstrap_init_vars() {
 }
 
 # =============================================================================
-# YAML Parsing (uses python3 for reliable handling of special characters)
+# YAML Parsing (uses yq — like jq but for YAML)
 # =============================================================================
 
 # Read a value from bootstrap.yml by dot-separated key path.
-# Uses python3 (available on macOS and Linux) to avoid sed/xargs issues
-# with special characters in passwords.
 # Arguments: $1 = dot-separated key path (e.g., "proxmox.ip")
 # Returns: value string, or empty if not found
 function yamlGet() {
   local key="$1"
   local file="${2:-$BOOTSTRAP_FILE}"
 
-  python3 -c "
-import sys, re
+  # Convert dot-separated path to yq path (e.g., "proxmox.ip" → ".proxmox.ip")
+  local yq_path=".$key"
 
-def parse_simple_yaml(path):
-    \"\"\"Minimal YAML parser for flat/one-level-nested config.\"\"\"
-    result = {}
-    current_section = None
-    with open(path) as f:
-        for line in f:
-            stripped = line.rstrip()
-            # Skip comments and empty lines
-            if not stripped or stripped.lstrip().startswith('#'):
-                continue
-            # Check indentation
-            indent = len(line) - len(line.lstrip())
-            # Remove inline comments (but not inside quoted values)
-            if '#' in stripped:
-                # Only strip comments that aren't inside quotes
-                in_quote = False
-                quote_char = None
-                for i, c in enumerate(stripped):
-                    if c in ('\"', \"'\") and not in_quote:
-                        in_quote = True
-                        quote_char = c
-                    elif c == quote_char and in_quote:
-                        in_quote = False
-                    elif c == '#' and not in_quote:
-                        stripped = stripped[:i].rstrip()
-                        break
-            if indent == 0 and ':' in stripped:
-                k, _, v = stripped.partition(':')
-                k = k.strip()
-                v = v.strip().strip('\"').strip(\"'\")
-                if v:
-                    result[k] = v
-                else:
-                    current_section = k
-                    if k not in result:
-                        result[k] = {}
-            elif indent > 0 and current_section and ':' in stripped:
-                k, _, v = stripped.partition(':')
-                k = k.strip()
-                v = v.strip().strip('\"').strip(\"'\")
-                if isinstance(result.get(current_section), dict):
-                    result[current_section][k] = v
-
-    return result
-
-data = parse_simple_yaml('$file')
-keys = '$key'.split('.')
-val = data
-for k in keys:
-    if isinstance(val, dict):
-        val = val.get(k, '')
-    else:
-        val = ''
-        break
-print(val if val and not isinstance(val, dict) else '')
-" 2>/dev/null
+  yq -r "$yq_path // \"\"" "$file" 2>/dev/null
 }
 
 # =============================================================================

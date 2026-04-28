@@ -1,6 +1,6 @@
 # Traefik
 
-Traefik is the reverse proxy and load balancer for all Nomad-managed services. It automatically discovers services via the Nomad provider and obtains TLS certificates from the internal step-ca Certificate Authority using the ACME protocol.
+Traefik is the reverse proxy and load balancer for all Nomad-managed services. It automatically discovers services via the Nomad provider and uses a wildcard TLS certificate issued from Vault PKI.
 
 ## Overview
 
@@ -8,13 +8,148 @@ Traefik is the reverse proxy and load balancer for all Nomad-managed services. I
 |----------|-------|
 | **Nomad Job** | `traefik` |
 | **Image** | `traefik:v3.6` |
-| **Type** | `service` (count 1) |
-| **Node** | Pinned to `nomad01` |
+| **Type** | `system` (runs on all Nomad nodes) |
 | **Ports** | 80 (HTTP), 443 (HTTPS), 8081 (Dashboard) |
 | **Network Mode** | Host |
-| **Storage** | GlusterFS host volume `gluster-data` mounted at `/data` |
-| **Resources** | 200 MHz CPU, 256 MB memory |
-| **Menu Option** | 7 (Deploy Traefik) |
+| **Storage** | GlusterFS host volume mounted at `/data` |
+| **TLS** | Wildcard cert (`*.<dns-suffix>`) from Vault PKI |
+| **Cert location** | `/srv/gluster/nomad-data/traefik/tls/cert.pem` and `key.pem` |
+
+## Deployment
+
+Traefik is deployed by Layer 2 Terraform (`terraform/services/nomad-jobs.tf`). It is always the first service deployed and is a prerequisite for all other services that need HTTPS access through the reverse proxy.
+
+To redeploy Traefik (and re-issue the wildcard TLS certificate):
+
+```bash
+./setup.sh --dev
+# Select: d9) Deploy Traefik only
+```
+
+Or use Layer 2 Terraform directly:
+
+```bash
+docker compose run terraform-services apply -auto-approve -target=nomad_job.traefik
+```
+
+## TLS Configuration
+
+Traefik does not use ACME or cert-manager. Instead, a wildcard certificate is issued directly from the Vault intermediate CA (`pki_int/`) at deploy time:
+
+- **Certificate**: `*.<dns-suffix>`
+- **SANs**: `*.<dns-suffix>`, `<dns-suffix>`
+- **TTL**: 1 year
+- **Issuer**: Vault `pki_int/` intermediate CA
+- **Storage**: `/srv/gluster/nomad-data/traefik/tls/` (on GlusterFS)
+
+!!! note "No certResolver tags"
+    Nomad service tags use `tls=true` only. There is no `certresolver` tag. Traefik serves the wildcard certificate as the default TLS certificate for all HTTPS connections via a file provider configuration at `/data/traefik/config/tls.yml`.
+
+!!! info "Vault 1.21.x ACME nonce bug"
+    Vault 1.21.x has a bug in its ACME endpoint that causes nonce errors. Wildcard cert issuance via Vault's PKI secrets engine (`/v1/pki_int/issue/`) works correctly and is used instead.
+
+To re-issue the certificate (e.g., after expiry or DNS suffix change), redeploy Traefik via option `d9`. The Layer 2 `null_resource.install_traefik_cert` always issues a fresh certificate on apply.
+
+## Service Discovery
+
+Traefik discovers services via the Nomad provider:
+
+```
+--providers.nomad=true
+--providers.nomad.endpoint.address=http://127.0.0.1:4646
+--providers.nomad.exposedByDefault=false
+--providers.nomad.namespaces=default
+```
+
+Services opt into Traefik routing by setting `traefik.enable=true` in their Nomad service tags. Services without this tag are not exposed through Traefik.
+
+## Routing Rules
+
+Each service defines its routing via Nomad service tags. Services accept both FQDN and short hostname:
+
+```hcl
+"traefik.http.routers.vault.rule=Host(`vault.<dns-suffix>`) || Host(`vault`)"
+```
+
+Entrypoints:
+
+| Entrypoint | Port | Purpose |
+|------------|------|---------|
+| `web` | 80 | HTTP (no redirect to HTTPS by default) |
+| `websecure` | 443 | HTTPS with wildcard TLS |
+| `traefik` | 8081 | Dashboard (insecure, admin access only) |
+
+## Authentik Forward Auth
+
+Traefik is configured to use Authentik as a forward auth provider for protecting admin services. This is configured via a static middleware file at `/data/traefik/config/authentik.yml` (on GlusterFS), rendered from `nomad/config/traefik/authentik.yml`.
+
+Services that require authentication add the middleware tag:
+
+```hcl
+"traefik.http.routers.pihole.middlewares=authentik@file"
+```
+
+Services accessible to all authenticated users (like Kasm) use a different outpost URL.
+
+## Dashboard
+
+The Traefik dashboard is available at:
+```
+http://<nomad01-ip>:8081
+```
+
+Or via DNS (through Traefik itself):
+```
+https://traefik.<dns-suffix>
+```
+
+The dashboard shows all configured routers, services, middlewares, and entrypoints.
+
+## HA Configuration
+
+When `ha_traefik_enabled: true` is set in `bootstrap.yml`, Traefik runs as a system job on all Nomad nodes and keepalived VRRP manages a VIP that floats to the highest-priority healthy node.
+
+See [High Availability Configuration](../tutorials/ha-configuration.md) for setup instructions.
+
+## Troubleshooting
+
+### 404 errors for a service
+
+Check that the service is registered in Nomad and has the correct tags:
+
+```bash
+# List registered services
+nomad service list
+
+# Check Traefik's view of routers
+curl http://<nomad01-ip>:8081/api/http/routers | jq .
+
+# Check services
+curl http://<nomad01-ip>:8081/api/http/services | jq .
+```
+
+### TLS certificate missing or expired
+
+Redeploy Traefik to re-issue the wildcard certificate:
+
+```bash
+./setup.sh --dev
+# d9) Deploy Traefik only
+```
+
+Verify the certificate:
+
+```bash
+echo | openssl s_client -connect vault.<dns-suffix>:443 2>/dev/null | \
+  openssl x509 -noout -dates
+```
+
+### Service not discovered by Traefik
+
+1. Verify `traefik.enable=true` is in the service tags
+2. Check the service is running: `nomad job status <service>`
+3. Check Traefik logs: `nomad alloc logs -job traefik`
+4. Verify the Nomad service is registered: `nomad service list`
 
 ## Deployment
 

@@ -56,7 +56,7 @@ job "lam" {
       driver = "docker"
 
       config {
-        image       = "ghcr.io/ldapaccountmanager/lam:stable"
+        image       = "ghcr.io/ldapaccountmanager/lam:9.5.2"
         ports       = ["http"]
 
         volumes = [

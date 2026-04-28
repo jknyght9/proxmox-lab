@@ -1,30 +1,35 @@
 # Samba AD
 
-Samba AD provides Active Directory Domain Services for the lab environment. It deploys two domain controllers -- DC01 as the primary (provisioning a new domain) and DC02 as a replica (joining the existing domain) -- across separate Nomad nodes for redundancy.
+Samba AD provides Active Directory Domain Services for the lab environment. It deploys two domain controllers — DC01 as the primary (provisioning a new domain) and DC02 as a replica — across separate Nomad nodes.
 
 ## Overview
 
 | Property | Value |
 |----------|-------|
-| **Nomad Job** | `samba-dc` |
+| **Nomad Job** | `samba-ad` |
 | **Image** | `nowsci/samba-domain:latest` |
-| **Type** | `service` (2 groups) |
+| **Type** | `service` (2 task groups) |
 | **DC01 Node** | Pinned to `nomad01` |
 | **DC02 Node** | Pinned to `nomad02` |
-| **Vault Role** | `samba-dc` (WIF, change_mode: noop) |
+| **Vault Role** | `samba-ad` (WIF) |
 | **Privileged** | Yes |
-| **Kill Timeout** | 120 seconds |
-| **Resources** | 500 MHz CPU, 1024 MB memory per DC |
-| **Menu Option** | 16 (Deploy Samba AD) |
+| **Storage** | `/srv/gluster/nomad-data/samba-dc01/`, `samba-dc02/` |
+| **Ports** | 88 (Kerberos), 389 (LDAP), 636 (LDAPS), 445 (SMB) |
 
 ## Deployment
 
-Deploy Samba AD using the setup menu:
+Select option 4 from the setup menu:
 
 ```bash
 ./setup.sh
-# Select option 16: Deploy Samba AD
+# 4) Samba AD + LDAP Account Manager
 ```
+
+This deploys:
+1. Samba AD domain controllers
+2. LDAP Account Manager (LAM) for web-based user management
+3. Service accounts (`domain-join-svc`, `authentik-sync`, `lam-admin`)
+4. DNS forwarding rules in Pi-hole for the AD realm
 
 The deployment script:
 

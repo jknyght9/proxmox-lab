@@ -31,6 +31,8 @@ locals {
       "${local.traefik_ip} nomad nomad.${var.dns_postfix}",
       "${local.traefik_ip} pihole pihole.${var.dns_postfix}",
       "${local.traefik_ip} lam lam.${var.dns_postfix}",
+      "${local.traefik_ip} netbox netbox.${var.dns_postfix}",
+      "${local.traefik_ip} docs docs.${var.dns_postfix}",
       "${local.traefik_ip} ca ca.${var.dns_postfix}",
     ],
 

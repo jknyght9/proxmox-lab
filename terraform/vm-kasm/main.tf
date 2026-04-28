@@ -141,7 +141,7 @@ resource "null_resource" "kasm_install" {
         curl -fsSLO https://kasm-static-content.s3.amazonaws.com/kasm_release_${var.kasm_version}.tar.gz
         tar -xf kasm_release_${var.kasm_version}.tar.gz
         cd /root/kasm_release
-        bash install.sh --accept-eula --admin-password "$(cat /tmp/.kasm_pw)"
+        bash install.sh --accept-eula --admin-password "$(cat /tmp/.kasm_pw)" -J 4096
         rm -f /tmp/.kasm_pw
       '
       echo '[+] Kasm installation complete'

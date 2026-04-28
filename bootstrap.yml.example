@@ -62,9 +62,29 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # authentik_sync_interval: 300         # Sync interval in seconds (5 min default)
 
 # =============================================================================
-# TrueNAS Integration (optional — AD join, profile shares)
-# Requires: TrueNAS accessible on network, API key generated
+# NAS Servers (optional — AD domain join, profile shares)
+# Supports TrueNAS SCALE and Synology DSM 7.x
+# API keys are stored in Vault after first use
 # =============================================================================
 
-# truenas_ip: "192.168.1.50"          # TrueNAS management IP
-# truenas_api_key: ""                  # API key (stored in Vault after first use)
+# nas_servers:
+#   - name: "truenas-01"               # Friendly name (used as Vault key)
+#     type: "truenas"                   # "truenas" or "synology"
+#     address: "192.168.1.50"           # Management IP or FQDN
+#     api_key: ""                       # TrueNAS: API key from UI
+#                                       # Synology: not needed (uses AD join creds)
+#   - name: "synology-01"
+#     type: "synology"
+#     address: "192.168.1.51"
+#     admin_user: "admin"               # Synology DSM admin (for API auth)
+#     admin_password: ""                # Synology DSM admin password
+
+# =============================================================================
+# UniFi Controller (optional — network device inventory in Netbox)
+# Requires: UniFi Controller/OS accessible on network, API key generated
+# API key: Settings → Control Plane → API Key (UniFi OS 4.x+)
+# =============================================================================
+
+# unifi_address: "192.168.1.1"          # UniFi Controller IP or FQDN
+# unifi_api_key: ""                      # API key (Settings → Integrations)
+# unifi_site: "default"                  # Site name (default for most setups)

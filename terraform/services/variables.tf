@@ -32,6 +32,29 @@ variable "nomad_node_ips" {
   description = "Map of Nomad node names to IPs (e.g., {nomad01 = \"10.1.50.114\"})"
 }
 
+variable "vm_inventory" {
+  type = map(object({
+    vm_id       = number
+    ip          = string
+    cores       = number
+    memory      = number
+    disk_size   = string
+    target_node = string
+  }))
+  description = "All VM configs for Netbox inventory (from Layer 1 vm_configs)"
+  default     = {}
+}
+
+variable "lxc_inventory" {
+  type = map(object({
+    ip          = string
+    target_node = string
+    role        = string
+  }))
+  description = "All LXC container configs for Netbox inventory"
+  default     = {}
+}
+
 variable "dns_server_ip" {
   type        = string
   description = "Primary DNS server IP (Pi-hole VIP or dns-01)"
@@ -128,9 +151,58 @@ variable "deploy_lam" {
   default = false
 }
 
+variable "deploy_netbox" {
+  type        = bool
+  description = "Deploy Netbox inventory management"
+  default     = false
+}
+
+variable "configure_netbox" {
+  type        = bool
+  description = "Configure Netbox provider resources (requires Netbox to be running first)"
+  default     = false
+}
+
+variable "netbox_api_token" {
+  type        = string
+  sensitive   = true
+  description = "Netbox API token (bootstrap token for provider auth)"
+  default     = "not-configured"
+}
+
+variable "vault_oidc_client_secret" {
+  type        = string
+  sensitive   = true
+  description = "Vault OIDC client secret from Authentik (stored at secret/vault-oidc)"
+  default     = ""
+}
+
 variable "deploy_backup" {
   type    = bool
   default = false
+}
+
+# =============================================================================
+# UniFi Controller (for Netbox inventory sync)
+# =============================================================================
+
+variable "unifi_address" {
+  type        = string
+  description = "UniFi Controller IP or FQDN"
+  default     = ""
+}
+
+variable "unifi_api_key" {
+  type        = string
+  sensitive   = true
+  description = "UniFi Controller API key"
+  default     = ""
+}
+
+variable "unifi_site" {
+  type        = string
+  description = "UniFi site name"
+  default     = "default"
 }
 
 variable "deploy_tailscale" {
@@ -193,4 +265,21 @@ variable "backup_timezone" {
 variable "backup_retention_days" {
   type    = number
   default = 7
+}
+
+# =============================================================================
+# NAS Servers (AD domain join via API)
+# =============================================================================
+
+variable "nas_servers" {
+  type = list(object({
+    name           = string
+    type           = string # "truenas" or "synology"
+    address        = string
+    api_key        = optional(string, "")
+    admin_user     = optional(string, "")
+    admin_password = optional(string, "")
+  }))
+  description = "NAS servers to join to the AD domain"
+  default     = []
 }

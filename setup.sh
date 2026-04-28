@@ -220,13 +220,22 @@ function enableService() {
     echo "${var_name} = true" >> "$tfvars"
   fi
 
-  # Authentik: ensure configure_authentik=false for first apply (deploy job only)
+  # Two-phase services: deploy job first, configure after healthy
   if [ "$service_name" = "authentik" ]; then
     if grep -q "^configure_authentik" "$tfvars"; then
       sed -i.bak "s/^configure_authentik.*/configure_authentik = false/" "$tfvars"
       rm -f "$tfvars.bak"
     else
       echo "configure_authentik = false" >> "$tfvars"
+    fi
+  fi
+
+  if [ "$service_name" = "netbox" ]; then
+    if grep -q "^configure_netbox" "$tfvars"; then
+      sed -i.bak "s/^configure_netbox.*/configure_netbox = false/" "$tfvars"
+      rm -f "$tfvars.bak"
+    else
+      echo "configure_netbox = false" >> "$tfvars"
     fi
   fi
 
@@ -246,7 +255,6 @@ function enableService() {
       sleep 10
     done
 
-    # Now update the API token from Vault and enable configuration
     local VAULT_ADDR ROOT_TOKEN API_TOKEN
     VAULT_ADDR=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
     ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
@@ -262,6 +270,59 @@ function enableService() {
     doing "Configuring Authentik applications and providers..."
     tf-services apply -auto-approve
     success "Authentik configured"
+
+    # Sync akadmin password — bootstrap password only applies on first DB init
+    doing "Syncing Authentik admin password with Vault..."
+    local ADMIN_PW
+    ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
+    if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "not-configured" ] && [ -n "$ADMIN_PW" ]; then
+      local NOMAD01_IP_
+      NOMAD01_IP_=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+      local ADMIN_PK
+      ADMIN_PK=$(curl -sk -H "Authorization: Bearer $API_TOKEN" "https://${NOMAD01_IP_}:9443/api/v3/core/users/?username=akadmin" 2>/dev/null | jq -r '.results[0].pk // empty')
+      if [ -n "$ADMIN_PK" ]; then
+        curl -sk -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" \
+          -X POST "https://${NOMAD01_IP_}:9443/api/v3/core/users/$ADMIN_PK/set_password/" \
+          -d "{\"password\":$(echo "$ADMIN_PW" | jq -Rs .)}" >/dev/null 2>&1
+        success "Authentik admin password synced"
+      fi
+    fi
+  fi
+
+  # Netbox: second apply to populate inventory after it's running
+  if [ "$service_name" = "netbox" ]; then
+    doing "Waiting for Netbox to start..."
+    local NOMAD01_IP
+    NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+    for i in {1..30}; do
+      if curl -sk --connect-timeout 3 "http://${NOMAD01_IP}:8080/login/" >/dev/null 2>&1; then
+        success "Netbox is healthy"
+        break
+      fi
+      sleep 10
+    done
+
+    local VAULT_ADDR ROOT_TOKEN NETBOX_TOKEN
+    VAULT_ADDR=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+    ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+    NETBOX_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/netbox" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+
+    sed -i.bak "s/^netbox_api_token.*/netbox_api_token = \"${NETBOX_TOKEN}\"/" "$tfvars"
+    rm -f "$tfvars.bak"
+    if ! grep -q "^netbox_api_token" "$tfvars"; then
+      echo "netbox_api_token = \"${NETBOX_TOKEN}\"" >> "$tfvars"
+    fi
+
+    if grep -q "^configure_netbox" "$tfvars"; then
+      sed -i.bak "s/^configure_netbox.*/configure_netbox = true/" "$tfvars"
+      rm -f "$tfvars.bak"
+    else
+      echo "configure_netbox = true" >> "$tfvars"
+    fi
+
+    doing "Populating Netbox inventory..."
+    tf-services apply -auto-approve
+    success "Netbox configured and inventory populated"
   fi
 }
 
@@ -461,8 +522,10 @@ EOF
   DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
   initAndUnsealVault "$NOMAD01_IP"
 
-  # Enable DNS records now that containers are deployed
+  # Enable DNS records and Authentik for baseline deploy
   local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
+
+  # Enable DNS records
   if ! grep -q "deploy_dns_records" "$SERVICES_TFVARS" 2>/dev/null; then
     echo "deploy_dns_records = true" >> "$SERVICES_TFVARS"
   else
@@ -470,57 +533,80 @@ EOF
     rm -f "$SERVICES_TFVARS.bak"
   fi
 
-  # Re-apply Layer 2 with HTTPS Vault address + DNS records
-  doing "Re-applying Layer 2 (HTTPS + DNS records)..."
+  # Wipe Authentik data if it exists from a previous deployment
+  # (the DB has the old bootstrap token baked in, new Vault secrets won't match)
+  doing "Cleaning stale Authentik data..."
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -i "$ADMIN_KEY_PATH" "labadmin@${NOMAD01_IP}" \
+    "sudo rm -rf /srv/gluster/nomad-data/authentik/postgres/* /srv/gluster/nomad-data/authentik/data/* 2>/dev/null" 2>/dev/null || true
+
+  # Enable Authentik (phase 1: deploy job only, configure_authentik=false)
+  if ! grep -q "deploy_authentik" "$SERVICES_TFVARS" 2>/dev/null; then
+    echo "deploy_authentik = true" >> "$SERVICES_TFVARS"
+  else
+    sed -i.bak 's/deploy_authentik.*/deploy_authentik = true/' "$SERVICES_TFVARS"
+    rm -f "$SERVICES_TFVARS.bak"
+  fi
+  if ! grep -q "configure_authentik" "$SERVICES_TFVARS" 2>/dev/null; then
+    echo "configure_authentik = false" >> "$SERVICES_TFVARS"
+  else
+    sed -i.bak 's/configure_authentik.*/configure_authentik = false/' "$SERVICES_TFVARS"
+    rm -f "$SERVICES_TFVARS.bak"
+  fi
+
+  # Re-apply Layer 2 with HTTPS Vault address + DNS records + Authentik job
+  doing "Re-applying Layer 2 (HTTPS + DNS records + Authentik)..."
   tf-services apply -auto-approve
+
+  # Authentik phase 2: wait for healthy, then configure apps/providers
+  doing "Waiting for Authentik to start..."
+  for i in {1..30}; do
+    if curl -sk --connect-timeout 3 "https://${NOMAD01_IP}:9443/-/health/live/" >/dev/null 2>&1; then
+      success "Authentik is healthy"
+      break
+    fi
+    sleep 10
+  done
+
+  # Read API token from Vault and enable configuration
+  local VAULT_ADDR_FINAL ROOT_TOKEN API_TOKEN
+  VAULT_ADDR_FINAL=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+  ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
+  API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+
+  sed -i.bak "s/^authentik_api_token.*/authentik_api_token = \"${API_TOKEN}\"/" "$SERVICES_TFVARS"
+  sed -i.bak "s/^configure_authentik.*/configure_authentik = true/" "$SERVICES_TFVARS"
+  rm -f "$SERVICES_TFVARS.bak"
+
+  doing "Configuring Authentik applications and providers..."
+  tf-services apply -auto-approve
+  success "Authentik configured"
+
+  # Sync akadmin password — the bootstrap password only applies on first DB init.
+  # If the DB persisted from a previous deployment, the password won't match Vault.
+  doing "Syncing Authentik admin password with Vault..."
+  local ADMIN_PW
+  ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
+  if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "not-configured" ] && [ -n "$ADMIN_PW" ]; then
+    local ADMIN_PK
+    ADMIN_PK=$(curl -sk -H "Authorization: Bearer $API_TOKEN" "https://${NOMAD01_IP}:9443/api/v3/core/users/?username=akadmin" 2>/dev/null | jq -r '.results[0].pk // empty')
+    if [ -n "$ADMIN_PK" ]; then
+      curl -sk -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" \
+        -X POST "https://${NOMAD01_IP}:9443/api/v3/core/users/$ADMIN_PK/set_password/" \
+        -d "{\"password\":$(echo "$ADMIN_PW" | jq -Rs .)}" >/dev/null 2>&1
+      success "Authentik admin password synced"
+    fi
+  fi
 
   echo
   success "Deployment complete!"
   echo
   info "Services:"
-  info "  Vault:   https://${NOMAD01_IP}:8200"
-  info "  Traefik: http://${NOMAD01_IP}:8081"
-  info "  Nomad:   http://${NOMAD01_IP}:4646"
+  info "  Vault:     https://${NOMAD01_IP}:8200"
+  info "  Traefik:   http://${NOMAD01_IP}:8081"
+  info "  Nomad:     http://${NOMAD01_IP}:4646"
+  info "  Authentik: https://${NOMAD01_IP}:9443"
   echo
-}
-
-# Rebuild Packer templates submenu
-function rebuildTemplates() {
-  echo
-  echo -e "  ${C_BOLD}Rebuild Packer Templates${C_RESET}"
-  echo
-  echo "  a) All templates (base + service)"
-  echo "  b) Base only (Ubuntu, Fedora, Debian)"
-  echo "  s) Service only (Docker, Nomad)"
-  echo "  q) Cancel"
-  echo
-  read -rp "$(question "Select: ")" tmpl_choice
-
-  case $tmpl_choice in
-    a|A)
-      doing "Rebuilding all Packer templates..."
-      docker compose build packer >/dev/null 2>&1
-      docker compose run --rm packer init .
-      docker compose run --rm packer build -only='base-*.*' .
-      docker compose run --rm packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
-      success "All templates rebuilt"
-      ;;
-    b|B)
-      doing "Rebuilding base templates..."
-      docker compose build packer >/dev/null 2>&1
-      docker compose run --rm packer init .
-      docker compose run --rm packer build -only='base-*.*' .
-      success "Base templates rebuilt"
-      ;;
-    s|S)
-      doing "Rebuilding service templates..."
-      docker compose build packer >/dev/null 2>&1
-      docker compose run --rm packer init .
-      docker compose run --rm packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
-      success "Service templates rebuilt"
-      ;;
-    *) info "Cancelled";;
-  esac
 }
 
 # -----------------------------------------------------------------------------
@@ -622,35 +708,35 @@ function showMenu() {
   echo
   echo -e "  ${C_BOLD}Setup${C_RESET}"
   echo "    1) Deploy all services"
+  echo "    2) Enable HA (keepalived VIPs)"
   echo
-  echo -e "  ${C_BOLD}Infrastructure (Layer 1)${C_RESET}"
-  echo "    2) DNS (Pi-hole cluster)"
-  echo "    3) Vault (deploy container)"
-  echo "    4) Kasm Workspaces (optional)"
-  echo "    5) Enable HA (keepalived VIPs)"
-  echo
-  echo -e "  ${C_BOLD}Services (Layer 2)${C_RESET}"
-  echo "    6) Traefik (load balancer)"
-  echo "    7) Authentik (SSO / OIDC)"
-  echo "    8) Samba AD"
-  echo "    9) Uptime Kuma (monitoring)"
-  echo "   10) LDAP Account Manager"
+  echo -e "  ${C_BOLD}Optional Services${C_RESET}"
+  echo "    3) Kasm Workspaces"
+  echo "    4) Samba AD + LDAP Account Manager"
+  echo "    5) Uptime Kuma (monitoring)"
+  echo "    6) Netbox (inventory management)"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
-  echo "   11) Rollback deployment"
-  echo "   12) Purge deployment"
+  echo "    7) Rollback services (Layer 2)"
+  echo "    8) Rollback infrastructure (Layer 1 + 2)"
+  echo "    9) Purge entire deployment"
   echo "    0) Exit"
 
   if [ "$DEV_MODE" = true ]; then
     echo
     echo -e "  ${C_DIM}─── Developer Tools ──────────────────────${C_RESET}"
     echo
-    echo "   d1) Rebuild Packer templates"
-    echo "   d2) Reset API credentials"
-    echo "   d3) Apply Layer 1 (infrastructure)"
-    echo "   d4) Apply Layer 2 (services)"
-    echo "   d5) Deploy Nomad cluster only"
-    echo "   d6) Rebuild DNS records"
+    echo "   d1) Rebuild base templates (Debian, Fedora, Ubuntu)"
+    echo "   d2) Rebuild service templates (Docker, Nomad)"
+    echo "   d3) Reset Proxmox user/token/role"
+    echo "   d4) Deploy infrastructure (Nomad, Vault, DNS)"
+    echo "   d5) Deploy services (Traefik, Authentik, secrets)"
+    echo "   d6) Deploy Nomad cluster only"
+    echo "   d7) Deploy DNS only"
+    echo "   d8) Deploy Vault only"
+    echo "   d9) Deploy Traefik only"
+    echo "  d10) Deploy Authentik only"
+    echo "  d11) Rebuild DNS records"
   fi
   echo
 }
@@ -671,38 +757,38 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-12, d1-d6]: ")" choice
+    read -rp "$(question "Select [0-9, d1-d11]: ")" choice
   else
-    read -rp "$(question "Select [0-12]: ")" choice
+    read -rp "$(question "Select [0-9]: ")" choice
   fi
 
   case $choice in
     1)  deployAll;;
+    2)  toggleHA;;
 
-    # Layer 1 — Infrastructure
-    2)  ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main;;
-    3)  ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault;;
-    4)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
-    5)  toggleHA;;
-
-    # Layer 2 — Services
-    6)  enableService "traefik";;
-    7)  enableService "authentik";;
-    8)  enableService "samba_ad";;
-    9)  enableService "uptime_kuma";;
-    10) enableService "lam";;
+    # Optional services
+    3)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
+    4)  enableService "samba_ad" && enableService "lam";;
+    5)  enableService "uptime_kuma";;
+    6)  enableService "netbox";;
 
     # Management
-    11) ensureBootstrapComplete && rollbackManual;;
-    12) purgeDeployment;;
+    7)  ensureBootstrapComplete && rollbackLayer2;;
+    8)  ensureBootstrapComplete && rollbackLayer1;;
+    9)  purgeDeployment;;
 
     # Developer tools
-    d1|D1) if [ "$DEV_MODE" = true ]; then rebuildTemplates;                                            else error "Invalid option"; fi;;
-    d2|D2) if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                     else error "Invalid option"; fi;;
-    d3|D3) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;            else error "Invalid option"; fi;;
-    d4|D4) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;  else error "Invalid option"; fi;;
-    d5|D5) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
-    d6|D6) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync -target=null_resource.proxmox_dns_config; else error "Invalid option"; fi;;
+    d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-*.*' .; else error "Invalid option"; fi;;
+    d2|D2)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .; else error "Invalid option"; fi;;
+    d3|D3)   if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                      else error "Invalid option"; fi;;
+    d4|D4)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;             else error "Invalid option"; fi;;
+    d5|D5)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;    else error "Invalid option"; fi;;
+    d6|D6)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
+    d7|D7)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main; else error "Invalid option"; fi;;
+    d8|D8)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault; else error "Invalid option"; fi;;
+    d9|D9)   if [ "$DEV_MODE" = true ]; then enableService "traefik";                                      else error "Invalid option"; fi;;
+    d10|D10) if [ "$DEV_MODE" = true ]; then enableService "authentik";                                    else error "Invalid option"; fi;;
+    d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync -target=null_resource.proxmox_dns_config; else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

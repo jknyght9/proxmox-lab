@@ -97,6 +97,31 @@ resource "nomad_job" "backup" {
   detach = false
 }
 
+resource "nomad_job" "netbox" {
+  count      = var.deploy_netbox ? 1 : 0
+  depends_on = [
+    null_resource.service_directories,
+    vault_policy.netbox,
+    vault_jwt_auth_backend_role.netbox,
+    vault_kv_secret_v2.netbox,
+    null_resource.nomad_vault_config,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/netbox.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+}
+
+resource "nomad_job" "docs" {
+  depends_on = [null_resource.service_directories, null_resource.nomad_vault_config, null_resource.docs_build]
+
+  jobspec = templatefile("${path.module}/templates/docs.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+}
+
 resource "nomad_job" "tailscale" {
   count      = var.deploy_tailscale ? 1 : 0
   depends_on = [

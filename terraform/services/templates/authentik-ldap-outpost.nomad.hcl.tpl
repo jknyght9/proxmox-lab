@@ -13,7 +13,7 @@ job "authentik-ldap" {
       driver = "docker"
 
       config {
-        image        = "ghcr.io/goauthentik/ldap:latest"
+        image        = "ghcr.io/goauthentik/ldap:2026.2.2"
         network_mode = "host"
       }
 
