@@ -134,7 +134,7 @@ CLOUD_INIT
       BRIDGE="$4"
       SSH_USER="$5"
       SSH_PASS="$6"
-      SNIPPET_STORE="$7"
+      SNIPPET_STORE="${7:-local}"
       IMAGE="/tmp/noble-server-cloudimg-amd64.img"
 
       echo "[+] Checking for existing VM $VMID..."
