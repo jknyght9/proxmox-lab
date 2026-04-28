@@ -343,7 +343,7 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 
 ## Dependencies
 
-- **Local**: Docker, Docker Compose, sshpass, jq
+- **Local**: Docker, Docker Compose, sshpass, jq, yq (mikefarah/yq — Go version)
 - **Terraform Provider**: bpg/proxmox
 - **Packer Plugin**: hashicorp/proxmox >=1.1.2
 - **Base template**: Ubuntu Server 24.04 (VM ID 9999 in Proxmox)

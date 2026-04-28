@@ -81,6 +81,23 @@ function checkRequirements() {
     exit 1
   fi
 
+  # Check if yq is installed (mikefarah/yq — Go implementation)
+  # The Python yq (kislyuk/yq) has incompatible expression syntax and
+  # will silently return empty strings for our queries.
+  if ! command -v yq >/dev/null 2>&1; then
+    error "'yq' is not installed. Please install mikefarah/yq (Go) and try again."
+    echo "  Debian/Ubuntu: sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && sudo chmod +x /usr/local/bin/yq"
+    echo "  macOS (Homebrew): brew install yq"
+    echo "  Fedora: sudo dnf install yq"
+    exit 1
+  fi
+  if ! yq --version 2>&1 | grep -qiE 'mikefarah|github\.com/mikefarah'; then
+    error "Detected an incompatible 'yq'. This project requires mikefarah/yq (Go), not Python yq."
+    echo "  Found: $(yq --version 2>&1)"
+    echo "  Install Go yq from https://github.com/mikefarah/yq/releases"
+    exit 1
+  fi
+
   # Check if Docker Engine is installed
   if ! command -v docker >/dev/null 2>&1; then
     error "'docker' is not installed. Please install Docker Engine."
@@ -97,7 +114,7 @@ function checkRequirements() {
     exit 1
   fi
 
-  success "All requirements met: sshpass, jq, and Docker are available and running."
+  success "All requirements met: sshpass, jq, yq, and Docker are available and running."
 }
 
 # Display a header banner

@@ -39,6 +39,7 @@ Install these tools on the machine where you'll run the setup script:
     brew install docker
     brew install hudochenkov/sshpass/sshpass
     brew install jq
+    brew install yq
     ```
 
 === "Ubuntu/Debian"
@@ -53,6 +54,10 @@ Install these tools on the machine where you'll run the setup script:
 
     # Install other requirements
     sudo apt install -y sshpass jq
+
+    # Install yq (mikefarah Go version — required, NOT the python-yq apt package)
+    sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    sudo chmod +x /usr/local/bin/yq
     ```
 
 === "Fedora/RHEL"
@@ -63,9 +68,16 @@ Install these tools on the machine where you'll run the setup script:
     sudo systemctl enable --now docker
     sudo usermod -aG docker $USER
 
-    # Install other requirements
-    sudo dnf install -y sshpass jq
+    # Install other requirements (yq in Fedora repos is the mikefarah Go version)
+    sudo dnf install -y sshpass jq yq
     ```
+
+!!! warning "yq must be the Go implementation"
+    This project uses [mikefarah/yq](https://github.com/mikefarah/yq) (Go).
+    The Python `yq` package (`kislyuk/yq`, installed via `pip install yq` or
+    `apt install python3-yq`) uses incompatible expression syntax and will
+    cause silent failures during bootstrap. Verify with `yq --version` —
+    output must mention `mikefarah`.
 
 ### Verify Installation
 
@@ -77,6 +89,7 @@ docker compose version
 # Check other tools
 sshpass -V
 jq --version
+yq --version    # Must show "mikefarah" in output
 ```
 
 ### On Proxmox
