@@ -1049,6 +1049,9 @@ EOF
   discoverStorage || return 1
   discoverNetworkBridges || return 1
   createAPIToken || return 1
+  # Generate service passwords *before* tfvars/pkrvars so they aren't
+  # left at the changeme123 placeholder on a fresh deployment.
+  generateServicePasswords || return 1
   generateTfvarsFromBootstrap || return 1
   generatePackerVarsFromBootstrap || return 1
 
