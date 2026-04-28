@@ -99,7 +99,7 @@ yq --version    # Must show "mikefarah" in output
 - **API access** enabled (default)
 
 !!! info "Tailscale Compatibility"
-    Proxmox Lab is fully compatible with Tailscale for remote access. If you have Tailscale installed on your Proxmox nodes, the setup script will automatically configure it to work alongside local DNS resolution. See the [Tailscale Integration](../architecture/network-topology.md#tailscale-integration) section for details.
+    Proxmox Lab is fully compatible with Tailscale for remote access. If you have Tailscale installed on your Proxmox nodes, the setup script will automatically configure it to work alongside local DNS resolution.
 
 ## Proxmox Preparation
 

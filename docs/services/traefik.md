@@ -464,4 +464,4 @@ curl -s http://nomad01:8081/api/http/routers | jq '.[].rule'
 
 - [:octicons-arrow-right-24: Vault](vault.md) -- Secrets management (routed through Traefik)
 - [:octicons-arrow-right-24: Authentik](authentik.md) -- Identity provider (routed through Traefik)
-- [:octicons-arrow-right-24: Certificate Chain](../architecture/certificate-chain.md) -- How TLS certificates are issued
+- [:octicons-arrow-right-24: Secrets Management](../architecture/secrets.md) -- How TLS certificates and secrets are issued via Vault

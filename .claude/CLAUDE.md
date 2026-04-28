@@ -96,7 +96,7 @@ docker compose run terraform destroy
 ### Nomad (from project root)
 ```bash
 docker compose run --rm nomad job status              # List all jobs
-docker compose run --rm nomad job run /nomad/jobs/vault.nomad.hcl  # Deploy job
+docker compose run --rm nomad job run -                          # Deploy a rendered jobspec from stdin (templates live under terraform/services/templates/)
 docker compose run --rm nomad job stop -purge vault   # Stop and purge job
 docker compose run --rm nomad alloc logs -job vault   # View job logs
 docker compose run --rm nomad service list            # List registered services
@@ -121,9 +121,7 @@ Modules called from `main.tf`:
 - **vm-nomad/** - 3-node HashiCorp Nomad cluster with GlusterFS (nomad01-03)
 - **vm-kasm/** - Kasm Workspaces remote desktop platform
 - **lxc-pihole/** - Pi-hole v6 DNS + Unbound (DNS-over-TLS) with Gravity Sync
-- **lxc-step-ca/** - (Removed) Replaced by Vault PKI secrets engine
-- **vm-docker-swarm/** - (Legacy) 3-node Docker Swarm cluster
-- **archive/** - Archived/deprecated modules
+- **services/** - Layer 2 (Nomad jobs, Vault config, Authentik, Netbox, etc.)
 
 ### Packer Templates (packer/)
 - **build_base_ubuntu.pkr.hcl** - Base Ubuntu 24.04 cloud image template (VMID 9999) — downloads cloud image, imports via qm, converts to template
@@ -134,17 +132,26 @@ Modules called from `main.tf`:
 - **dev/** - Development templates (Windows, Kasm)
 - **archive/** - Archived/deprecated templates
 
-### Nomad Jobs (nomad/jobs/)
-- **traefik.nomad.hcl** - Traefik reverse proxy/load balancer
-- **authentik.nomad.hcl** - Authentik identity provider (SSO, OAuth2/OIDC, SAML, LDAP)
-- **vault.nomad.hcl** - HashiCorp Vault secrets manager (KV secrets engine, auto-unseal)
-- **samba-dc.nomad.hcl** - Samba AD Domain Controllers (DC01 on nomad01, DC02 on nomad02)
-- **uptime-kuma.nomad.hcl** - Uptime Kuma service health monitoring (port 3001)
-- **backup.nomad.hcl** - Periodic backup job for NFS/SMB storage (credentials from Vault)
+### Nomad Job Templates (terraform/services/templates/)
+Rendered by `nomad_job` resources in `terraform/services/nomad-jobs.tf`:
+
+- **traefik.nomad.hcl.tpl** — Traefik reverse proxy/load balancer
+- **authentik.nomad.hcl.tpl** — Authentik identity provider (SSO, OIDC, SAML, LDAP)
+- **authentik-ldap-outpost.nomad.hcl.tpl** — Authentik LDAP outpost (Kasm credential passthrough)
+- **samba-ad.nomad.hcl.tpl** — Samba AD Domain Controllers (DC01 on nomad01, DC02 on nomad02)
+- **lam.nomad.hcl.tpl** — LDAP Account Manager (web UI for AD)
+- **uptime-kuma.nomad.hcl.tpl** — Uptime Kuma service health monitoring (port 3001)
+- **netbox.nomad.hcl.tpl** — Netbox DCIM/IPAM (postgres + redis + server + worker + housekeeping)
+- **docs.nomad.hcl.tpl** — MkDocs documentation site
+- **backup.nomad.hcl.tpl** — Periodic backup job for NFS/SMB storage (credentials from Vault)
+- **tailscale.nomad.hcl.tpl** — Tailscale subnet router (system job, all Nomad nodes)
+
+Layer 1 (`terraform/templates/`):
+- **vault.nomad.hcl.tpl** — HashiCorp Vault (deployed before services so it can issue PKI certs)
 
 ### Network Architecture
 Networks are user-configured during setup (stored in `cluster-info.json`):
-- **vmbr0 (external)**: User-defined CIDR - Nomad VMs, DNS servers, step-ca, Kasm
+- **vmbr0 (external)**: User-defined CIDR - Nomad VMs, DNS servers, Kasm
 - **labnet (SDN internal)**: User-defined CIDR - labnet-dns servers, internal services
 
 ### DNS Architecture (Pi-hole v6 + Unbound)
@@ -179,7 +186,7 @@ Labnet SDN DNS cluster (max 2 nodes on internal network):
 .4  - dns-01
 .5  - dns-02
 .6  - dns-03
-.7  - (available, formerly step-ca)
+.7  - (available)
 .8+ - Other services
 ```
 
@@ -289,9 +296,8 @@ start on every boot, via:
   `RequiresMountsFor=/srv/gluster/nomad-data` — Docker and Nomad cannot
   enter `active` until the mount is up.
 - Sentinel file `/srv/gluster/nomad-data/.mount-sentinel` (contents `v1`)
-  is created once the volume is confirmed mounted (by `deployNomad.sh` or
-  the one-shot `fixGlusterMountOrdering` helper, exposed as setup.sh
-  `--dev` menu option `d11`).
+  is created once the volume is confirmed mounted by the Nomad VM
+  cloud-init (`terraform/vm-nomad/cloudinit/nomad-user-data.tmpl`).
 
 Every Nomad job that bind-mounts a path under `/srv/gluster/nomad-data`
 includes a `wait-for-gluster` prestart task (`raw_exec`, `sidecar = false`)
@@ -301,8 +307,8 @@ sentinel is absent, the alloc fails fast instead of binding to an empty
 pre-mount local directory.
 
 **When adding a new Nomad job that bind-mounts from the gluster volume**,
-copy the `wait-for-gluster` task from an existing job (e.g.
-`nomad/jobs/vault.nomad.hcl`) into the same task group. The guard depends
+copy the `wait-for-gluster` task from an existing job template (e.g.
+`terraform/services/templates/netbox.nomad.hcl.tpl`) into the same task group. The guard depends
 on `plugin "raw_exec"` being enabled in `/etc/nomad.d/nomad.hcl`, which
 the cloud-init template and `fixGlusterMountOrdering` already provide.
 
@@ -352,7 +358,6 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 
 | Range | Purpose |
 |-------|---------|
-| 902 | (Retired) step-ca LXC - replaced by Vault PKI |
 | 905-907 | Nomad cluster (nomad01-03) |
 | 910-912 | Main DNS cluster (dns-01, dns-02, dns-03) |
 | 920-922 | Labnet DNS cluster (labnet-dns-01, labnet-dns-02, labnet-dns-03) |
@@ -450,11 +455,11 @@ curl -v http://10.1.50.100/
 - **Privileged Mode**: Required for GlusterFS volume writes (`privileged = true`)
 - **Storage**: Direct Docker bind mount `/srv/gluster/nomad-data/vault:/data/vault`
 - **Disable mlock**: Set `disable_mlock = true` in config (IPC_LOCK capability not allowed in Nomad Docker driver)
-- **TLS Listener**: Vault serves HTTPS using a cert issued by its own PKI. Two-phase bootstrap: first deploy uses `tls_disable=true`, then `initVaultPKI` issues a listener cert and Vault redeploys with HCL2 variable `vault_tls_enabled=true`. Cert/key at `/srv/gluster/nomad-data/vault-tls/`.
-- **Vault PKI**: Two-tier setup — `pki/` (root CA, 10-year TTL) and `pki_int/` (intermediate CA, 5-year TTL), initialized by `initVaultPKI` in `deployVault.sh`. Replaces the old step-ca LXC.
+- **TLS Listener**: Vault serves HTTPS using a cert issued by its own PKI. Two-phase bootstrap: first deploy uses `tls_disable=true`, then `initVault.sh` issues a listener cert via the Vault Terraform PKI resources and Vault redeploys with HCL2 variable `vault_tls_enabled=true`. Cert/key at `/srv/gluster/nomad-data/vault-tls/`.
+- **Vault PKI**: Two-tier setup — `pki/` (root CA, 10-year TTL) and `pki_int/` (intermediate CA, 5-year TTL), managed declaratively by `terraform/services/vault-pki.tf`.
 - **Health Check**: Use `?uninitcode=200&sealedcode=200` to accept uninitialized/sealed Vault as healthy
-- **Credentials**: Saved to `crypto/vault-credentials.json` (gitignored) during initialization. `vault_address` is updated from http:// to https:// by `deployVaultOnly` when TLS is enabled.
-- **Nomad Integration**: Uses Workload Identity Federation (WIF) - no tokens stored on Nomad nodes. When Vault is HTTPS, `configureNomadVaultIntegration` pushes the root CA to all Nomad VMs' system trust stores.
+- **Credentials**: Saved to `crypto/vault-credentials.json` (gitignored) during initialization. `vault_address` is updated from http:// to https:// when TLS is enabled.
+- **Nomad Integration**: Uses Workload Identity Federation (WIF) — no tokens stored on Nomad nodes. The root CA is pushed to all Nomad VMs' system trust stores during VM provisioning so Nomad workloads can validate Vault HTTPS.
 - **curl -k required**: All deploy script curl calls to Vault use `-k` since the workstation may not trust the internal root CA
 
 ### Vault Credentials File (`crypto/vault-credentials.json`)
@@ -541,10 +546,6 @@ Enables remote access to the lab network via Tailscale VPN with high availabilit
 
 **Auth Key Rotation (every 90 days):**
 ```bash
-# Option 1: Use rotation function
-source lib/deploy/nomadJob/deployTailscale.sh && rotateTailscaleKey
-
-# Option 2: Manual
 vault kv put secret/tailscale auth_key=tskey-auth-xxxxx
 nomad job restart tailscale
 ```
@@ -623,7 +624,7 @@ nomad job stop backup                # Stop scheduled backups
 ```
 
 ### DNS for Nomad Services
-The `updateDNSRecords` function adds service DNS entries:
+`terraform/services/dns-records.tf` writes service DNS entries to Pi-hole:
 - `vault.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `auth.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
 - `traefik.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
@@ -657,7 +658,7 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 
 #### Vault Data Loss
 - **Critical**: Vault data at `/srv/gluster/nomad-data/vault` must be preserved across redeployments - never delete unless intentionally resetting
-- The `deployVault.sh` script was fixed to not delete existing Vault data during redeployment
+- Terraform's vault Nomad job uses bind-mount semantics that preserve existing data; only manual `rm -rf` of the GlusterFS path destroys it
 - **If Vault is accidentally reinitialized, all secrets are lost** and dependent services (Authentik, Samba AD, backups) will fail to start
 - **Recovery steps** (Authentik example):
   1. Generate new `AUTHENTIK_SECRET_KEY` and `POSTGRES_PASSWORD`
