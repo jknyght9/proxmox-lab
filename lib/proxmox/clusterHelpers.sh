@@ -199,12 +199,19 @@ function detectAndSaveCluster() {
     FIX_DNS=${FIX_DNS:-Y}
 
     if [[ "$FIX_DNS" =~ ^[Yy]$ ]]; then
-      # Ask for the user's DNS server
-      read -rp "$(question "Enter your network's DNS server (e.g., your gateway IP): ")" USER_DNS
-      while [ -z "$USER_DNS" ]; do
-        warn "DNS server is required"
-        read -rp "$(question "Enter your network's DNS server: ")" USER_DNS
-      done
+      # Default to network.dns from bootstrap.yml (which falls back to
+      # network.gateway). User can override at the prompt if needed.
+      local USER_DNS="$NETWORK_DNS"
+      if [ -n "$USER_DNS" ]; then
+        read -rp "$(question "DNS server [$USER_DNS]: ")" answer
+        [ -n "$answer" ] && USER_DNS="$answer"
+      else
+        read -rp "$(question "Enter your network's DNS server (e.g., your gateway IP): ")" USER_DNS
+        while [ -z "$USER_DNS" ]; do
+          warn "DNS server is required"
+          read -rp "$(question "Enter your network's DNS server: ")" USER_DNS
+        done
+      fi
 
       for node in "${failed_nodes[@]}"; do
         local idx=-1
