@@ -238,6 +238,54 @@ function _selectStorage() {
   _SELECTED_STORAGE="${names[$((selection-1))]}"
 }
 
+# Validate bootstrap.yml storage.* overrides against the live storage
+# pool list from Proxmox. Each override must exist and carry the right
+# content type for its role.
+#
+# Arguments: $1 = STORAGE_JSON from `pvesh get /storage --output-format json`
+# Returns:   0 if all overrides are valid (or none set), 1 on validation
+#            failure (errors already printed).
+function validateStorageOverrides() {
+  local storage_json="$1"
+  local errors=0
+
+  _checkStorageContent() {
+    local name="$1" required_content="$2" field="$3"
+    [ -z "$name" ] && return 0  # No override set — skip
+
+    local entry
+    entry=$(echo "$storage_json" | jq -r --arg s "$name" '.[] | select(.storage == $s)')
+    if [ -z "$entry" ]; then
+      error "  $field=\"$name\" — storage pool does not exist on this Proxmox cluster"
+      info  "  Available pools:"
+      echo "$storage_json" | jq -r '.[] | "    - \(.storage) (\(.type)) content: \(.content)"'
+      errors=$((errors + 1))
+      return 1
+    fi
+    local content; content=$(echo "$entry" | jq -r '.content // ""')
+    if ! echo ",${content}," | grep -q ",${required_content},"; then
+      error "  $field=\"$name\" — pool exists but lacks '${required_content}' content type"
+      info  "  Found content: $content"
+      info  "  Enable in Proxmox → Datacenter → Storage → Edit ${name} → Content"
+      errors=$((errors + 1))
+      return 1
+    fi
+    return 0
+  }
+
+  _checkStorageContent "$STORAGE_TEMPLATES_OVERRIDE" "images"   "storage.templates"
+  _checkStorageContent "$STORAGE_RUNTIME_OVERRIDE"   "images"   "storage.runtime"
+  _checkStorageContent "$STORAGE_LXC_OVERRIDE"       "rootdir"  "storage.lxc"
+  _checkStorageContent "$STORAGE_SNIPPETS_OVERRIDE"  "snippets" "storage.snippets"
+  _checkStorageContent "$STORAGE_VZTMPL_OVERRIDE"    "vztmpl"   "storage.vztmpl"
+
+  if [ "$errors" -gt 0 ]; then
+    error "Bootstrap aborted: $errors storage override(s) invalid in bootstrap.yml"
+    return 1
+  fi
+  return 0
+}
+
 # Discover available storage pools from Proxmox and prompt the user to
 # select which pools to use for templates, VMs, and LXC containers.
 #
@@ -248,6 +296,23 @@ function _selectStorage() {
 #              LXC_STORAGE, SNIPPET_STORAGE
 function discoverStorage() {
   doing "Discovering storage pools..."
+
+  # Always fetch the live storage list first so both the saved-config
+  # fast path and the interactive path can validate against it.
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local STORAGE_JSON
+  STORAGE_JSON=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$PROXMOX_IP" \
+    "pvesh get /storage --output-format json" 2>/dev/null)
+
+  if [ -z "$STORAGE_JSON" ]; then
+    warn "Could not query storage — using defaults"
+    TEMPLATE_STORAGE="local-lvm"
+    TEMPLATE_STORAGE_TYPE="lvm"
+    RUNTIME_STORAGE="local-lvm"
+    LXC_STORAGE="local-lvm"
+    SNIPPET_STORAGE="local"
+    return 0
+  fi
 
   # Check if storage was already selected in a previous run
   if [ -f "$CLUSTER_INFO_FILE" ]; then
@@ -267,41 +332,45 @@ function discoverStorage() {
       info "    Snippets:        $saved_snippets"
       info "    LXC templates:   $saved_vztmpl"
 
-      read -rp "$(question "  Keep these settings? [Y/n]: ")" keep_storage
-      keep_storage=${keep_storage:-Y}
-      if [[ "$keep_storage" =~ ^[Yy]$ ]]; then
-        TEMPLATE_STORAGE="$saved_templates"
-        TEMPLATE_STORAGE_TYPE="$saved_type"
-        RUNTIME_STORAGE="$saved_runtime"
-        LXC_STORAGE="$saved_lxc"
-        SNIPPET_STORAGE="${saved_snippets:-local}"
-        VZTMPL_STORAGE="${saved_vztmpl:-local}"
-        success "Storage configuration loaded from previous run"
-        return 0
+      # Verify saved pools still exist on the cluster — saved values can
+      # go stale if Proxmox storage was renamed/removed since the last run.
+      local saved_valid=true
+      for s in "$saved_templates" "$saved_runtime" "$saved_lxc" "$saved_snippets" "$saved_vztmpl"; do
+        [ -z "$s" ] && continue
+        if ! echo "$STORAGE_JSON" | jq -e --arg s "$s" '.[] | select(.storage == $s)' >/dev/null 2>&1; then
+          warn "    Saved pool '$s' no longer exists — discarding cached selection"
+          saved_valid=false
+          break
+        fi
+      done
+
+      if [ "$saved_valid" = true ]; then
+        read -rp "$(question "  Keep these settings? [Y/n]: ")" keep_storage
+        keep_storage=${keep_storage:-Y}
+        if [[ "$keep_storage" =~ ^[Yy]$ ]]; then
+          TEMPLATE_STORAGE="$saved_templates"
+          TEMPLATE_STORAGE_TYPE="$saved_type"
+          RUNTIME_STORAGE="$saved_runtime"
+          LXC_STORAGE="$saved_lxc"
+          SNIPPET_STORAGE="${saved_snippets:-local}"
+          VZTMPL_STORAGE="${saved_vztmpl:-local}"
+          success "Storage configuration loaded from previous run"
+          return 0
+        fi
       fi
     fi
-  fi
-
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
-
-  # Query available storage that can hold VM images
-  local STORAGE_JSON
-  STORAGE_JSON=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$PROXMOX_IP" \
-    "pvesh get /storage --output-format json" 2>/dev/null)
-
-  if [ -z "$STORAGE_JSON" ]; then
-    warn "Could not query storage — using defaults"
-    TEMPLATE_STORAGE="local-lvm"
-    TEMPLATE_STORAGE_TYPE="lvm"
-    RUNTIME_STORAGE="local-lvm"
-    LXC_STORAGE="local-lvm"
-    SNIPPET_STORAGE="local"
-    return 0
   fi
 
   # Show all storage pools with their content types (sorted alphabetically)
   info "  Available storage pools:"
   echo "$STORAGE_JSON" | jq -r '[.[] | {storage, type, shared, content}] | sort_by(.storage) | .[] | "    \(.storage) (\(.type)) \(if .shared == 1 then "[shared]" else "[local]" end) content: \(.content)"'
+
+  # Validate any overrides from bootstrap.yml against the live storage list.
+  # Each override must (a) exist as a storage pool and (b) carry the right
+  # content type. Fail loudly here rather than later in Packer/Terraform.
+  if ! validateStorageOverrides "$STORAGE_JSON"; then
+    return 1
+  fi
 
   # Filter storage pools that can hold VM disk images
   local IMAGE_STORAGE
