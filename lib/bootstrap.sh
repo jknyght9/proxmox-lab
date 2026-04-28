@@ -63,6 +63,9 @@ function readBootstrapConfig() {
   # interactive storage selection prompt (not auto-applied)
   STORAGE_TEMPLATES_OVERRIDE=$(yamlGet "storage.templates")
   STORAGE_RUNTIME_OVERRIDE=$(yamlGet "storage.runtime")
+  STORAGE_SNIPPETS_OVERRIDE=$(yamlGet "storage.snippets")
+  STORAGE_VZTMPL_OVERRIDE=$(yamlGet "storage.vztmpl")
+  STORAGE_LXC_OVERRIDE=$(yamlGet "storage.lxc")
 
   # Validate required fields
   local missing=()
@@ -271,8 +274,8 @@ function discoverStorage() {
         TEMPLATE_STORAGE_TYPE="$saved_type"
         RUNTIME_STORAGE="$saved_runtime"
         LXC_STORAGE="$saved_lxc"
-        SNIPPET_STORAGE="$saved_snippets"
-        VZTMPL_STORAGE="$saved_vztmpl"
+        SNIPPET_STORAGE="${saved_snippets:-local}"
+        VZTMPL_STORAGE="${saved_vztmpl:-local}"
         success "Storage configuration loaded from previous run"
         return 0
       fi
@@ -305,38 +308,49 @@ function discoverStorage() {
   IMAGE_STORAGE=$(echo "$STORAGE_JSON" | jq '[.[] | select(.content | contains("images"))]')
 
   # --- Auto-detect snippet and vztmpl storage (limited choices) ---
+  # bootstrap.yml overrides take priority over auto-detection
 
   # Identify storage that supports snippets (needed for cloud-init cicustom)
   # Prefer shared snippet storage for clusters so templates work on any node
   # Not local — needed by generatePackerVarsFromBootstrap
-  SNIPPET_STORAGE=""
-  if [ "$IS_CLUSTER" = "true" ]; then
-    SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("snippets")) and .shared == 1)] | first | .storage // empty')
-  fi
-  if [ -z "$SNIPPET_STORAGE" ]; then
-    SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("snippets"))] | first | .storage // empty')
-  fi
-  if [ -n "$SNIPPET_STORAGE" ]; then
-    info "  Snippet storage: $SNIPPET_STORAGE$([ "$IS_CLUSTER" = "true" ] && echo " (shared)" || echo "")"
+  if [ -n "$STORAGE_SNIPPETS_OVERRIDE" ]; then
+    SNIPPET_STORAGE="$STORAGE_SNIPPETS_OVERRIDE"
+    info "  Snippet storage: $SNIPPET_STORAGE (from bootstrap.yml)"
   else
-    SNIPPET_STORAGE="local"
-    warn "  No storage with 'snippets' content found — falling back to 'local'"
+    SNIPPET_STORAGE=""
+    if [ "$IS_CLUSTER" = "true" ]; then
+      SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("snippets")) and .shared == 1)] | first | .storage // empty')
+    fi
+    if [ -z "$SNIPPET_STORAGE" ]; then
+      SNIPPET_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("snippets"))] | first | .storage // empty')
+    fi
+    if [ -n "$SNIPPET_STORAGE" ]; then
+      info "  Snippet storage: $SNIPPET_STORAGE$([ "$IS_CLUSTER" = "true" ] && echo " (shared)" || echo "")"
+    else
+      SNIPPET_STORAGE="local"
+      warn "  No storage with 'snippets' content found — falling back to 'local'"
+    fi
   fi
 
   # Identify storage that supports LXC templates (vztmpl)
   # Prefer shared storage for clusters so templates are accessible on all nodes
   # Not local — needed by downloadLXCTemplates
-  VZTMPL_STORAGE=""
-  if [ "$IS_CLUSTER" = "true" ]; then
-    VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("vztmpl")) and .shared == 1)] | sort_by(.storage) | first | .storage // empty')
-  fi
-  if [ -z "$VZTMPL_STORAGE" ]; then
-    VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("vztmpl"))] | sort_by(.storage) | first | .storage // empty')
-  fi
-  if [ -n "$VZTMPL_STORAGE" ]; then
-    info "  LXC template storage: $VZTMPL_STORAGE"
+  if [ -n "$STORAGE_VZTMPL_OVERRIDE" ]; then
+    VZTMPL_STORAGE="$STORAGE_VZTMPL_OVERRIDE"
+    info "  LXC template storage: $VZTMPL_STORAGE (from bootstrap.yml)"
   else
-    warn "  No storage with 'vztmpl' content found — LXC template downloads may fail"
+    VZTMPL_STORAGE=""
+    if [ "$IS_CLUSTER" = "true" ]; then
+      VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select((.content | contains("vztmpl")) and .shared == 1)] | sort_by(.storage) | first | .storage // empty')
+    fi
+    if [ -z "$VZTMPL_STORAGE" ]; then
+      VZTMPL_STORAGE=$(echo "$STORAGE_JSON" | jq -r '[.[] | select(.content | contains("vztmpl"))] | sort_by(.storage) | first | .storage // empty')
+    fi
+    if [ -n "$VZTMPL_STORAGE" ]; then
+      info "  LXC template storage: $VZTMPL_STORAGE"
+    else
+      warn "  No storage with 'vztmpl' content found — LXC template downloads may fail"
+    fi
   fi
 
   # --- Storage selection ---
@@ -352,14 +366,18 @@ function discoverStorage() {
   if [ -n "$STORAGE_TEMPLATES_OVERRIDE" ] && [ -n "$STORAGE_RUNTIME_OVERRIDE" ]; then
     resolved_template="$STORAGE_TEMPLATES_OVERRIDE"
     resolved_vm="$STORAGE_RUNTIME_OVERRIDE"
-    # LXC uses runtime storage unless it's file-level
-    local runtime_type
-    runtime_type=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$resolved_vm" '.[] | select(.storage == $s) | .type // "lvm"')
-    if [[ "$runtime_type" =~ ^(nfs|cifs|glusterfs)$ ]]; then
-      # Runtime is file-level — pick first block-level storage
-      resolved_lxc=$(echo "$IMAGE_STORAGE" | jq -r '[.[] | select(.type | test("^(nfs|cifs|glusterfs)$") | not)] | sort_by(.storage) | first | .storage // "local-lvm"')
+    # LXC: use bootstrap.yml override if set, else fall back to runtime (or first block-level if runtime is file-level)
+    if [ -n "$STORAGE_LXC_OVERRIDE" ]; then
+      resolved_lxc="$STORAGE_LXC_OVERRIDE"
     else
-      resolved_lxc="$resolved_vm"
+      local runtime_type
+      runtime_type=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$resolved_vm" '.[] | select(.storage == $s) | .type // "lvm"')
+      if [[ "$runtime_type" =~ ^(nfs|cifs|glusterfs)$ ]]; then
+        # Runtime is file-level — pick first block-level storage
+        resolved_lxc=$(echo "$IMAGE_STORAGE" | jq -r '[.[] | select(.type | test("^(nfs|cifs|glusterfs)$") | not)] | sort_by(.storage) | first | .storage // "local-lvm"')
+      else
+        resolved_lxc="$resolved_vm"
+      fi
     fi
     TEMPLATE_STORAGE="$resolved_template"
     TEMPLATE_STORAGE_TYPE=$(echo "$IMAGE_STORAGE" | jq -r --arg s "$TEMPLATE_STORAGE" '.[] | select(.storage == $s) | .type // "lvm"')

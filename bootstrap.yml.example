@@ -27,8 +27,11 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # Optional: override auto-detected storage pools
 # If omitted, bootstrap discovers available pools and picks the best option.
 # storage:
-#   templates: "nfs-templates"  # Storage for Packer templates (VM images)
-#   runtime: "local-lvm"        # Storage for running VMs and LXC containers
+#   templates: "nfs-templates"  # Storage for Packer template images (must support 'images' content)
+#   runtime:   "local-lvm"      # Storage for running VMs and LXC containers
+#   snippets:  "local"          # Storage for cloud-init vendor data (must support 'snippets' content)
+#   vztmpl:    "local"          # Storage for downloaded LXC templates (must support 'vztmpl' content)
+#   lxc:       "local-lvm"      # Storage for LXC container rootfs (block-level preferred)
 
 # =============================================================================
 # High Availability (optional — uncomment to enable keepalived VIPs)
