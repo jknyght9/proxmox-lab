@@ -69,7 +69,7 @@ build {
         <<'REMOTE_SCRIPT'
       set -euo pipefail
       VMID="$1"; STORAGE="$2"; STORAGE_TYPE="$3"; BRIDGE="$4"
-      SSH_USER="$5"; SSH_PASS="$6"; SNIPPET_STORE="${7:-local}"
+      SSH_USER="$5"; SSH_PASS="$6"; SNIPPET_STORE="$${7:-local}"
       IMAGE="/tmp/fedora-cloud-base.qcow2"
 
       echo "[+] Checking for existing VM $VMID..."
