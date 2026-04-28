@@ -238,6 +238,71 @@ function _selectStorage() {
   _SELECTED_STORAGE="${names[$((selection-1))]}"
 }
 
+# Verify every Proxmox node can resolve DNS and reach the public
+# internet over HTTPS. Without this, Packer base-template builds fail
+# silently (cloud-init can't apt-install qemu-guest-agent), or cloud
+# images won't download at all. Fail loudly here with a remediation
+# hint instead of letting the user discover it 20 minutes into a build.
+function verifyClusterInternet() {
+  doing "Verifying internet connectivity from Proxmox nodes..."
+
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local probe_host="archive.ubuntu.com"
+  local probe_url="https://${probe_host}/ubuntu/dists/noble/Release"
+  local errors=0
+
+  local nodes=("$PROXMOX_IP")
+  if [ "${#CLUSTER_NODE_IPS[@]}" -gt 0 ]; then
+    nodes=("${CLUSTER_NODE_IPS[@]}")
+  fi
+
+  for ip in "${nodes[@]}"; do
+    local rc dns_ok=true http_ok=true
+    # DNS first — most common failure mode after a network reset
+    if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
+         "getent ahosts $probe_host >/dev/null 2>&1"; then
+      dns_ok=false
+    fi
+    # HTTP reachability (skip if DNS is broken — error message is clearer)
+    if [ "$dns_ok" = true ]; then
+      if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
+           "curl -fsS --max-time 10 -o /dev/null '$probe_url'"; then
+        http_ok=false
+      fi
+    fi
+
+    if [ "$dns_ok" = true ] && [ "$http_ok" = true ]; then
+      info "  $ip: ✓ DNS + HTTPS"
+    elif [ "$dns_ok" = false ]; then
+      error "  $ip: cannot resolve $probe_host"
+      errors=$((errors + 1))
+    else
+      error "  $ip: DNS works but HTTPS to $probe_host failed"
+      errors=$((errors + 1))
+    fi
+  done
+
+  if [ "$errors" -gt 0 ]; then
+    echo
+    error "Bootstrap aborted: $errors Proxmox node(s) cannot reach the internet."
+    info  "Required for: cloud image downloads, cloud-init package installs (qemu-guest-agent),"
+    info  "              VM apt updates during Packer template builds."
+    info  ""
+    info  "Common causes and fixes:"
+    info  "  - /etc/resolv.conf empty or pointing at a stale internal DNS"
+    info  "      ssh root@<node> 'echo nameserver 1.1.1.1 > /etc/resolv.conf'"
+    info  "  - Default route missing"
+    info  "      ssh root@<node> 'ip route' (must show: default via <gateway>)"
+    info  "  - Outbound HTTPS blocked at firewall/router"
+    info  ""
+    info  "After fixing, re-run setup.sh option 1."
+    return 1
+  fi
+
+  success "All Proxmox nodes have internet connectivity"
+  return 0
+}
+
 # Validate bootstrap.yml storage.* overrides against the live storage
 # pool list from Proxmox. Each override must exist and carry the right
 # content type for its role.
@@ -1046,6 +1111,7 @@ EOF
 
   readBootstrapConfig || return 1
   discoverCluster || return 1
+  verifyClusterInternet || return 1
   discoverStorage || return 1
   discoverNetworkBridges || return 1
   createAPIToken || return 1
