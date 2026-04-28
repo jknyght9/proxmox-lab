@@ -100,21 +100,34 @@ EOF
   done
   success "Root certificate removed"
 
-  # Step 5: Reset node DNS configuration to network gateway
+  # Step 5: Reset node DNS configuration.
+  # Priority: bootstrap.yml network.dns > network.gateway > cluster-info.json
+  # On networks where the gateway isn't a DNS server, set network.dns
+  # explicitly in bootstrap.yml — otherwise post-purge nodes can't resolve
+  # anything and the next bootstrap fails.
   doing "Step 5/10: Resetting DNS configuration..."
-  local gateway_dns
-  gateway_dns=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
-  if [ -z "$gateway_dns" ] || [ "$gateway_dns" = "null" ]; then
-    gateway_dns="10.1.50.1"
-    warn "  No gateway found in cluster-info.json, using $gateway_dns"
+  local reset_dns=""
+  if [ -f "$SCRIPT_DIR/bootstrap.yml" ]; then
+    reset_dns=$(yamlGet "network.dns" 2>/dev/null || true)
+    if [ -z "$reset_dns" ]; then
+      reset_dns=$(yamlGet "network.gateway" 2>/dev/null || true)
+    fi
   fi
-  for i in "${!CLUSTER_NODES[@]}"; do
-    local node="${CLUSTER_NODES[$i]}"
-    local ip="${CLUSTER_NODE_IPS[$i]}"
-    info "  Resetting DNS on $node to gateway: $gateway_dns"
-    sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 $gateway_dns" 2>/dev/null || warn "  Failed to reset DNS on $node"
-  done
-  success "DNS configuration reset to gateway"
+  if [ -z "$reset_dns" ]; then
+    reset_dns=$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  fi
+  if [ -z "$reset_dns" ] || [ "$reset_dns" = "null" ]; then
+    warn "  No DNS source found in bootstrap.yml or cluster-info.json — skipping reset"
+    warn "  You may need to set /etc/resolv.conf manually before the next bootstrap"
+  else
+    for i in "${!CLUSTER_NODES[@]}"; do
+      local node="${CLUSTER_NODES[$i]}"
+      local ip="${CLUSTER_NODE_IPS[$i]}"
+      info "  Resetting DNS on $node to: $reset_dns"
+      sshRun "$REMOTE_USER" "$ip" "pvesh set /nodes/$node/dns -dns1 $reset_dns" 2>/dev/null || warn "  Failed to reset DNS on $node"
+    done
+    success "DNS configuration reset to $reset_dns"
+  fi
 
   # Step 6: Remove hashicorp API user and role
   doing "Step 6/10: Removing hashicorp API user and role..."

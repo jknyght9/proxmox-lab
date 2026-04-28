@@ -21,6 +21,11 @@ network:
   cidr: "192.168.1.0/24"       # Network CIDR for VMs and containers
   gateway: "192.168.1.1"       # Default gateway
   # bridge: "vmbr0"            # Optional: override auto-detected bridge
+  # dns: "192.168.1.1"         # Optional: DNS server the Proxmox hosts should use
+                                #   (and what purge resets resolv.conf to). Defaults to
+                                #   network.gateway. Set explicitly on networks where the
+                                #   gateway isn't a DNS server, or where 1.1.1.1/8.8.8.8
+                                #   are blocked.
 
 dns_suffix: "mylab.lan"        # Domain suffix for all services
 

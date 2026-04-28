@@ -58,6 +58,10 @@ function readBootstrapConfig() {
   NETWORK_CIDR=$(yamlGet "network.cidr")
   NETWORK_GATEWAY=$(yamlGet "network.gateway")
   NETWORK_BRIDGE=$(yamlGet "network.bridge")
+  NETWORK_DNS=$(yamlGet "network.dns")
+  # network.dns falls back to the gateway — works on most home networks
+  # where the router is also the DNS server.
+  : "${NETWORK_DNS:=$NETWORK_GATEWAY}"
   DNS_POSTFIX=$(yamlGet "dns_suffix")
   # Storage overrides from bootstrap.yml are used as defaults in the
   # interactive storage selection prompt (not auto-applied)
@@ -290,9 +294,10 @@ function verifyClusterInternet() {
     info  ""
     info  "Common causes and fixes:"
     info  "  - /etc/resolv.conf empty or pointing at a stale internal DNS"
-    info  "      ssh root@<node> 'echo nameserver 1.1.1.1 > /etc/resolv.conf'"
+    info  "      ssh root@<node> 'echo nameserver $NETWORK_DNS > /etc/resolv.conf'"
+    info  "      (network.dns from bootstrap.yml — adjust if that resolver is also down)"
     info  "  - Default route missing"
-    info  "      ssh root@<node> 'ip route' (must show: default via <gateway>)"
+    info  "      ssh root@<node> 'ip route' (must show: default via $NETWORK_GATEWAY)"
     info  "  - Outbound HTTPS blocked at firewall/router"
     info  ""
     info  "After fixing, re-run setup.sh option 1."
