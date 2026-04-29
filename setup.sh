@@ -518,19 +518,25 @@ crypto/vault-credentials.json and Layer 2 tfvars will be generated.
 EOF
   pressAnyKey
 
-  # Wait for Vault to be reachable
-  doing "Waiting for Vault to be reachable..."
+  # Wait for Vault to be reachable. First-run can take a couple minutes —
+  # the alloc has to schedule, Docker pulls the vault image, the container
+  # boots, and the GlusterFS sentinel guard waits for the brick to mount.
+  doing "Waiting for Vault to be reachable (up to 5 min on first deploy — image pull)..."
   local vault_ready=false
-  for i in {1..30}; do
+  for i in {1..60}; do
     if curl -sk --connect-timeout 2 --max-time 3 "http://${NOMAD01_IP}:8200/v1/sys/health?uninitcode=200&sealedcode=200" >/dev/null 2>&1; then
       vault_ready=true
       break
     fi
-    sleep 2
+    sleep 5
   done
 
   if [ "$vault_ready" != "true" ]; then
-    error "Vault not reachable at http://${NOMAD01_IP}:8200 after 60s"
+    error "Vault not reachable at http://${NOMAD01_IP}:8200 after 5 minutes"
+    info "  Check allocation status:"
+    info "    ssh labadmin@${NOMAD01_IP} 'nomad job status vault'"
+    info "    ssh labadmin@${NOMAD01_IP} 'nomad alloc logs -job vault'"
+    info "    ssh labadmin@${NOMAD01_IP} 'docker ps -a | grep vault'"
     return 1
   fi
 
