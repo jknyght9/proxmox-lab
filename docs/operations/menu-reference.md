@@ -118,12 +118,12 @@ Exits the menu.
 
 Run with `./setup.sh --dev` to access additional options.
 
-### d1) Rebuild base templates
+### d1) Rebuild base Ubuntu template
 
-Rebuilds Packer base OS templates (Debian 12, Fedora 42, Ubuntu 24.04). Use when you want to update the base images or after significant OS updates.
+Rebuilds the Packer Ubuntu 24.04 base template (VMID 9999). All other Packer templates (Docker, Nomad) clone from this. Use after significant OS updates or to refresh the cloud-init vendor snippet.
 
 ```bash
-packer build -only='base-*.*' .
+packer build -only='base-ubuntu.*' .
 ```
 
 ### d2) Rebuild service templates

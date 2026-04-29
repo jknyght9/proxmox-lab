@@ -48,7 +48,7 @@ $EDITOR bootstrap.yml
 ./setup.sh --dev
 ```
 ```
- d1) Rebuild base templates       - Debian, Fedora, Ubuntu cloud images
+ d1) Rebuild base Ubuntu template - 24.04 LTS cloud image (parent of all clones)
  d2) Rebuild service templates    - Docker + Nomad (clones from base)
  d3) Reset Proxmox user/token/role - Purge and recreate hashicorp@pam
  d4) Deploy infrastructure        - Full Layer 1 (Nomad, Vault, DNS)
@@ -151,8 +151,7 @@ Layer 1 (`terraform/templates/`):
 
 ### Network Architecture
 Networks are user-configured during setup (stored in `cluster-info.json`):
-- **vmbr0 (external)**: User-defined CIDR - Nomad VMs, DNS servers, Kasm
-- **labnet (SDN internal)**: User-defined CIDR - labnet-dns servers, internal services
+- **vmbr0 (external)**: User-defined CIDR — Nomad VMs, DNS servers, Kasm
 
 ### DNS Architecture (Pi-hole v6 + Unbound)
 DNS resolution chain: `Client → Pi-hole (ad blocking) → Unbound (DNS-over-TLS) → Cloudflare/Quad9`
@@ -166,11 +165,6 @@ Main DNS cluster (one node per Proxmox cluster node):
 - Hostnames: dns-01, dns-02, dns-03, etc.
 - Primary node runs Gravity Sync source
 - Secondary nodes sync from primary
-
-Labnet SDN DNS cluster (max 2 nodes on internal network):
-- Hostnames: labnet-dns-01, labnet-dns-02
-- Provisioned via pct exec (SDN not directly reachable)
-- **DHCP Server**: labnet-dns-01 serves DHCP for the SDN (default range: .100-.200)
 
 **High Availability with keepalived (Optional):**
 - Uses VRRP to provide a Virtual IP (VIP) that fails over between Pi-hole nodes
@@ -212,72 +206,6 @@ dig @VIP_ADDRESS google.com
 # Check keepalived status
 journalctl -u keepalived -f
 ```
-
-### Labnet SDN Configuration
-The labnet SDN is a Proxmox Software Defined Network for isolated lab environments.
-
-**DHCP Settings** (in `terraform.tfvars`):
-```hcl
-labnet_dhcp_enabled    = true
-labnet_dhcp_start      = "172.16.0.100"
-labnet_dhcp_end        = "172.16.0.200"
-labnet_dhcp_router     = "172.16.0.1"
-labnet_dhcp_lease_time = "86400"
-```
-
-**Egress Configuration** (in `cluster-info.json`):
-```json
-"labnet": {
-  "egress_bridge": "vmbr1",
-  "egress_ip": "10.10.0.101",
-  "egress_gateway": "10.10.0.1"
-}
-```
-- `egress_bridge`: Physical bridge interface for labnet outbound traffic
-- `egress_ip`: Source IP for SNAT (must be an IP on the egress bridge)
-- `egress_gateway`: Gateway for the egress network (only set for multi-homed systems)
-- If not configured, defaults to MASQUERADE via default route
-
-**Why egress matters**: Networks with multiple bridges (e.g., vmbr0 for management, vmbr1 for lab traffic) need explicit SNAT configuration. Without it, labnet traffic may route through the wrong interface.
-
-**Multi-Homed Detection**:
-The setup script automatically detects if the system is multi-homed by comparing:
-- The interface with the system's default route
-- The selected egress bridge for labnet
-
-If they differ, the system is multi-homed and PBR is required. If they're the same (single-gateway), PBR is skipped as unnecessary.
-
-**Policy-Based Routing (PBR)** *(multi-homed systems only)*:
-When a multi-homed system is detected, the setup script creates policy-based routing rules to ensure SNAT'd traffic uses the correct gateway:
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Proxmox Node                           │
-│                                                             │
-│  ┌─────────┐      ┌──────────────────────────────────────┐ │
-│  ┌─────────┐      ┌──────────────────────────────────────┐ │
-│  │ labnet  │──────│ ip rule: from 172.16.0.0/24          │ │
-│  │172.16.0x│      │     → use table "services"           │ │
-│  └─────────┘      │                                      │ │
-│                   │  table "services":                   │ │
-│       SNAT        │     172.16.0.0/24 dev labnet         │ │
-│         ↓         │     10.10.0.0/24 dev vmbr1           │ │
-│  ┌─────────┐      │     default via 10.10.0.1            │ │
-│  │  vmbr1  │◄─────│                                      │ │
-│  │10.10.0.x│      └──────────────────────────────────────┘ │
-│  └────┬────┘                                               │
-│       ▼                                                    │
-│  10.10.0.1 (gateway) → Internet                           │
-└─────────────────────────────────────────────────────────────┘
-```
-- Creates routing table `services` (table ID 200) in `/etc/iproute2/rt_tables`
-- Adds policy rules:
-  - `from 172.16.0.0/24 lookup services` (priority 99) - routes labnet traffic
-  - `from <egress_ip> lookup services` (priority 100) - handles return traffic
-- Adds routes to services table:
-  - `172.16.0.0/24 dev labnet` - labnet subnet
-  - `<egress_network> dev <egress_bridge>` - egress network
-  - `default via <egress_gateway>` - internet access
-- Persists configuration in `/etc/network/interfaces`
 
 ### Nomad Cluster Architecture
 3-node cluster where each node is both server and client:
@@ -360,12 +288,9 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 |-------|---------|
 | 905-907 | Nomad cluster (nomad01-03) |
 | 910-912 | Main DNS cluster (dns-01, dns-02, dns-03) |
-| 920-922 | Labnet DNS cluster (labnet-dns-01, labnet-dns-02, labnet-dns-03) |
 | 930 | Kasm Workspaces |
 | 9001 | Docker template (Packer, clones 9999) |
 | 9002 | Nomad template (Packer, clones 9999) |
-| 9997 | Debian 12 base template (Packer) |
-| 9998 | Fedora Cloud 42 base template (Packer) |
 | 9999 | Ubuntu 24.04 base template (Packer) |
 
 ## Cloud-init Templates
@@ -685,15 +610,6 @@ scpTo "/local/path" "$user" "$host" "/remote/path"
 - **Service DNS missing**: Run setup.sh --dev and select d1 to rebuild DNS records
 - **Container provisioning fails during apt-get**: Network may block external DNS. Set `bootstrap_dns` to your gateway IP in terraform.tfvars
 
-### Labnet SDN Issues
-- **VMs not getting DHCP addresses**: Verify labnet-dns-01 has DHCP enabled: `pihole-FTL --config dhcp.active`
-- **Labnet can't reach internet**: Check IP forwarding: `cat /proc/sys/net/ipv4/ip_forward` (should be 1)
-- **Labnet traffic using wrong interface**: Configure `egress_bridge`, `egress_ip`, and `egress_gateway` in cluster-info.json, then re-run proxmox/setup.sh
-- **Verify SNAT rules**: `iptables -t nat -L POSTROUTING -n | grep -E "172\.16\.0"` (should show SNAT to egress IP)
-- **Verify PBR is active**: `ip rule show` (should show `from <egress_ip> lookup services`)
-- **Check services routing table**: `ip route show table services` (should show default via egress gateway)
-- **Test traffic path**: `ip route get 8.8.8.8 from <egress_ip>` (should show via egress gateway, not default route)
-
 ### Purge/Rollback
 The complete purge (setup.sh option 10) removes all project resources:
 1. VMs, LXC containers, Packer templates
@@ -702,7 +618,6 @@ The complete purge (setup.sh option 10) removes all project resources:
 4. Traefik TLS certificates
 5. DNS configuration (reset to network gateway)
 6. Hashicorp API user AND HashicorpBuild role
-7. **Labnet SDN** (zone, vnet, subnets, iptables SNAT rules, policy-based routing)
 8. Local config (terraform.tfvars auto-generated sections, cluster-info.json network config)
 9. Tailscale DNS override (re-enables MagicDNS)
 10. SSH keys from nodes (last step)

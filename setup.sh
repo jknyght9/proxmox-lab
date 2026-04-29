@@ -382,7 +382,7 @@ EOF
     # Build base cloud image if it doesn't exist (required for cloning)
     if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config $VMID_BASE_TEMPLATE" &>/dev/null; then
       doing "Building base VM template (cloud image + guest agent)..."
-      docker compose run --rm -it packer build -only='base-*.*' .
+      docker compose run --rm -it packer build -only='base-ubuntu.*' .
       success "Base template built"
     else
       info "Base template $VMID_BASE_TEMPLATE already exists — skipping"
@@ -726,7 +726,7 @@ function showMenu() {
     echo
     echo -e "  ${C_DIM}─── Developer Tools ──────────────────────${C_RESET}"
     echo
-    echo "   d1) Rebuild base templates (Debian, Fedora, Ubuntu)"
+    echo "   d1) Rebuild base Ubuntu template"
     echo "   d2) Rebuild service templates (Docker, Nomad)"
     echo "   d3) Reset Proxmox user/token/role"
     echo "   d4) Deploy infrastructure (Nomad, Vault, DNS)"
@@ -778,7 +778,7 @@ while true; do
     9)  purgeDeployment;;
 
     # Developer tools
-    d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-*.*' .; else error "Invalid option"; fi;;
+    d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-ubuntu.*' .; else error "Invalid option"; fi;;
     d2|D2)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .; else error "Invalid option"; fi;;
     d3|D3)   if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                      else error "Invalid option"; fi;;
     d4|D4)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;             else error "Invalid option"; fi;;
