@@ -106,19 +106,27 @@ CLOUD_INIT
     ]
   }
 
-  # Pre-install qemu-guest-agent INTO the cloud image, offline, before it
-  # becomes a template. This bypasses every flaky thing about doing the
-  # install via cloud-init at clone-boot time:
-  #   - Clones don't need working DNS during first boot.
-  #   - Clones don't need internet egress on whatever bridge they land on.
-  #   - Clones don't depend on Proxmox preserving --nameserver/cicustom on
-  #     the cloned VM.
-  # The Proxmox host runs this and *does* have internet (verified by the
-  # bootstrap connectivity check), so this is the right place for the install.
+  # Bake DNS + qemu-guest-agent directly into the cloud image via
+  # virt-customize, offline, before it becomes a template.
+  #
+  # Two things are written here:
+  #   1. qemu-guest-agent is installed and enabled. Avoids relying on
+  #      cloud-init's apt install at clone boot, which needs DNS that
+  #      may not exist on lab networks.
+  #   2. /etc/systemd/resolved.conf.d/lab-dns.conf hardcodes the DNS
+  #      server so clones don't depend on DHCP option 6 being served
+  #      (some lab DHCP servers don't), or on Proxmox cloud-init's
+  #      --nameserver propagating through clone, or on netplan +
+  #      systemd-resolved cooperating perfectly.
+  #
+  # The Proxmox host runs this and has verified internet (bootstrap
+  # connectivity check), so apt-get inside virt-customize works.
   provisioner "shell-local" {
     environment_vars = [
       "PROXMOX_URL=${var.proxmox_url}",
-      "SSH_KEY=${var.ssh_enterprise_key_file}"
+      "SSH_KEY=${var.ssh_enterprise_key_file}",
+      "DNS_SERVER=${var.dns_server}",
+      "DNS_SEARCH=${var.dns_postfix}"
     ]
     inline = [
       <<-SCRIPT
@@ -126,19 +134,41 @@ CLOUD_INIT
       PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
 
-      echo "[+] Pre-installing qemu-guest-agent into cloud image via virt-customize..."
-      ssh $SSH_OPTS root@$PROXMOX_HOST bash <<'REMOTE'
+      echo "[+] Pre-installing qemu-guest-agent and baking DNS into cloud image via virt-customize..."
+      ssh $SSH_OPTS root@$PROXMOX_HOST DNS_SERVER="$DNS_SERVER" DNS_SEARCH="$DNS_SEARCH" bash <<'REMOTE'
       set -euo pipefail
       if ! command -v virt-customize >/dev/null 2>&1; then
         echo "[+] Installing libguestfs-tools..."
         DEBIAN_FRONTEND=noninteractive apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libguestfs-tools
       fi
-      virt-customize -a /tmp/noble-server-cloudimg-amd64.img \
-        --install qemu-guest-agent \
-        --run-command 'systemctl enable qemu-guest-agent.service' \
+
+      # Build the systemd-resolved drop-in locally so virt-customize can
+      # copy it into the image. Without this, lab networks whose DHCP
+      # doesn't serve DNS leave clones with no resolver.
+      RESOLVED_CONF=$(mktemp)
+      cat > "$RESOLVED_CONF" <<EOF
+[Resolve]
+DNS=$${DNS_SERVER:-}
+Domains=$${DNS_SEARCH:-}
+EOF
+
+      VIRT_ARGS=(
+        --install qemu-guest-agent
+        --run-command 'systemctl enable qemu-guest-agent.service'
+        --mkdir /etc/systemd/resolved.conf.d
         --truncate /etc/machine-id
-      echo "[+] qemu-guest-agent baked into image"
+      )
+      # Only apply the DNS drop-in if we actually have a DNS server value;
+      # an empty config would be worse than not writing anything.
+      if [ -n "$${DNS_SERVER:-}" ]; then
+        VIRT_ARGS+=(--copy-in "$RESOLVED_CONF:/etc/systemd/resolved.conf.d")
+        VIRT_ARGS+=(--run-command "mv /etc/systemd/resolved.conf.d/$(basename $RESOLVED_CONF) /etc/systemd/resolved.conf.d/lab-dns.conf")
+      fi
+
+      virt-customize -a /tmp/noble-server-cloudimg-amd64.img "$${VIRT_ARGS[@]}"
+      rm -f "$RESOLVED_CONF"
+      echo "[+] Baked into image: qemu-guest-agent + DNS ($${DNS_SERVER:-<none>})"
       REMOTE
       SCRIPT
     ]
