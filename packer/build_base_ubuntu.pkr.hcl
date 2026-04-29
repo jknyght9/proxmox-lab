@@ -106,6 +106,44 @@ CLOUD_INIT
     ]
   }
 
+  # Pre-install qemu-guest-agent INTO the cloud image, offline, before it
+  # becomes a template. This bypasses every flaky thing about doing the
+  # install via cloud-init at clone-boot time:
+  #   - Clones don't need working DNS during first boot.
+  #   - Clones don't need internet egress on whatever bridge they land on.
+  #   - Clones don't depend on Proxmox preserving --nameserver/cicustom on
+  #     the cloned VM.
+  # The Proxmox host runs this and *does* have internet (verified by the
+  # bootstrap connectivity check), so this is the right place for the install.
+  provisioner "shell-local" {
+    environment_vars = [
+      "PROXMOX_URL=${var.proxmox_url}",
+      "SSH_KEY=${var.ssh_enterprise_key_file}"
+    ]
+    inline = [
+      <<-SCRIPT
+      set -euo pipefail
+      PROXMOX_HOST=$(echo "$PROXMOX_URL" | sed -E 's|^https?://||; s|[:/].*$||')
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -i $SSH_KEY"
+
+      echo "[+] Pre-installing qemu-guest-agent into cloud image via virt-customize..."
+      ssh $SSH_OPTS root@$PROXMOX_HOST bash <<'REMOTE'
+      set -euo pipefail
+      if ! command -v virt-customize >/dev/null 2>&1; then
+        echo "[+] Installing libguestfs-tools..."
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libguestfs-tools
+      fi
+      virt-customize -a /tmp/noble-server-cloudimg-amd64.img \
+        --install qemu-guest-agent \
+        --run-command 'systemctl enable qemu-guest-agent.service' \
+        --truncate /etc/machine-id
+      echo "[+] qemu-guest-agent baked into image"
+      REMOTE
+      SCRIPT
+    ]
+  }
+
   # Create the template on Proxmox via SSH + qm commands
   provisioner "shell-local" {
     environment_vars = [
