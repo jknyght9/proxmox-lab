@@ -226,7 +226,14 @@ vault {
 }
 VAULTCONF
 
-      echo '[+] Nomad configuration written on ${each.value.name}'
+      # Nomad reads /etc/nomad.d/*.hcl on startup. The systemd unit was
+      # enabled during the Packer build, so Nomad is already running with
+      # whatever config was on disk at boot — without raw_exec enabled,
+      # docker volumes allowed, etc. Restart so the new config takes
+      # effect; without this the wait-for-gluster prestart task on every
+      # downstream Nomad job fails with "missing drivers: raw_exec".
+      sudo systemctl restart nomad
+      echo '[+] Nomad configuration written and reloaded on ${each.value.name}'
       EOT
     ]
   }
