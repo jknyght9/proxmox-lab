@@ -77,6 +77,17 @@ variable "snippet_storage" {
   default     = "local"
 }
 
+# DNS server cloud-init should hand to every clone of these base templates.
+# Set on the base template via `qm set --nameserver` so clones don't depend
+# on whatever the lab DHCP server happens to advertise (often nothing
+# useful, or an internal Pi-hole that doesn't exist yet during a fresh
+# bootstrap). Sourced from network.dns in bootstrap.yml.
+variable "dns_server" {
+  type        = string
+  description = "DNS server for cloud-init network config on cloned VMs"
+  default     = ""
+}
+
 # Base template VMIDs and image URLs
 variable "base_ubuntu_vmid" {
   type    = number

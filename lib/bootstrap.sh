@@ -928,6 +928,7 @@ proxmox_token_secret  = "${API_TOKEN_SECRET}"
 
 # DNS
 dns_postfix = "${DNS_POSTFIX}"
+dns_server  = "${NETWORK_DNS}"
 
 # Storage
 template_storage      = "${TEMPLATE_STORAGE}"

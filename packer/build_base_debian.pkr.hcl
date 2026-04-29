@@ -68,10 +68,13 @@ build {
         "${var.ssh_username}" \
         "${var.ssh_password}" \
         "${var.snippet_storage}" \
+        "${var.dns_server}" \
+        "${var.dns_postfix}" \
         <<'REMOTE_SCRIPT'
       set -euo pipefail
       VMID="$1"; STORAGE="$2"; STORAGE_TYPE="$3"; BRIDGE="$4"
       SSH_USER="$5"; SSH_PASS="$6"; SNIPPET_STORE="$${7:-local}"
+      DNS_SERVER="$${8:-}"; DNS_SEARCH="$${9:-}"
       IMAGE="/tmp/debian-12-cloud-amd64.qcow2"
 
       echo "[+] Checking for existing VM $VMID..."
@@ -100,6 +103,8 @@ build {
       qm set "$VMID" --ide2 "$STORAGE:cloudinit"
       qm set "$VMID" --ciuser "$SSH_USER" --cipassword "$SSH_PASS" \
         --ipconfig0 "ip=dhcp" --serial0 socket --vga serial0
+      [ -n "$DNS_SERVER" ] && qm set "$VMID" --nameserver "$DNS_SERVER" || true
+      [ -n "$DNS_SEARCH" ] && qm set "$VMID" --searchdomain "$DNS_SEARCH" || true
 
       echo "[+] Attaching cloud-init vendor data..."
       qm set "$VMID" --cicustom "vendor=$SNIPPET_STORE:snippets/cloud-init-agent.yaml"
