@@ -19,15 +19,19 @@ build {
   name    = "base-fedora"
   sources = ["source.null.fedora-base"]
 
-  # Download Fedora cloud image locally
+  # Download Fedora cloud image locally.
+  # Fedora's mirror redirects can land on flaky mirrors, so we retry and
+  # re-download if a previous attempt left an obviously-incomplete file
+  # (truncated downloads pass curl but later break qm importdisk).
   provisioner "shell-local" {
     inline = [
       "echo '[+] Downloading Fedora Cloud image...'",
       "IMG=/tmp/fedora-cloud-base.qcow2",
-      "if [ -f $IMG ]; then",
+      "if [ -f $IMG ] && [ \"$(stat -c%s $IMG 2>/dev/null || stat -f%z $IMG)\" -gt 100000000 ]; then",
       "  echo '    Image already downloaded, skipping'",
       "else",
-      "  curl -L -o $IMG '${var.fedora_image_url}'",
+      "  rm -f $IMG",
+      "  curl -L --fail --retry 5 --retry-delay 5 --retry-connrefused --connect-timeout 30 --max-time 1200 -o $IMG '${var.fedora_image_url}'",
       "fi",
       "ls -lh $IMG"
     ]

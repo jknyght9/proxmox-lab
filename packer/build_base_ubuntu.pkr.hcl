@@ -77,16 +77,19 @@ CLOUD_INIT
     ]
   }
 
-  # Download Ubuntu 24.04 cloud image locally
+  # Download Ubuntu 24.04 cloud image locally with retries; re-download
+  # if a previous attempt left a truncated file.
   provisioner "shell-local" {
     inline = [
       "echo '[+] Downloading Ubuntu 24.04 cloud image...'",
-      "if [ -f /tmp/noble-server-cloudimg-amd64.img ]; then",
+      "IMG=/tmp/noble-server-cloudimg-amd64.img",
+      "if [ -f $IMG ] && [ \"$(stat -c%s $IMG 2>/dev/null || stat -f%z $IMG)\" -gt 100000000 ]; then",
       "  echo '    Image already downloaded, skipping'",
       "else",
-      "  curl -L -o /tmp/noble-server-cloudimg-amd64.img '${var.ubuntu_image_url}'",
+      "  rm -f $IMG",
+      "  curl -L --fail --retry 5 --retry-delay 5 --retry-connrefused --connect-timeout 30 --max-time 1200 -o $IMG '${var.ubuntu_image_url}'",
       "fi",
-      "ls -lh /tmp/noble-server-cloudimg-amd64.img"
+      "ls -lh $IMG"
     ]
   }
 

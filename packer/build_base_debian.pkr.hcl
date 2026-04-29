@@ -19,15 +19,17 @@ build {
   name    = "base-debian"
   sources = ["source.null.debian-base"]
 
-  # Download Debian cloud image locally
+  # Download Debian cloud image locally with retries; re-download if a
+  # previous attempt left a truncated file.
   provisioner "shell-local" {
     inline = [
       "echo '[+] Downloading Debian 12 cloud image...'",
       "IMG=/tmp/debian-12-cloud-amd64.qcow2",
-      "if [ -f $IMG ]; then",
+      "if [ -f $IMG ] && [ \"$(stat -c%s $IMG 2>/dev/null || stat -f%z $IMG)\" -gt 100000000 ]; then",
       "  echo '    Image already downloaded, skipping'",
       "else",
-      "  curl -L -o $IMG '${var.debian_image_url}'",
+      "  rm -f $IMG",
+      "  curl -L --fail --retry 5 --retry-delay 5 --retry-connrefused --connect-timeout 30 --max-time 1200 -o $IMG '${var.debian_image_url}'",
       "fi",
       "ls -lh $IMG"
     ]
