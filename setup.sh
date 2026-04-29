@@ -462,15 +462,43 @@ EOF
   doing "Initializing Terraform Layer 1..."
   tf init || { error "Terraform init failed"; return 1; }
 
-  # Deploy Nomad cluster + Vault job only — DNS deploys after Vault
-  # has real passwords (avoids placeholder passwords and rebuild)
-  doing "Deploying Nomad cluster and Vault (this may take several minutes)..."
+  # Deploy Nomad cluster first — its provisioners install Nomad/Docker/etc.
+  # via cloud-init, but Terraform only knows the VMs exist; it can't tell
+  # that the Nomad API is actually serving on :4646 yet.
+  doing "Deploying Nomad cluster (this may take several minutes)..."
   if ! tf apply -auto-approve \
     -var "nomad_address=http://${NOMAD01_IP}:4646" \
-    -target=module.nomad \
-    -target=nomad_job.vault \
-    -target=null_resource.vault_directories; then
-    error "Phase 2 failed: Terraform apply"
+    -target=module.nomad; then
+    error "Phase 2 failed: Nomad cluster apply"
+    return 1
+  fi
+  success "Nomad cluster deployed"
+
+  # Wait for the Nomad API to come up. Without this, the next tf apply
+  # races cloud-init/systemd and gets connection-refused on :4646.
+  doing "Waiting for Nomad API on http://${NOMAD01_IP}:4646..."
+  local nomad_ready=false
+  for i in {1..60}; do
+    if curl -sf --connect-timeout 2 --max-time 3 "http://${NOMAD01_IP}:4646/v1/status/leader" >/dev/null 2>&1; then
+      nomad_ready=true
+      break
+    fi
+    sleep 5
+  done
+  if [ "$nomad_ready" != true ]; then
+    error "Nomad API never came up on http://${NOMAD01_IP}:4646 after 5 minutes"
+    info "  Check: ssh labadmin@${NOMAD01_IP} 'systemctl status nomad'"
+    return 1
+  fi
+  success "Nomad API responding"
+
+  # Now deploy the Vault Nomad job
+  doing "Deploying Vault Nomad job..."
+  if ! tf apply -auto-approve \
+    -var "nomad_address=http://${NOMAD01_IP}:4646" \
+    -target=null_resource.vault_directories \
+    -target=nomad_job.vault; then
+    error "Phase 2 failed: Vault job apply"
     return 1
   fi
   success "Phase 2 complete: Nomad cluster and Vault deployed"
