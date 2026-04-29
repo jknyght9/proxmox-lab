@@ -379,17 +379,38 @@ EOF
     docker compose build packer >/dev/null 2>&1
     docker compose run --rm -it packer init .
 
-    # Build base cloud image if it doesn't exist (required for cloning)
+    # Build base Ubuntu (REQUIRED — Docker/Nomad templates clone from it)
     if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config $VMID_BASE_TEMPLATE" &>/dev/null; then
-      doing "Building base VM template (cloud image + guest agent)..."
-      docker compose run --rm -it packer build -only='base-ubuntu.*' .
-      success "Base template built"
+      doing "Building base Ubuntu template (required)..."
+      docker compose run --rm -it packer build -only='base-ubuntu.*' . || {
+        error "Base Ubuntu template build failed — cannot continue"
+        return 1
+      }
+      success "Base Ubuntu template built"
     else
-      info "Base template $VMID_BASE_TEMPLATE already exists — skipping"
+      info "Base Ubuntu template $VMID_BASE_TEMPLATE already exists — skipping"
     fi
 
-    # Build Docker + Nomad templates (clone from base)
-    docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .
+    # Build base Debian + Fedora (best-effort — used by other projects, not by deployAll).
+    # Failures here don't block the rest of the deploy.
+    if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config 9997" &>/dev/null; then
+      doing "Building base Debian template (best-effort)..."
+      docker compose run --rm -it packer build -only='base-debian.*' . || warn "Debian base build failed — continuing"
+    else
+      info "Base Debian template 9997 already exists — skipping"
+    fi
+    if ! sshRun "$REMOTE_USER" "$PROXMOX_HOST" "qm config 9998" &>/dev/null; then
+      doing "Building base Fedora template (best-effort)..."
+      docker compose run --rm -it packer build -only='base-fedora.*' . || warn "Fedora base build failed — continuing"
+    else
+      info "Base Fedora template 9998 already exists — skipping"
+    fi
+
+    # Build Docker + Nomad templates (REQUIRED — clone from Ubuntu base)
+    docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' . || {
+      error "Docker/Nomad template build failed — cannot continue"
+      return 1
+    }
     success "Phase 1 complete: Packer templates built"
   fi
 
@@ -726,7 +747,7 @@ function showMenu() {
     echo
     echo -e "  ${C_DIM}─── Developer Tools ──────────────────────${C_RESET}"
     echo
-    echo "   d1) Rebuild base Ubuntu template"
+    echo "   d1) Rebuild base templates (Ubuntu required; Debian + Fedora best-effort)"
     echo "   d2) Rebuild service templates (Docker, Nomad)"
     echo "   d3) Reset Proxmox user/token/role"
     echo "   d4) Deploy infrastructure (Nomad, Vault, DNS)"
@@ -778,7 +799,7 @@ while true; do
     9)  purgeDeployment;;
 
     # Developer tools
-    d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-ubuntu.*' .; else error "Invalid option"; fi;;
+    d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-ubuntu.*' . && (docker compose run --rm -it packer build -only='base-debian.*' . || warn "Debian base build failed") && (docker compose run --rm -it packer build -only='base-fedora.*' . || warn "Fedora base build failed"); else error "Invalid option"; fi;;
     d2|D2)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .; else error "Invalid option"; fi;;
     d3|D3)   if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                      else error "Invalid option"; fi;;
     d4|D4)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;             else error "Invalid option"; fi;;
