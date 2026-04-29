@@ -86,3 +86,19 @@ variable "ubuntu_image_url" {
   type    = string
   default = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 }
+variable "base_fedora_vmid" {
+  type    = number
+  default = 9998
+}
+variable "fedora_image_url" {
+  type    = string
+  default = "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"
+}
+variable "base_debian_vmid" {
+  type    = number
+  default = 9997
+}
+variable "debian_image_url" {
+  type    = string
+  default = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2"
+}

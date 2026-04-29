@@ -47,7 +47,9 @@ pinned versions. Updated: April 2026.
 
 | Template | VMID | Base Image | Purpose |
 |----------|------|------------|---------|
-| Ubuntu 24.04 | 9999 | Ubuntu Server 24.04 cloud image | Base template (parent of all clones) |
+| Ubuntu 24.04 | 9999 | Ubuntu Server 24.04 cloud image | Base template (parent of all clones used by deployAll) |
+| Debian 12 | 9997 | Debian 12 Bookworm cloud image | Available to other projects via `packer build -only='base-debian.*' .` |
+| Fedora Cloud 42 | 9998 | Fedora Cloud 42 cloud image | Available to other projects via `packer build -only='base-fedora.*' .` |
 | Docker | 9001 | Clone of 9999 + Docker + GlusterFS | Docker workloads |
 | Nomad | 9002 | Clone of 9999 + Nomad + Consul | Nomad cluster nodes |
 

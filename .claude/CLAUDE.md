@@ -291,6 +291,8 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 | 930 | Kasm Workspaces |
 | 9001 | Docker template (Packer, clones 9999) |
 | 9002 | Nomad template (Packer, clones 9999) |
+| 9997 | Debian 12 base template (Packer, manual build only — not used by deployAll) |
+| 9998 | Fedora Cloud 42 base template (Packer, manual build only — not used by deployAll) |
 | 9999 | Ubuntu 24.04 base template (Packer) |
 
 ## Cloud-init Templates
