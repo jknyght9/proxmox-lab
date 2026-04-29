@@ -86,6 +86,26 @@ function tf-services() {
   docker compose run --rm -it terraform-services "$@"
 }
 
+# Resolve nomad01's IP from bootstrap-generated tfvars (or compute from
+# bootstrap.yml network.cidr as fallback). Replaces sed-grepping the
+# vm-nomad module defaults, which were jdclabs-specific and have been
+# removed.
+function getNomad01IP() {
+  local ip=""
+  if [ -f "$SCRIPT_DIR/terraform/terraform.tfvars" ]; then
+    ip=$(grep '"nomad01"' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null \
+         | sed -n 's/.*ip = "\([^"]*\)".*/\1/p' | head -1)
+  fi
+  if [ -z "$ip" ] && [ -f "$SCRIPT_DIR/bootstrap.yml" ] && command -v yq >/dev/null 2>&1; then
+    local cidr; cidr=$(yq -r '.network.cidr // ""' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null)
+    if [ -n "$cidr" ]; then
+      local base; base=$(echo "$cidr" | cut -d/ -f1 | sed 's/\.[0-9]*$//')
+      ip="${base}.14"
+    fi
+  fi
+  echo "$ip"
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -179,8 +199,11 @@ EOF
 
   # Get nomad address for apply
   local NOMAD01_IP
-  NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
-  NOMAD01_IP="${NOMAD01_IP:-10.1.50.114}"
+  NOMAD01_IP=$(getNomad01IP)
+  if [ -z "$NOMAD01_IP" ]; then
+    error "Cannot determine nomad01 IP — bootstrap may not have run yet"
+    return 1
+  fi
 
   doing "Applying HA configuration (Layer 1)..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
@@ -246,7 +269,7 @@ function enableService() {
   if [ "$service_name" = "authentik" ]; then
     doing "Waiting for Authentik to start..."
     local NOMAD01_IP
-    NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+    NOMAD01_IP=$(getNomad01IP)
     for i in {1..30}; do
       if curl -sk --connect-timeout 3 "https://${NOMAD01_IP}:9443/-/health/live/" >/dev/null 2>&1; then
         success "Authentik is healthy"
@@ -277,7 +300,7 @@ function enableService() {
     ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
     if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "not-configured" ] && [ -n "$ADMIN_PW" ]; then
       local NOMAD01_IP_
-      NOMAD01_IP_=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+      NOMAD01_IP_=$(getNomad01IP)
       local ADMIN_PK
       ADMIN_PK=$(curl -sk -H "Authorization: Bearer $API_TOKEN" "https://${NOMAD01_IP_}:9443/api/v3/core/users/?username=akadmin" 2>/dev/null | jq -r '.results[0].pk // empty')
       if [ -n "$ADMIN_PK" ]; then
@@ -293,7 +316,7 @@ function enableService() {
   if [ "$service_name" = "netbox" ]; then
     doing "Waiting for Netbox to start..."
     local NOMAD01_IP
-    NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+    NOMAD01_IP=$(getNomad01IP)
     for i in {1..30}; do
       if curl -sk --connect-timeout 3 "http://${NOMAD01_IP}:8080/login/" >/dev/null 2>&1; then
         success "Netbox is healthy"
@@ -428,11 +451,12 @@ Deploying Nomad cluster, DNS, Kasm, and Vault container via Terraform.
 EOF
   pressAnyKey
 
-  # Get first Nomad node IP from vm_configs defaults
+  # Resolve nomad01's IP from bootstrap-generated tfvars
   local NOMAD01_IP
-  NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
+  NOMAD01_IP=$(getNomad01IP)
   if [ -z "${NOMAD01_IP:-}" ]; then
-    NOMAD01_IP="10.1.50.114"
+    error "Cannot determine nomad01 IP — bootstrap may not have run yet"
+    return 1
   fi
 
   doing "Initializing Terraform Layer 1..."

@@ -208,16 +208,25 @@ EOF
   local DNS_SERVER_IP=""
   DNS_SERVER_IP=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
 
-  # Get Nomad node IPs — parse from vm_configs defaults in variables.tf
+  # Get Nomad node IPs from the bootstrap-generated nomad_vm_configs in
+  # terraform.tfvars. (vm-nomad/variables.tf no longer carries hardcoded
+  # defaults — they were jdclabs-specific.)
   local NOMAD_IPS_HCL=""
-  NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" 2>/dev/null || true)
+  NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
 
-  # Build VM inventory from Layer 1 vm_configs (nomad + kasm)
-  # Parses the HCL map defaults in variables.tf — each VM is a single line
+  # Build VM inventory from the same source. nomad_vm_configs lines look like:
+  #   "nomad01" = { vm_id = 905, name = "nomad01", ip = "10.10.0.14", cores = 4, ... target_node = "pve01", ... }
+  # Kasm still has hardcoded defaults in vm-kasm/variables.tf — parse those too.
   local VM_INVENTORY_HCL=""
-  VM_INVENTORY_HCL=$(for f in "${SCRIPT_DIR}/terraform/vm-nomad/variables.tf" "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf"; do
-    [ -f "$f" ] && sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' "$f"
-  done | sort 2>/dev/null || true)
+  VM_INVENTORY_HCL=$(
+    sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' \
+      "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null
+    if [ -f "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" ]; then
+      sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null
+    fi
+    true
+  )
+  VM_INVENTORY_HCL=$(echo "$VM_INVENTORY_HCL" | sort -u)
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================

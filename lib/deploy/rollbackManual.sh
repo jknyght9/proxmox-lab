@@ -17,7 +17,7 @@ function resetDNSToGateway() {
   # Reset Nomad VMs
   if [ "$scope" = "all" ]; then
     local NOMAD_IPS
-    NOMAD_IPS=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null)
+    NOMAD_IPS=$(grep -E '"nomad[0-9]+"' terraform/terraform.tfvars 2>/dev/null | sed -n 's/.*ip = "\([^"]*\)".*/\1/p')
     for ip in $NOMAD_IPS; do
       ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
         -i "$ADMIN_KEY_PATH" "labadmin@${ip}" \
@@ -89,8 +89,11 @@ EOF
   # Always stop Nomad jobs directly as fallback (handles missing/stale state)
   doing "Stopping Layer 2 Nomad jobs..."
   local NOMAD01_IP
-  NOMAD01_IP=$(sed -n 's/.*ip = "\([^"]*\)".*/\1/p' terraform/vm-nomad/variables.tf 2>/dev/null | head -1)
-  NOMAD01_IP="${NOMAD01_IP:-10.1.50.114}"
+  NOMAD01_IP=$(grep '"nomad01"' terraform/terraform.tfvars 2>/dev/null | sed -n 's/.*ip = "\([^"]*\)".*/\1/p' | head -1)
+  if [ -z "$NOMAD01_IP" ]; then
+    warn "  Could not determine nomad01 IP from terraform.tfvars — skipping job stop"
+    return 0
+  fi
 
   local LAYER2_JOBS="traefik authentik samba-ad uptime-kuma lam netbox docs backup tailscale"
   for job in $LAYER2_JOBS; do
