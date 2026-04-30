@@ -122,6 +122,27 @@ function refreshGeneratedConfigs() {
   return 0
 }
 
+# Re-run the Layer 2 (services) tfvars generator using current values
+# from bootstrap.yml + vault credentials + cluster info. Skips silently
+# if Vault hasn't been initialized yet (Layer 2 isn't deployable in
+# that state, so refreshing its tfvars would just write garbage).
+function refreshLayer2Configs() {
+  ensureBootstrapComplete || return 1
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    return 0
+  fi
+  local NOMAD01_IP; NOMAD01_IP=$(getNomad01IP)
+  if [ -z "$NOMAD01_IP" ]; then
+    warn "Could not resolve nomad01 IP — skipping Layer 2 tfvars refresh"
+    return 0
+  fi
+  writeServicesTfvars "$NOMAD01_IP" || {
+    error "Failed to refresh terraform/services/terraform.tfvars"
+    return 1
+  }
+  return 0
+}
+
 # Resolve nomad01's IP from bootstrap-generated tfvars (or compute from
 # bootstrap.yml network.cidr as fallback). Replaces sed-grepping the
 # vm-nomad module defaults, which were jdclabs-specific and have been
@@ -270,6 +291,12 @@ function enableService() {
     error "Layer 2 not configured. Run 'Deploy all' (option 1) first."
     return 1
   fi
+
+  # Re-sync Layer 2 tfvars from bootstrap.yml so passthrough fields
+  # (unifi_*, profile_*, nas_servers, etc.) reflect any edits the
+  # user made since the initial deploy. Preserves configure_* toggles
+  # and netbox_api_token internally.
+  refreshLayer2Configs || warn "Could not refresh Layer 2 tfvars — using existing values"
 
   # Add or update the deploy toggle in tfvars
   if grep -q "^${var_name}" "$tfvars"; then

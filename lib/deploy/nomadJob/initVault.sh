@@ -52,6 +52,136 @@ function generateNASServersTfvars() {
   echo "]"
 }
 
+# Write terraform/services/terraform.tfvars from current bootstrap.yml +
+# cluster-info.json + crypto/vault-credentials.json. Idempotent — safe
+# to call multiple times. Used by initAndUnsealVault on first deploy and
+# by refreshLayer2Configs (in setup.sh) when bootstrap.yml changes.
+#
+# Arguments: $1 = nomad01 IP (used to construct nomad_address)
+function writeServicesTfvars() {
+  local VAULT_IP="${1:-}"
+  if [ -z "$VAULT_IP" ]; then
+    error "writeServicesTfvars: nomad01 IP required as first arg"
+    return 1
+  fi
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    error "writeServicesTfvars: $VAULT_CREDENTIALS_FILE missing"
+    return 1
+  fi
+  if [ ! -f "$CLUSTER_INFO_FILE" ]; then
+    error "writeServicesTfvars: $CLUSTER_INFO_FILE missing"
+    return 1
+  fi
+
+  local ROOT_TOKEN VAULT_ADDR_FINAL DNS_POSTFIX
+  ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE")
+  VAULT_ADDR_FINAL=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE")
+  DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE")
+
+  local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
+  local NOMAD_ADDR="http://${VAULT_IP}:4646"
+
+  local DNS_SERVER_IP=""
+  DNS_SERVER_IP=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
+
+  local NOMAD_IPS_HCL=""
+  NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
+
+  local VM_INVENTORY_HCL=""
+  VM_INVENTORY_HCL=$(
+    sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' \
+      "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null
+    if [ -f "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" ]; then
+      sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null
+    fi
+    true
+  )
+  VM_INVENTORY_HCL=$(echo "$VM_INVENTORY_HCL" | sort -u)
+
+  # Preserve user-edited values that aren't derived from bootstrap.yml.
+  # configure_authentik / configure_netbox toggle as part of two-phase
+  # deploys; netbox_api_token is fetched after Netbox starts.
+  local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN
+  if [ -f "$SERVICES_TFVARS" ]; then
+    PREV_CFG_AUTH=$(sed -n 's/^configure_authentik.*=.*\([a-z]*\)/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
+    PREV_CFG_NETBOX=$(sed -n 's/^configure_netbox.*=.*\([a-z]*\)/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
+    PREV_NETBOX_TOKEN=$(sed -n 's/^netbox_api_token.*=.*"\(.*\)"/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
+  fi
+  : "${PREV_CFG_AUTH:=false}"
+  : "${PREV_CFG_NETBOX:=false}"
+  : "${PREV_NETBOX_TOKEN:=not-configured}"
+
+  cat > "$SERVICES_TFVARS" <<EOF
+# =============================================================================
+# Layer 2 — Auto-generated (writeServicesTfvars)
+# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+# =============================================================================
+
+vault_address   = "${VAULT_ADDR_FINAL}"
+vault_token     = "${ROOT_TOKEN}"
+nomad_address   = "${NOMAD_ADDR}"
+dns_postfix     = "${DNS_POSTFIX}"
+dns_server_ip   = "${DNS_SERVER_IP}"
+network_gateway = "$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
+network_cidr    = "$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
+
+nomad_node_ips = {
+${NOMAD_IPS_HCL}
+}
+
+vm_inventory = {
+${VM_INVENTORY_HCL}
+}
+
+lxc_inventory = {
+$(awk '/dns_main_nodes/,/]/' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null | \
+  awk '/hostname/{h=$3} /target_node/{t=$3} /ip/{print "  " h " = { ip = " $3 ", target_node = " t ", role = \"dns\" }"}' 2>/dev/null || true)
+}
+
+ad_realm  = "$(echo "${DNS_POSTFIX}" | tr '[:lower:]' '[:upper:]')"
+ad_domain = "$(echo "${DNS_POSTFIX}" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')"
+
+ssh_admin_private_key_file      = "/crypto/labadmin"
+ssh_admin_public_key_file       = "/crypto/labadmin.pub"
+ssh_enterprise_private_key_file = "/crypto/labenterpriseadmin"
+
+traefik_ha_vip = "$(sed -n 's/^nomad_traefik_ha_vip.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
+dns_ha_vip     = "$(sed -n 's/^dns_ha_vip_address.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
+
+proxmox_node_ips = {
+$(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null || true)
+}
+
+kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
+
+pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
+
+authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
+
+# Two-phase toggles — preserved across re-runs
+configure_authentik = ${PREV_CFG_AUTH}
+configure_netbox    = ${PREV_CFG_NETBOX}
+netbox_api_token    = "${PREV_NETBOX_TOKEN}"
+
+# Roaming profiles (from bootstrap.yml)
+profile_server       = "$(yq -r '.profile_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+profile_share        = "$(yq -r '.profile_share // "profiles"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "profiles")"
+profile_drive_letter = "$(yq -r '.profile_drive_letter // "P"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "P")"
+
+deploy_traefik = true
+
+# NAS servers (from bootstrap.yml)
+$(generateNASServersTfvars)
+
+# UniFi Controller (from bootstrap.yml)
+unifi_address = "$(yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+unifi_api_key = "$(yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+unifi_site    = "$(yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
+EOF
+
+  chmod 600 "$SERVICES_TFVARS"
+}
+
 function initAndUnsealVault() {
   local VAULT_IP="${1:-}"
 
@@ -194,116 +324,16 @@ EOF
     fi
   fi
 
-  # Read credentials for tfvars generation
+  # Write Layer 2 tfvars via the shared helper
+  doing "Writing terraform/services/terraform.tfvars..."
+  writeServicesTfvars "$VAULT_IP" || return 1
+  success "terraform/services/terraform.tfvars written"
+
+  # Also update Layer 1 vault.auto.tfvars (consumed by terraform/main.tf)
   local ROOT_TOKEN VAULT_ADDR_FINAL
   ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE")
   VAULT_ADDR_FINAL=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE")
-
-  # Write Layer 2 tfvars
-  doing "Writing terraform/services/terraform.tfvars..."
-  local SERVICES_TFVARS="${SCRIPT_DIR}/terraform/services/terraform.tfvars"
   local NOMAD_ADDR="http://${VAULT_IP}:4646"
-
-  # Get DNS server IP from terraform.tfvars
-  local DNS_SERVER_IP=""
-  DNS_SERVER_IP=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
-
-  # Get Nomad node IPs from the bootstrap-generated nomad_vm_configs in
-  # terraform.tfvars. (vm-nomad/variables.tf no longer carries hardcoded
-  # defaults — they were jdclabs-specific.)
-  local NOMAD_IPS_HCL=""
-  NOMAD_IPS_HCL=$(sed -n 's/.*"\(nomad[0-9]*\)".*ip = "\([^"]*\)".*/  \1 = "\2"/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)
-
-  # Build VM inventory from the same source. nomad_vm_configs lines look like:
-  #   "nomad01" = { vm_id = 905, name = "nomad01", ip = "10.10.0.14", cores = 4, ... target_node = "pve01", ... }
-  # Kasm still has hardcoded defaults in vm-kasm/variables.tf — parse those too.
-  local VM_INVENTORY_HCL=""
-  VM_INVENTORY_HCL=$(
-    sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' \
-      "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null
-    if [ -f "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" ]; then
-      sed -n 's/.*"\([a-z0-9]*\)".*vm_id = \([0-9]*\).*ip = "\([^"]*\)".*cores = \([0-9]*\).*memory = \([0-9]*\).*disk_size = "\([^"]*\)".*target_node = "\([^"]*\)".*/  \1 = { vm_id = \2, ip = "\3", cores = \4, memory = \5, disk_size = "\6", target_node = "\7" }/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null
-    fi
-    true
-  )
-  VM_INVENTORY_HCL=$(echo "$VM_INVENTORY_HCL" | sort -u)
-
-  cat > "$SERVICES_TFVARS" <<EOF
-# =============================================================================
-# Layer 2 — Auto-generated after Vault init
-# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-# =============================================================================
-
-vault_address   = "${VAULT_ADDR_FINAL}"
-vault_token     = "${ROOT_TOKEN}"
-nomad_address   = "${NOMAD_ADDR}"
-dns_postfix     = "${DNS_POSTFIX}"
-dns_server_ip   = "${DNS_SERVER_IP}"
-network_gateway = "$(jq -r '.network.external.gateway // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
-network_cidr    = "$(jq -r '.network.external.cidr // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)"
-
-nomad_node_ips = {
-${NOMAD_IPS_HCL}
-}
-
-# VM inventory (from Layer 1 vm_configs — for Netbox)
-vm_inventory = {
-${VM_INVENTORY_HCL}
-}
-
-# LXC inventory (from dns_main_nodes in terraform.tfvars)
-lxc_inventory = {
-$(awk '/dns_main_nodes/,/]/' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null | \
-  awk '/hostname/{h=$3} /target_node/{t=$3} /ip/{print "  " h " = { ip = " $3 ", target_node = " t ", role = \"dns\" }"}' 2>/dev/null || true)
-}
-
-# AD Configuration (derived from dns_postfix)
-ad_realm  = "$(echo "${DNS_POSTFIX}" | tr '[:lower:]' '[:upper:]')"
-ad_domain = "$(echo "${DNS_POSTFIX}" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')"
-
-ssh_admin_private_key_file      = "/crypto/labadmin"
-ssh_admin_public_key_file       = "/crypto/labadmin.pub"
-ssh_enterprise_private_key_file = "/crypto/labenterpriseadmin"
-
-# HA VIPs (for DNS records)
-traefik_ha_vip = "$(sed -n 's/^nomad_traefik_ha_vip.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
-dns_ha_vip     = "$(sed -n 's/^dns_ha_vip_address.*=.*"\(.*\)"/\1/p' "${SCRIPT_DIR}/terraform/terraform.tfvars" 2>/dev/null || true)"
-
-# Proxmox nodes (for DNS records)
-proxmox_node_ips = {
-$(jq -r '.nodes[] | "  \(.name) = \"\(.ip)\""' "$CLUSTER_INFO_FILE" 2>/dev/null || true)
-}
-
-# Kasm IP (for DNS record, set when Kasm is deployed)
-kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terraform/vm-kasm/variables.tf" 2>/dev/null || true)"
-
-# Pi-hole admin password (for API access — read from Vault)
-pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
-
-# Authentik API token (for authentik provider — read from Vault)
-authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
-
-# Roaming profiles (from bootstrap.yml)
-profile_server       = "$(command -v yq >/dev/null && yq -r '.profile_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-profile_share        = "$(command -v yq >/dev/null && yq -r '.profile_share // "profiles"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "profiles")"
-profile_drive_letter = "$(command -v yq >/dev/null && yq -r '.profile_drive_letter // "P"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "P")"
-
-# Service toggles — set to true to deploy
-deploy_traefik = true
-
-# NAS servers (from bootstrap.yml)
-$(generateNASServersTfvars)
-
-# UniFi Controller (from bootstrap.yml)
-unifi_address = "$(command -v yq >/dev/null && yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-unifi_api_key = "$(command -v yq >/dev/null && yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-unifi_site    = "$(command -v yq >/dev/null && yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
-EOF
-
-  chmod 600 "$SERVICES_TFVARS"
-  success "terraform/services/terraform.tfvars written"
-
-  # Also update Layer 1 vault.auto.tfvars and nomad_address
   cat > "${SCRIPT_DIR}/terraform/vault.auto.tfvars" <<EOF
 vault_address = "${VAULT_ADDR_FINAL}"
 vault_token   = "${ROOT_TOKEN}"
