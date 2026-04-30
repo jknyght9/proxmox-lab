@@ -194,8 +194,13 @@ if echo "$NETWORKS" | jq -e '.meta.rc == "ok"' >/dev/null 2>&1; then
       PREFIX_EXISTS=$(curl -sk -H "$AUTH" "$API/ipam/prefixes/?prefix=$NET_SUBNET" \
         | jq -r '.results[0].id // empty')
       if [ -z "$PREFIX_EXISTS" ]; then
+        # Avoid bash default-value syntax inside Nomad heredocs — the
+        # colon-dash inside a templatefile-produced interpolation gets
+        # rejected by Nomad's HCL2 parser.
+        VID_LOOKUP="$NET_VLAN"
+        [ -z "$VID_LOOKUP" ] || [ "$VID_LOOKUP" = "null" ] && VID_LOOKUP=0
         VLAN_ID=$(curl -sk -H "$AUTH" "$API/ipam/vlans/" \
-          | jq -r --argjson vid "$${NET_VLAN:-0}" '[.results[] | select(.vid == $vid)][0].id // null')
+          | jq -r --argjson vid "$VID_LOOKUP" '[.results[] | select(.vid == $vid)][0].id // null')
         curl -sk -H "$AUTH" -H "Content-Type: application/json" \
           -X POST "$API/ipam/prefixes/" \
           -d "{\"prefix\":\"$NET_SUBNET\",\"status\":\"active\",\"site\":$SITE_ID,\"vlan\":$VLAN_ID,\"description\":\"$NET_NAME ($NET_PURPOSE)\"}" > /dev/null
