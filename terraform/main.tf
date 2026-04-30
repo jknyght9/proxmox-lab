@@ -126,6 +126,7 @@ module "kasm" {
   template_node      = var.proxmox_target_node
   network_gateway    = var.network_gateway_address
   network_cidr_bits  = split("/", var.dns_main_nodes[0].ip)[1]
+  vm_configs         = var.kasm_vm_configs
   kasm_admin_password = local.vault_configured ? data.vault_kv_secret_v2.kasm[0].data["admin_password"] : "vault-not-configured"
 
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file

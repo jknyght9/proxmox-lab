@@ -141,6 +141,22 @@ variable "nomad_vm_configs" {
   default     = {}
 }
 
+variable "kasm_vm_configs" {
+  type = map(object({
+    vm_id          = number
+    name           = string
+    ip             = string
+    cores          = number
+    memory         = number
+    disk_size      = string
+    vm_state       = string
+    target_node    = string
+    target_storage = string
+  }))
+  description = "Kasm VM configurations keyed by hostname (only used when deploy_kasm = true)"
+  default     = {}
+}
+
 # =============================================================================
 # Vault Configuration
 # =============================================================================

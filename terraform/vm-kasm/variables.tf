@@ -75,7 +75,5 @@ variable "vm_configs" {
     target_node    = string
     target_storage = string
   }))
-  default = {
-    "kasm01" = { vm_id = 930, name = "kasm01", ip = "10.1.50.120", cores = 4, memory = 8192, disk_size = "100G", vm_state = "running", target_node = "pve01", target_storage = "ceph-pool-01" }
-  }
+  description = "Kasm VM configurations. Required — passed in by parent module from bootstrap-generated tfvars (no hardcoded defaults so we don't quietly use a previous lab's IPs)."
 }
