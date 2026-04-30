@@ -111,6 +111,14 @@ resource "nomad_job" "netbox" {
     dns_postfix = var.dns_postfix
   })
   detach = false
+
+  # First-run pulls postgres:17 + redis:8 + netbox:v4.5.8 (~700MB total)
+  # and runs initial DB migrations. Default 5m create timeout isn't enough.
+  # The job's own progress_deadline is "15m" — match it here.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
 }
 
 resource "nomad_job" "docs" {
