@@ -1146,6 +1146,10 @@ EOF
   generateServicePasswords || return 1
   generateTfvarsFromBootstrap || return 1
   generatePackerVarsFromBootstrap || return 1
+  # DNS LXC containers (lxc-pihole) reference debian-12-standard*.tar.zst
+  # at the configured vztmpl storage. Without this download, Layer 1
+  # apply fails with: "volume '<storage>:vztmpl/debian-12-standard...' does not exist"
+  downloadLXCTemplates || return 1
 
   # Mark bootstrap as successfully completed
   date -u +%Y-%m-%dT%H:%M:%SZ > "$SCRIPT_DIR/.bootstrap-complete"
