@@ -134,14 +134,18 @@ resource "null_resource" "authentik_apps" {
       create_or_get "core/applications" "slug" "netbox" \
         "{\"name\":\"Netbox\",\"slug\":\"netbox\",\"provider\":$NETBOX_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://netbox.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/netbox.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
-      # Store OIDC credentials in separate Vault path (not managed by Terraform)
+      # Store OIDC credentials in separate Vault path (not managed by Terraform).
+      # Filter by the provider name we created on line 132 ("Netbox OIDC"),
+      # not "Netbox" — the latter is the application name and would miss.
       NETBOX_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
-        "$API/providers/oauth2/" | jq -r --arg name "Netbox" '[.results[] | select(.name == $name)][0].client_secret // empty')
+        "$API/providers/oauth2/" | jq -r --arg name "Netbox OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$NETBOX_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
           "${var.vault_address}/v1/secret/data/netbox-oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"netbox\",\"oidc_client_secret\":\"$NETBOX_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/netbox/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/netbox-oidc"
+      else
+        echo "    [!] Netbox OIDC client_secret not found — SSO will fail until secret/netbox-oidc is populated"
       fi
       %{endif}
 
