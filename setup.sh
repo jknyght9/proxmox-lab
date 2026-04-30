@@ -93,21 +93,32 @@ function tf-services() {
 # Proxmox API calls; just rewrites the local files.
 function refreshGeneratedConfigs() {
   ensureBootstrapComplete || return 1
-  _bootstrap_init_vars 2>/dev/null || true
-  ensureClusterContext 2>/dev/null || return 0
-  # Re-read network/storage from bootstrap.yml + cluster-info.json so
-  # the generators have the inputs they need.
-  readBootstrapConfig >/dev/null 2>&1 || true
-  if [ -f "$CLUSTER_INFO_FILE" ]; then
-    TEMPLATE_STORAGE=$(jq -r '.storage.templates // ""' "$CLUSTER_INFO_FILE")
-    TEMPLATE_STORAGE_TYPE=$(jq -r '.storage.templates_type // ""' "$CLUSTER_INFO_FILE")
-    RUNTIME_STORAGE=$(jq -r '.storage.runtime // ""' "$CLUSTER_INFO_FILE")
-    LXC_STORAGE=$(jq -r '.storage.lxc // ""' "$CLUSTER_INFO_FILE")
-    SNIPPET_STORAGE=$(jq -r '.storage.snippets // ""' "$CLUSTER_INFO_FILE")
-    VZTMPL_STORAGE=$(jq -r '.storage.vztmpl // ""' "$CLUSTER_INFO_FILE")
-  fi
-  generateTfvarsFromBootstrap >/dev/null 2>&1 || warn "Could not refresh terraform.tfvars"
-  generatePackerVarsFromBootstrap >/dev/null 2>&1 || warn "Could not refresh packer.auto.pkrvars.hcl"
+  _bootstrap_init_vars
+  ensureClusterContext || {
+    error "Cannot refresh tfvars — cluster-info.json missing or unreadable"
+    return 1
+  }
+  readBootstrapConfig || {
+    error "Cannot refresh tfvars — bootstrap.yml missing or invalid"
+    return 1
+  }
+  # Storage selections come from cluster-info.json (saved during initial
+  # bootstrap). We don't re-prompt here.
+  TEMPLATE_STORAGE=$(jq -r '.storage.templates // ""' "$CLUSTER_INFO_FILE")
+  TEMPLATE_STORAGE_TYPE=$(jq -r '.storage.templates_type // ""' "$CLUSTER_INFO_FILE")
+  RUNTIME_STORAGE=$(jq -r '.storage.runtime // ""' "$CLUSTER_INFO_FILE")
+  LXC_STORAGE=$(jq -r '.storage.lxc // ""' "$CLUSTER_INFO_FILE")
+  SNIPPET_STORAGE=$(jq -r '.storage.snippets // ""' "$CLUSTER_INFO_FILE")
+  VZTMPL_STORAGE=$(jq -r '.storage.vztmpl // ""' "$CLUSTER_INFO_FILE")
+  PRIMARY_NODE=$(jq -r '.primary_node // ""' "$CLUSTER_INFO_FILE")
+  generateTfvarsFromBootstrap || {
+    error "Failed to regenerate terraform.tfvars"
+    return 1
+  }
+  generatePackerVarsFromBootstrap || {
+    error "Failed to regenerate packer.auto.pkrvars.hcl"
+    return 1
+  }
   return 0
 }
 
