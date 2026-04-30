@@ -86,6 +86,31 @@ function tf-services() {
   docker compose run --rm -it terraform-services "$@"
 }
 
+# Re-run the tfvars/pkrvars generators against the current cluster
+# discovery snapshot. Cheap and idempotent — call before any operation
+# that depends on bootstrap-derived variables matching the latest code
+# (e.g. when a new variable is added between releases). No SSH or
+# Proxmox API calls; just rewrites the local files.
+function refreshGeneratedConfigs() {
+  ensureBootstrapComplete || return 1
+  _bootstrap_init_vars 2>/dev/null || true
+  ensureClusterContext 2>/dev/null || return 0
+  # Re-read network/storage from bootstrap.yml + cluster-info.json so
+  # the generators have the inputs they need.
+  readBootstrapConfig >/dev/null 2>&1 || true
+  if [ -f "$CLUSTER_INFO_FILE" ]; then
+    TEMPLATE_STORAGE=$(jq -r '.storage.templates // ""' "$CLUSTER_INFO_FILE")
+    TEMPLATE_STORAGE_TYPE=$(jq -r '.storage.templates_type // ""' "$CLUSTER_INFO_FILE")
+    RUNTIME_STORAGE=$(jq -r '.storage.runtime // ""' "$CLUSTER_INFO_FILE")
+    LXC_STORAGE=$(jq -r '.storage.lxc // ""' "$CLUSTER_INFO_FILE")
+    SNIPPET_STORAGE=$(jq -r '.storage.snippets // ""' "$CLUSTER_INFO_FILE")
+    VZTMPL_STORAGE=$(jq -r '.storage.vztmpl // ""' "$CLUSTER_INFO_FILE")
+  fi
+  generateTfvarsFromBootstrap >/dev/null 2>&1 || warn "Could not refresh terraform.tfvars"
+  generatePackerVarsFromBootstrap >/dev/null 2>&1 || warn "Could not refresh packer.auto.pkrvars.hcl"
+  return 0
+}
+
 # Resolve nomad01's IP from bootstrap-generated tfvars (or compute from
 # bootstrap.yml network.cidr as fallback). Replaces sed-grepping the
 # vm-nomad module defaults, which were jdclabs-specific and have been
@@ -846,7 +871,7 @@ while true; do
     2)  toggleHA;;
 
     # Optional services
-    3)  ensureBootstrapComplete && tf apply -auto-approve -var "deploy_kasm=true";;
+    3)  ensureBootstrapComplete && refreshGeneratedConfigs && tf apply -auto-approve -var "deploy_kasm=true";;
     4)  enableService "samba_ad" && enableService "lam";;
     5)  enableService "uptime_kuma";;
     6)  enableService "netbox";;
