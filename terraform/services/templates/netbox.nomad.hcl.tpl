@@ -201,10 +201,13 @@ from django.dispatch import receiver
 
 @receiver(user_logged_in)
 def _promote_sso_users_to_superuser(sender, request, user, **kwargs):
+    # Netbox 4.5's custom User model treats is_staff as a non-concrete
+    # field (it's derived from group membership / is_superuser), so we
+    # can't pass it to save(update_fields=...). is_superuser alone is
+    # enough for full UI access.
     if not user.is_superuser and request.path.startswith("/oauth/"):
-        user.is_staff = True
         user.is_superuser = True
-        user.save(update_fields=["is_staff", "is_superuser"])
+        user.save(update_fields=["is_superuser"])
 
 # Display on login page
 SOCIAL_AUTH_BACKEND_ATTRS = {
