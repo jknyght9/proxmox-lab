@@ -184,11 +184,27 @@ SOCIAL_AUTH_OIDC_SECRET = "{{ .Data.data.oidc_client_secret }}"
 SOCIAL_AUTH_OIDC_SCOPE = ["openid", "profile", "email"]
 SOCIAL_AUTH_OIDC_USERNAME_KEY = "preferred_username"
 
-# SSO users are auto-created and granted staff + superuser
+# Auto-create SSO users
 REMOTE_AUTH_AUTO_CREATE_USER = True
 REMOTE_AUTH_DEFAULT_GROUPS = []
 REMOTE_AUTH_DEFAULT_PERMISSIONS = {}
+# REMOTE_AUTH_STAFF_SUPERUSERS only applies to header-based remote auth,
+# not the social-auth OIDC backend we use for Authentik. Promote OIDC
+# users to staff + superuser via a Django signal instead — every user
+# who reaches Authentik has already passed its access policies, so they
+# get full Netbox access in the lab. Tighten by checking group claims
+# here if you want role separation later.
 REMOTE_AUTH_STAFF_SUPERUSERS = True
+
+from django.contrib.auth.signals import user_logged_in
+from django.dispatch import receiver
+
+@receiver(user_logged_in)
+def _promote_sso_users_to_superuser(sender, request, user, **kwargs):
+    if not user.is_superuser and request.path.startswith("/oauth/"):
+        user.is_staff = True
+        user.is_superuser = True
+        user.save(update_fields=["is_staff", "is_superuser"])
 
 # Display on login page
 SOCIAL_AUTH_BACKEND_ATTRS = {
