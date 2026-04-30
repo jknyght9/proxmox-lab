@@ -96,3 +96,9 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # unifi_address: "192.168.1.1"          # UniFi Controller IP or FQDN
 # unifi_api_key: ""                      # API key (Settings → Integrations)
 # unifi_site: "default"                  # Site name (default for most setups)
+
+# How often the periodic netbox-sync Nomad job re-scrapes UniFi.
+# Cron syntax. Defaults: every 6 hours, UTC. Only used when both
+# Netbox and UniFi are configured.
+# netbox_sync_cron:     "0 */6 * * *"
+# netbox_sync_timezone: "UTC"

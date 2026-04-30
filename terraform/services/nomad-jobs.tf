@@ -130,6 +130,28 @@ resource "nomad_job" "docs" {
   detach = false
 }
 
+# Periodic Netbox inventory sync. Pulls UniFi devices/networks into
+# Netbox on a cron schedule (default every 6 hours). Replaces the
+# one-shot null_resource.netbox_unifi_devices in netbox-inventory.tf
+# for ongoing refresh — that resource only re-runs when its config
+# triggers change, not when the actual UniFi data does.
+resource "nomad_job" "netbox_sync" {
+  count = var.deploy_netbox && var.unifi_address != "" ? 1 : 0
+  depends_on = [
+    nomad_job.netbox,
+    vault_policy.netbox_sync,
+    vault_jwt_auth_backend_role.netbox_sync,
+    vault_kv_secret_v2.unifi,
+    null_resource.nomad_vault_config,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/netbox-sync.nomad.hcl.tpl", {
+    sync_cron     = var.netbox_sync_cron
+    sync_timezone = var.netbox_sync_timezone
+  })
+  detach = false
+}
+
 resource "nomad_job" "tailscale" {
   count      = var.deploy_tailscale ? 1 : 0
   depends_on = [

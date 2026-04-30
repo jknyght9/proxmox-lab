@@ -267,6 +267,18 @@ variable "backup_retention_days" {
   default = 7
 }
 
+# Periodic Netbox inventory sync (UniFi → Netbox).
+# Default: every 6 hours. Override in bootstrap.yml as netbox_sync_cron.
+variable "netbox_sync_cron" {
+  type    = string
+  default = "0 */6 * * *"
+}
+
+variable "netbox_sync_timezone" {
+  type    = string
+  default = "UTC"
+}
+
 # =============================================================================
 # NAS Servers (AD domain join via API)
 # =============================================================================

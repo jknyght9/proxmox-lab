@@ -47,6 +47,12 @@ resource "vault_policy" "netbox" {
   policy = file("${path.module}/../../nomad/vault-policies/netbox.hcl")
 }
 
+resource "vault_policy" "netbox_sync" {
+  count  = var.deploy_netbox && var.unifi_address != "" ? 1 : 0
+  name   = "netbox-sync"
+  policy = file("${path.module}/../../nomad/vault-policies/netbox-sync.hcl")
+}
+
 resource "vault_policy" "domain_join" {
   count  = var.deploy_samba_ad ? 1 : 0
   name   = "domain-join"
