@@ -1150,6 +1150,12 @@ EOF
   discoverStorage || return 1
   discoverNetworkBridges || return 1
   createAPIToken || return 1
+  # Distribute the labenterpriseadmin SSH key to every cluster member so
+  # subsequent steps (downloadLXCTemplates, packer/terraform-driven SSH
+  # against secondary nodes) can use key auth. Has to happen *before*
+  # downloadLXCTemplates which uses sshRun().
+  PROXMOX_HOST="${PROXMOX_HOST:-$PROXMOX_IP}"
+  distributeSSHKeys || return 1
   # Generate service passwords *before* tfvars/pkrvars so they aren't
   # left at the changeme123 placeholder on a fresh deployment.
   generateServicePasswords || return 1

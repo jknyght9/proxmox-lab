@@ -431,9 +431,9 @@ function deployAll() {
 
   # Set PROXMOX_HOST from bootstrap
   PROXMOX_HOST="$PROXMOX_IP"
-
-  # Distribute SSH keys to all discovered nodes
-  distributeSSHKeys
+  # SSH keys are now distributed inside runBootstrap (between
+  # createAPIToken and downloadLXCTemplates) so the LXC template
+  # download step can use key auth.
 
   cat <<EOF
 
