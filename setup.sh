@@ -857,12 +857,14 @@ function showMenu() {
   echo "    4) Samba AD + LDAP Account Manager"
   echo "    5) Uptime Kuma (monitoring)"
   echo "    6) Netbox (inventory management)"
+  echo "    7) Periodic backups (NFS/SMB)"
+  echo "    8) Tailscale subnet routers"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
-  echo "    7) Rollback services (Layer 2)"
-  echo "    8) Rollback infrastructure (Layer 1 + 2)"
-  echo "    9) Purge entire deployment"
-  echo "    0) Exit"
+  echo "    9)  Rollback services (Layer 2)"
+  echo "    10) Rollback infrastructure (Layer 1 + 2)"
+  echo "    11) Purge entire deployment"
+  echo "    0)  Exit"
 
   if [ "$DEV_MODE" = true ]; then
     echo
@@ -899,9 +901,9 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-9, d1-d11]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d11]: ")" choice
   else
-    read -rp "$(question "Select [0-9]: ")" choice
+    read -rp "$(question "Select [0-11]: ")" choice
   fi
 
   case $choice in
@@ -913,11 +915,13 @@ while true; do
     4)  enableService "samba_ad" && enableService "lam";;
     5)  enableService "uptime_kuma";;
     6)  enableService "netbox";;
+    7)  enableService "backup";;
+    8)  enableService "tailscale";;
 
     # Management
-    7)  ensureBootstrapComplete && rollbackLayer2;;
-    8)  ensureBootstrapComplete && rollbackLayer1;;
-    9)  purgeDeployment;;
+    9)   ensureBootstrapComplete && rollbackLayer2;;
+    10)  ensureBootstrapComplete && rollbackLayer1;;
+    11)  purgeDeployment;;
 
     # Developer tools
     d1|D1)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='base-ubuntu.*' . && (docker compose run --rm -it packer build -only='base-debian.*' . || warn "Debian base build failed") && (docker compose run --rm -it packer build -only='base-fedora.*' . || warn "Fedora base build failed"); else error "Invalid option"; fi;;

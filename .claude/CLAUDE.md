@@ -34,13 +34,15 @@ $EDITOR bootstrap.yml
  4) Samba AD + LAM                - Active Directory + LDAP Account Manager
  5) Uptime Kuma                   - Service health monitoring
  6) Netbox                        - Inventory management (DCIM/IPAM)
+ 7) Periodic backups              - Nightly NFS/SMB backups of stateful volumes
+ 8) Tailscale subnet routers      - Reach lab IPs from the tailnet
 ```
 
 ### Management
 ```
- 7) Rollback services (Layer 2)      - Destroy Nomad jobs, Vault config, secrets, DNS records
- 8) Rollback infrastructure (L1 + 2) - Destroy all VMs/LXCs (wipes GlusterFS data)
- 9) Purge entire deployment          - Emergency reset via SSH (bypasses Terraform)
+ 9)  Rollback services (Layer 2)     - Destroy Nomad jobs, Vault config, secrets, DNS records
+ 10) Rollback infrastructure (L1+L2) - Destroy all VMs/LXCs (wipes GlusterFS data)
+ 11) Purge entire deployment         - Emergency reset via SSH (bypasses Terraform)
 ```
 
 ### Developer Menu (--dev flag)
