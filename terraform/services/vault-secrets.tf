@@ -223,6 +223,23 @@ resource "vault_kv_secret_v2" "unifi" {
   })
 }
 
+# Backup credentials. The backup Nomad job reads this at runtime via WIF
+# and uses the values to mount the NFS/SMB target before archiving.
+resource "vault_kv_secret_v2" "backup" {
+  count = var.deploy_backup ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "backup"
+  data_json = jsonencode({
+    backup_type  = var.backup_type
+    nfs_server   = var.backup_nfs_server
+    nfs_path     = var.backup_nfs_path
+    smb_server   = var.backup_smb_server
+    smb_share    = var.backup_smb_share
+    smb_user     = var.backup_smb_user
+    smb_password = var.backup_smb_password
+  })
+}
+
 resource "vault_kv_secret_v2" "samba_ad" {
   count = var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path

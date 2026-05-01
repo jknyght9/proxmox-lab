@@ -221,6 +221,18 @@ unifi_address = "$(yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>
 unifi_api_key = "$(yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 unifi_site    = "$(yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
 
+# Periodic Backups (from bootstrap.yml)
+backup_type         = "$(yq -r '.backup.type // "nfs"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "nfs")"
+backup_nfs_server   = "$(yq -r '.backup.nfs_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_nfs_path     = "$(yq -r '.backup.nfs_path // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_smb_server   = "$(yq -r '.backup.smb_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_smb_share    = "$(yq -r '.backup.smb_share // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_smb_user     = "$(yq -r '.backup.smb_user // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_smb_password = "$(yq -r '.backup.smb_password // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+backup_cron           = "$(yq -r '.backup.cron // "0 2 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 2 * * *")"
+backup_timezone       = "$(yq -r '.backup.timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"
+backup_retention_days = $(yq -r '.backup.retention_days // 7' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo 7)
+
 # Netbox periodic inventory sync (from bootstrap.yml — defaults to every 6h)
 netbox_sync_cron     = "$(yq -r '.netbox_sync_cron // "0 */6 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 */6 * * *")"
 netbox_sync_timezone = "$(yq -r '.netbox_sync_timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"

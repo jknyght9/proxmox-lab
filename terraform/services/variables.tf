@@ -193,6 +193,53 @@ variable "unifi_api_key" {
   default     = ""
 }
 
+# =============================================================================
+# Periodic Backups (NFS or SMB target — credentials stored in Vault)
+# =============================================================================
+
+variable "backup_type" {
+  type        = string
+  description = "Backup target type: 'nfs' or 'smb'"
+  default     = "nfs"
+}
+
+variable "backup_nfs_server" {
+  type        = string
+  description = "NFS server hostname or IP (only when backup_type='nfs')"
+  default     = ""
+}
+
+variable "backup_nfs_path" {
+  type        = string
+  description = "NFS export path (e.g. /mnt/pool/backups)"
+  default     = ""
+}
+
+variable "backup_smb_server" {
+  type        = string
+  description = "SMB server hostname or IP (only when backup_type='smb')"
+  default     = ""
+}
+
+variable "backup_smb_share" {
+  type        = string
+  description = "SMB share name"
+  default     = ""
+}
+
+variable "backup_smb_user" {
+  type        = string
+  description = "SMB authenticating user"
+  default     = ""
+}
+
+variable "backup_smb_password" {
+  type        = string
+  sensitive   = true
+  description = "SMB user password (stored in Vault, not in tfstate output)"
+  default     = ""
+}
+
 variable "unifi_site" {
   type        = string
   description = "UniFi site name"

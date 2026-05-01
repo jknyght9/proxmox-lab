@@ -94,3 +94,27 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # Netbox and UniFi are configured.
 # netbox_sync_cron:     "0 */6 * * *"
 # netbox_sync_timezone: "UTC"
+
+# =============================================================================
+# Periodic Backups (optional — Nomad batch job archives Vault, Authentik DB,
+# Samba, Netbox, etc. to NFS or SMB nightly)
+# =============================================================================
+# Credentials are stored in Vault, not in tfstate. backup.type controls
+# which set of fields below is used; the other set is ignored.
+
+# backup:
+#   type: "nfs"                            # "nfs" or "smb"
+#
+#   # NFS target (when type=nfs)
+#   nfs_server: "nas.example.lan"
+#   nfs_path:   "/mnt/pool/backups/proxmox-lab"
+#
+#   # SMB target (when type=smb)
+#   # smb_server:   "nas.example.lan"
+#   # smb_share:    "backups"
+#   # smb_user:     "backup-user"
+#   # smb_password: "..."
+#
+#   retention_days: 7
+#   cron:           "0 2 * * *"            # nightly at 02:00
+#   timezone:       "UTC"
