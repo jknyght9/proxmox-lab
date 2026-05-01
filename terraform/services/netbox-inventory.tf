@@ -105,8 +105,13 @@ resource "null_resource" "netbox_inventory" {
       # --- Foundation ---
       echo '[+] Creating site, cluster, roles...'
 
-      SITE_ID=$(nb_create "dcim/sites" "slug" "home-lab" \
-        '{"name":"Home Lab","slug":"home-lab","status":"active"}')
+      # Site name = dns_postfix verbatim (e.g. "iotvf.lab"); slug is the
+      # Netbox-safe form (lowercase, dots → hyphens) since Netbox slugs
+      # disallow dots and must be lowercase.
+      SITE_NAME="${var.dns_postfix}"
+      SITE_SLUG="${replace(lower(var.dns_postfix), ".", "-")}"
+      SITE_ID=$(nb_create "dcim/sites" "slug" "$SITE_SLUG" \
+        "{\"name\":\"$SITE_NAME\",\"slug\":\"$SITE_SLUG\",\"status\":\"active\"}")
 
       CLUSTER_TYPE_ID=$(nb_create "virtualization/cluster-types" "slug" "proxmox-ve" \
         '{"name":"Proxmox VE","slug":"proxmox-ve"}')
@@ -366,7 +371,7 @@ resource "null_resource" "netbox_proxmox_devices" {
       DT_ID=$(nb_create "dcim/device-types" "slug" "$DT_SLUG" \
         "{\"manufacturer\":$MFG_ID,\"model\":\"$PRODUCT\",\"slug\":\"$DT_SLUG\"}")
 
-      SITE_ID=$(curl -sk -H "$AUTH" "$API/dcim/sites/?slug=home-lab" | jq -r '.results[0].id')
+      SITE_ID=$(curl -sk -H "$AUTH" "$API/dcim/sites/?slug=${replace(lower(var.dns_postfix), ".", "-")}" | jq -r '.results[0].id')
       ROLE_ID=$(curl -sk -H "$AUTH" "$API/dcim/device-roles/?slug=server" | jq -r '.results[0].id')
 
       # Create or update device

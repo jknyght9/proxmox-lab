@@ -90,9 +90,9 @@ fi
 DEVICE_COUNT=$(echo "$DEVICES" | jq '.data | length')
 echo "[+] Found $DEVICE_COUNT UniFi devices"
 
-SITE_ID=$(curl -sk -H "$AUTH" "$API/dcim/sites/?slug=home-lab" | jq -r '.results[0].id // empty')
+SITE_ID=$(curl -sk -H "$AUTH" "$API/dcim/sites/?slug=${site_slug}" | jq -r '.results[0].id // empty')
 if [ -z "$SITE_ID" ]; then
-  echo "[!] Netbox site 'home-lab' not found — run option 6 once first to seed sites/roles"
+  echo "[!] Netbox site '${site_slug}' not found — run option 6 once first to seed sites/roles"
   exit 1
 fi
 NET_ROLE_ID=$(nb_create "dcim/device-roles" "slug" "network" \

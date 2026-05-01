@@ -148,6 +148,7 @@ resource "nomad_job" "netbox_sync" {
   jobspec = templatefile("${path.module}/templates/netbox-sync.nomad.hcl.tpl", {
     sync_cron     = var.netbox_sync_cron
     sync_timezone = var.netbox_sync_timezone
+    site_slug     = replace(lower(var.dns_postfix), ".", "-")
   })
   detach = false
 }
