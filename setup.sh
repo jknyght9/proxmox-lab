@@ -626,10 +626,35 @@ Vault TLS via Layer 1 (now with real Vault passwords).
 EOF
   pressAnyKey
 
-  # Deploy DNS LXCs (Layer 1, targeted) BEFORE Layer 2.
-  # Layer 2's null_resource.pihole_dns_records SSHes to the Pi-hole at
-  # var.dns_server_ip — that LXC has to exist first, otherwise the
-  # Layer 2 apply hangs waiting on SSH to a non-existent host.
+  # The DNS LXCs (Layer 1's module.dns-main) read secret/data/pihole
+  # from Vault for admin/root passwords. That secret is created by
+  # Layer 2's vault_kv_secret_v2.pihole. So Layer 2 secrets have to be
+  # written first, THEN Layer 1 can deploy the DNS LXCs, THEN Layer 2
+  # can push DNS records into them.
+  doing "Initializing Terraform Layer 2..."
+  tf-services init
+
+  # Step 1: only the Vault scaffolding + service secrets. Use -target so
+  # null_resource.pihole_dns_records (which SSHes to the not-yet-existent
+  # LXC) doesn't fire here.
+  doing "Layer 2 (step 1/2): Vault PKI, JWT auth, service secrets..."
+  if ! tf-services apply -auto-approve \
+    -target=vault_mount.pki \
+    -target=vault_mount.pki_int \
+    -target=vault_mount.secret \
+    -target=vault_jwt_auth_backend.nomad \
+    -target=vault_kv_secret_v2.pihole \
+    -target=vault_kv_secret_v2.kasm \
+    -target=vault_kv_secret_v2.packer \
+    -target=vault_kv_secret_v2.ssh_keys \
+    -target=vault_kv_secret_v2.cluster_config \
+    -target=vault_kv_secret_v2.nomad_nodes; then
+    error "Phase 4 failed: Layer 2 secrets apply"
+    return 1
+  fi
+  success "Layer 2 secrets seeded"
+
+  # Step 2: deploy DNS LXCs (Layer 1) — they can now read pihole creds from Vault.
   doing "Deploying DNS LXCs (Layer 1)..."
   if ! tf apply -auto-approve \
     -var "nomad_address=http://${NOMAD01_IP}:4646" \
@@ -639,10 +664,8 @@ EOF
   fi
   success "DNS LXCs deployed"
 
-  doing "Initializing Terraform Layer 2..."
-  tf-services init
-
-  doing "Running Terraform Layer 2 (PKI, secrets, Traefik, DNS records)..."
+  # Step 3: full Layer 2 — Traefik, DNS records, everything else
+  doing "Layer 2 (step 2/2): Traefik, DNS records, all remaining resources..."
   tf-services apply -auto-approve
   success "Layer 2 complete: Vault configured, Traefik deployed, DNS records pushed"
 
