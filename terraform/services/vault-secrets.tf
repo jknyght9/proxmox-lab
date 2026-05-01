@@ -240,6 +240,18 @@ resource "vault_kv_secret_v2" "backup" {
   })
 }
 
+# Tailscale auth key. The tailscale system job reads this at runtime via
+# WIF and joins the tailnet on every Nomad node, advertising the lab
+# subnet so remote clients can reach lab IPs over the tailnet.
+resource "vault_kv_secret_v2" "tailscale" {
+  count = var.deploy_tailscale ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "tailscale"
+  data_json = jsonencode({
+    auth_key = var.tailscale_auth_key
+  })
+}
+
 resource "vault_kv_secret_v2" "samba_ad" {
   count = var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path

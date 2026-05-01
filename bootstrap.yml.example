@@ -118,3 +118,16 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 #   retention_days: 7
 #   cron:           "0 2 * * *"            # nightly at 02:00
 #   timezone:       "UTC"
+
+# =============================================================================
+# Tailscale Subnet Routers (optional — every Nomad node joins the tailnet
+# and advertises the lab subnet so remote tailnet clients can reach lab IPs)
+# =============================================================================
+# Generate auth_key at https://login.tailscale.com/admin/settings/keys
+# (Reusable: yes; Pre-authorized: yes; Expiry: 90 days max — rotate before).
+# After deploy, approve the advertised routes in the Tailscale admin UI:
+# Machines → <node> → Edit route settings → enable the subnet.
+
+# tailscale:
+#   auth_key:         "tskey-auth-..."     # required
+#   advertise_routes: "10.10.0.0/24"       # CSV; defaults to network.cidr if blank

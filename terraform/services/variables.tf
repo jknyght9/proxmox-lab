@@ -240,6 +240,24 @@ variable "backup_smb_password" {
   default     = ""
 }
 
+# =============================================================================
+# Tailscale Subnet Routers (optional — every Nomad node runs tailscaled,
+# advertising the lab subnet so remote tailnet clients can reach lab IPs)
+# =============================================================================
+
+variable "tailscale_auth_key" {
+  type        = string
+  sensitive   = true
+  description = "Reusable Tailscale auth key (login.tailscale.com → Settings → Keys). Stored in Vault."
+  default     = ""
+}
+
+variable "tailscale_advertise_routes" {
+  type        = string
+  description = "CSV of subnets the tailnet should reach via these routers (e.g. '10.10.0.0/24'). Defaults to network_cidr."
+  default     = ""
+}
+
 variable "unifi_site" {
   type        = string
   description = "UniFi site name"

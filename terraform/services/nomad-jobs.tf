@@ -162,7 +162,7 @@ resource "nomad_job" "tailscale" {
   ]
 
   jobspec = templatefile("${path.module}/templates/tailscale.nomad.hcl.tpl", {
-    tailscale_subnet = var.network_cidr
+    tailscale_subnet = coalesce(var.tailscale_advertise_routes, var.network_cidr)
   })
   detach = false
 }

@@ -21,9 +21,23 @@ users:
 
 packages: [curl, jq, socat, ca-certificates]
 
+write_files:
+  # Persistent IP forwarding for the Tailscale subnet router. Even if
+  # tailscale isn't deployed yet, having this on by default is harmless
+  # (kernel routing only happens when something actually forwards). We
+  # enable it once at first boot via cloud-init so it survives reboots
+  # without depending on the Nomad job's prestart task.
+  - path: /etc/sysctl.d/99-tailscale-forward.conf
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv6.conf.all.forwarding = 1
+
 runcmd:
   - mkdir -p /opt/nomad/data
   - chown -R nomad:nomad /opt/nomad || true
+  # Apply the IP-forward sysctl now so we don't need a reboot
+  - sysctl --system >/dev/null 2>&1 || true
   - |
     bash -lc '
       systemctl enable --now systemd-timesyncd || true

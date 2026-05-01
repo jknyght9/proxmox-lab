@@ -233,6 +233,12 @@ backup_cron           = "$(yq -r '.backup.cron // "0 2 * * *"' "${SCRIPT_DIR}/bo
 backup_timezone       = "$(yq -r '.backup.timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"
 backup_retention_days = $(yq -r '.backup.retention_days // 7' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo 7)
 
+# Tailscale subnet routers (from bootstrap.yml). auth_key goes into
+# Vault at secret/data/tailscale; advertise_routes defaults to network_cidr
+# (terraform 'coalesce' falls back automatically if left empty here).
+tailscale_auth_key         = "$(yq -r '.tailscale.auth_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+tailscale_advertise_routes = "$(yq -r '.tailscale.advertise_routes // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+
 # Netbox periodic inventory sync (from bootstrap.yml — defaults to every 6h)
 netbox_sync_cron     = "$(yq -r '.netbox_sync_cron // "0 */6 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 */6 * * *")"
 netbox_sync_timezone = "$(yq -r '.netbox_sync_timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"
