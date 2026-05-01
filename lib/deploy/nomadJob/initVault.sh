@@ -121,9 +121,16 @@ function writeServicesTfvars() {
     echo "$val"
   }
 
+  local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
   local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN
+  # deploy_traefik / deploy_dns_records default to true on first deploy
+  # (Traefik is mandatory for the lab to work; DNS records are written
+  # immediately so the cluster is reachable). After that, never let them
+  # silently flip — same destructive footgun as the deploy_authentik bug.
+  PREV_DEPLOY_TRAEFIK=$(_preserve_bool   "deploy_traefik"     "true")
+  PREV_DEPLOY_DNS_RECORDS=$(_preserve_bool "deploy_dns_records" "true")
   PREV_DEPLOY_AUTHENTIK=$(_preserve_bool "deploy_authentik"   "false")
   PREV_DEPLOY_SAMBA_AD=$(_preserve_bool  "deploy_samba_ad"    "false")
   PREV_DEPLOY_LAM=$(_preserve_bool       "deploy_lam"         "false")
@@ -186,6 +193,8 @@ authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADD
 # silently fall back to defaults; doing so destroys vault_kv_secret_v2
 # resources and the random_password values backing them, taking down
 # Authentik/Samba/etc.
+deploy_traefik     = ${PREV_DEPLOY_TRAEFIK}
+deploy_dns_records = ${PREV_DEPLOY_DNS_RECORDS}
 deploy_authentik   = ${PREV_DEPLOY_AUTHENTIK}
 deploy_samba_ad    = ${PREV_DEPLOY_SAMBA_AD}
 deploy_lam         = ${PREV_DEPLOY_LAM}
@@ -203,8 +212,6 @@ netbox_api_token    = "${PREV_NETBOX_TOKEN}"
 profile_server       = "$(yq -r '.profile_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 profile_share        = "$(yq -r '.profile_share // "profiles"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "profiles")"
 profile_drive_letter = "$(yq -r '.profile_drive_letter // "P"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "P")"
-
-deploy_traefik = true
 
 # NAS servers (from bootstrap.yml)
 $(generateNASServersTfvars)
