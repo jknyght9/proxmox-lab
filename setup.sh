@@ -626,16 +626,29 @@ Vault TLS via Layer 1 (now with real Vault passwords).
 EOF
   pressAnyKey
 
+  # Deploy DNS LXCs (Layer 1, targeted) BEFORE Layer 2.
+  # Layer 2's null_resource.pihole_dns_records SSHes to the Pi-hole at
+  # var.dns_server_ip — that LXC has to exist first, otherwise the
+  # Layer 2 apply hangs waiting on SSH to a non-existent host.
+  doing "Deploying DNS LXCs (Layer 1)..."
+  if ! tf apply -auto-approve \
+    -var "nomad_address=http://${NOMAD01_IP}:4646" \
+    -target=module.dns-main; then
+    error "Phase 4 failed: DNS LXC apply"
+    return 1
+  fi
+  success "DNS LXCs deployed"
+
   doing "Initializing Terraform Layer 2..."
   tf-services init
 
-  doing "Running Terraform Layer 2 (PKI, secrets, Traefik)..."
+  doing "Running Terraform Layer 2 (PKI, secrets, Traefik, DNS records)..."
   tf-services apply -auto-approve
-  success "Layer 2 complete: Vault configured, Traefik deployed"
+  success "Layer 2 complete: Vault configured, Traefik deployed, DNS records pushed"
 
-  # Full Layer 1 apply: DNS (with real passwords) + Vault TLS redeploy
-  # detach=true so terraform doesn't wait for sealed Vault health check
-  doing "Deploying DNS and enabling Vault TLS..."
+  # Final Layer 1 full apply: Vault TLS redeploy + any module.kasm if enabled.
+  # No -target this time so any other Layer 1 resources catch up.
+  doing "Enabling Vault TLS (Layer 1 full apply)..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
   # Vault seals on TLS redeploy — wait for it to come up, then unseal
