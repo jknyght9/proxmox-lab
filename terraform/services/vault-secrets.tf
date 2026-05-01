@@ -50,11 +50,18 @@ resource "random_password" "template_pass" {
   keepers = { service = "packer" }
 }
 
+# prevent_destroy on every password backing a stateful service:
+# regenerating these orphans the on-disk Postgres/Samba data that was
+# initialized with the old value. If a user genuinely wants to tear a
+# service down, they have to `terraform state rm` first — turning a
+# silent destruction into an explicit one. (See incident 2026-05-01.)
+
 resource "random_password" "authentik_secret_key" {
   count   = var.deploy_authentik ? 1 : 0
   length  = 50
   special = false
   keepers = { service = "authentik" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "authentik_admin" {
@@ -63,6 +70,7 @@ resource "random_password" "authentik_admin" {
   special          = true
   override_special = "!@#%^&*"
   keepers          = { service = "authentik" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "authentik_api_token" {
@@ -70,6 +78,7 @@ resource "random_password" "authentik_api_token" {
   length  = 40
   special = false
   keepers = { service = "authentik" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "authentik_postgres" {
@@ -77,6 +86,7 @@ resource "random_password" "authentik_postgres" {
   length  = 24
   special = false
   keepers = { service = "authentik" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "samba_admin" {
@@ -84,6 +94,7 @@ resource "random_password" "samba_admin" {
   length  = 24
   special = true
   keepers = { service = "samba-ad" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "netbox_secret_key" {
@@ -91,6 +102,7 @@ resource "random_password" "netbox_secret_key" {
   length  = 50
   special = false
   keepers = { service = "netbox" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "netbox_postgres" {
@@ -98,6 +110,7 @@ resource "random_password" "netbox_postgres" {
   length  = 24
   special = false
   keepers = { service = "netbox" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "netbox_admin" {
@@ -106,6 +119,7 @@ resource "random_password" "netbox_admin" {
   special          = true
   override_special = "!@#%^&*"
   keepers          = { service = "netbox" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "netbox_api_token" {
@@ -113,6 +127,7 @@ resource "random_password" "netbox_api_token" {
   length  = 40
   special = false
   keepers = { service = "netbox" }
+  lifecycle { prevent_destroy = true }
 }
 
 # --- Write Secrets to Vault KV ---

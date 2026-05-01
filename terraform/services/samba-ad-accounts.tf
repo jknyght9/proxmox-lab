@@ -7,12 +7,18 @@
 
 # --- Service Account Passwords ---
 
+# prevent_destroy: these passwords are baked into the AD directory at
+# samba-tool user creation time. Regenerating them via Terraform without
+# also resetting the AD account leaves orphaned credentials. See the
+# vault-secrets.tf incident note (2026-05-01).
+
 resource "random_password" "domain_join" {
   count            = var.deploy_samba_ad ? 1 : 0
   length           = 24
   special          = true
   override_special = "!@#%^&*"
   keepers          = { service = "domain-join" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "authentik_sync" {
@@ -21,6 +27,7 @@ resource "random_password" "authentik_sync" {
   special          = true
   override_special = "!@#%^&*"
   keepers          = { service = "authentik-sync" }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "random_password" "lam_bind" {
@@ -29,6 +36,7 @@ resource "random_password" "lam_bind" {
   special          = true
   override_special = "!@#%^&*"
   keepers          = { service = "lam-bind" }
+  lifecycle { prevent_destroy = true }
 }
 
 # --- Store service account credentials in Vault ---
