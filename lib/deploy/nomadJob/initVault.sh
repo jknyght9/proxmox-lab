@@ -98,18 +98,42 @@ function writeServicesTfvars() {
   )
   VM_INVENTORY_HCL=$(echo "$VM_INVENTORY_HCL" | sort -u)
 
-  # Preserve user-edited values that aren't derived from bootstrap.yml.
-  # configure_authentik / configure_netbox toggle as part of two-phase
-  # deploys; netbox_api_token is fetched after Netbox starts.
+  # Preserve every user/menu-managed toggle that isn't derived from
+  # bootstrap.yml. If we don't carry these forward, Terraform sees the
+  # variable defaults (false for deploy_*, "" for tokens) on the next
+  # apply and DESTROYS every resource gated on them — including
+  # vault_kv_secret_v2 and random_password instances, which means lost
+  # service passwords. (Hard-learned 2026-05-01.)
+  _preserve_bool() {
+    local key="$1" default="$2" val=""
+    if [ -f "$SERVICES_TFVARS" ]; then
+      val=$(sed -n "s/^${key}[[:space:]]*=[[:space:]]*\\([a-z]*\\).*/\\1/p" "$SERVICES_TFVARS" 2>/dev/null | head -1)
+    fi
+    [ -z "$val" ] && val="$default"
+    echo "$val"
+  }
+  _preserve_str() {
+    local key="$1" default="$2" val=""
+    if [ -f "$SERVICES_TFVARS" ]; then
+      val=$(sed -n "s/^${key}[[:space:]]*=[[:space:]]*\"\\(.*\\)\"/\\1/p" "$SERVICES_TFVARS" 2>/dev/null | head -1)
+    fi
+    [ -z "$val" ] && val="$default"
+    echo "$val"
+  }
+
+  local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
+  local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN
-  if [ -f "$SERVICES_TFVARS" ]; then
-    PREV_CFG_AUTH=$(sed -n 's/^configure_authentik.*=.*\([a-z]*\)/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
-    PREV_CFG_NETBOX=$(sed -n 's/^configure_netbox.*=.*\([a-z]*\)/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
-    PREV_NETBOX_TOKEN=$(sed -n 's/^netbox_api_token.*=.*"\(.*\)"/\1/p' "$SERVICES_TFVARS" 2>/dev/null | head -1)
-  fi
-  : "${PREV_CFG_AUTH:=false}"
-  : "${PREV_CFG_NETBOX:=false}"
-  : "${PREV_NETBOX_TOKEN:=not-configured}"
+  PREV_DEPLOY_AUTHENTIK=$(_preserve_bool "deploy_authentik"   "false")
+  PREV_DEPLOY_SAMBA_AD=$(_preserve_bool  "deploy_samba_ad"    "false")
+  PREV_DEPLOY_LAM=$(_preserve_bool       "deploy_lam"         "false")
+  PREV_DEPLOY_UPTIME_KUMA=$(_preserve_bool "deploy_uptime_kuma" "false")
+  PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
+  PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
+  PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
+  PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
+  PREV_CFG_NETBOX=$(_preserve_bool       "configure_netbox"    "false")
+  PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
@@ -158,7 +182,19 @@ pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_A
 
 authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
 
-# Two-phase toggles — preserved across re-runs
+# Service deploy toggles — preserved across re-runs. NEVER let these
+# silently fall back to defaults; doing so destroys vault_kv_secret_v2
+# resources and the random_password values backing them, taking down
+# Authentik/Samba/etc.
+deploy_authentik   = ${PREV_DEPLOY_AUTHENTIK}
+deploy_samba_ad    = ${PREV_DEPLOY_SAMBA_AD}
+deploy_lam         = ${PREV_DEPLOY_LAM}
+deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
+deploy_netbox      = ${PREV_DEPLOY_NETBOX}
+deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
+deploy_backup      = ${PREV_DEPLOY_BACKUP}
+
+# Two-phase configure toggles
 configure_authentik = ${PREV_CFG_AUTH}
 configure_netbox    = ${PREV_CFG_NETBOX}
 netbox_api_token    = "${PREV_NETBOX_TOKEN}"
