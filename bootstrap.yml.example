@@ -62,14 +62,6 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # profile_drive_letter: "P"            # Drive letter to map (Windows)
 
 # =============================================================================
-# Authentik SSO (optional — automatic LDAP sync from Samba AD)
-# Requires: Authentik and Samba AD deployed
-# =============================================================================
-
-# authentik_ad_sync: true              # Enable LDAP user/group sync
-# authentik_sync_interval: 300         # Sync interval in seconds (5 min default)
-
-# =============================================================================
 # NAS Servers (optional — AD domain join, profile shares)
 # Supports TrueNAS SCALE and Synology DSM 7.x
 # API keys are stored in Vault after first use

@@ -170,12 +170,6 @@ variable "netbox_api_token" {
   default     = "not-configured"
 }
 
-variable "vault_oidc_client_secret" {
-  type        = string
-  sensitive   = true
-  description = "Vault OIDC client secret from Authentik (stored at secret/vault-oidc)"
-  default     = ""
-}
 
 variable "deploy_backup" {
   type    = bool
