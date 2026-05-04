@@ -42,22 +42,29 @@ module "nomad" {
 # Vault Nomad Job (deployed after Nomad cluster is healthy)
 # =============================================================================
 
-# Vault storage directories (must exist before the Nomad job starts)
+# Vault storage directories. With 3-node Raft HA each Nomad node gets
+# its own per-host subdir (raft requires unique storage per peer).
+# Created on every Nomad VM so the docker bind-mount can succeed at any
+# `node.unique.name`.
 resource "null_resource" "vault_directories" {
-  count      = local.nomad_configured ? 1 : 0
+  for_each   = local.nomad_configured ? module.nomad.vm_ips : {}
   depends_on = [module.nomad]
+
+  triggers = {
+    host = each.value
+  }
 
   connection {
     type        = "ssh"
-    host        = values(module.nomad.vm_ips)[0]
+    host        = each.value
     user        = "labadmin"
     private_key = file(replace(var.ssh_admin_public_key_file, ".pub", ""))
   }
 
   provisioner "remote-exec" {
     inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/vault /srv/gluster/nomad-data/vault-tls /srv/gluster/nomad-data/certs",
-      "sudo chmod 777 /srv/gluster/nomad-data/vault /srv/gluster/nomad-data/vault-tls",
+      "sudo mkdir -p /srv/gluster/nomad-data/vault/${each.key} /srv/gluster/nomad-data/vault-tls /srv/gluster/nomad-data/certs",
+      "sudo chmod 777 /srv/gluster/nomad-data/vault/${each.key} /srv/gluster/nomad-data/vault-tls",
     ]
   }
 }
@@ -70,6 +77,10 @@ resource "nomad_job" "vault" {
     dns_postfix       = var.dns_postfix
     vault_tls_enabled = local.vault_configured
     vault_version     = var.vault_version
+    # Raft retry_join targets — every Nomad VM gets a Vault. Each peer
+    # tries to join all the others; whoever's leader (or whoever's first
+    # to init) wins.
+    nomad_node_ips    = values(module.nomad.vm_ips)
   })
 
   # Vault starts sealed after every restart — it can't pass health checks
