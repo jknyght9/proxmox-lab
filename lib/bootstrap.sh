@@ -284,7 +284,7 @@ function verifyClusterInternet() {
       fi
       dns_ok=true
       if sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
-           "curl -fsS --max-time 10 -o /dev/null '$probe_url'"; then
+           "curl -fsS --connect-timeout 5 --max-time 25 -o /dev/null '$probe_url'"; then
         https_ok=true
         working_target="$probe_host"
         break
