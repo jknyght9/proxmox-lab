@@ -32,6 +32,14 @@ resource "nomad_job" "authentik" {
     dns_postfix = var.dns_postfix
   })
   detach = false
+
+  # First-run pulls postgres + authentik server + worker (~600MB total)
+  # and runs initial DB migrations. Default 5m wait isn't enough on
+  # most lab connections.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
 }
 
 resource "nomad_job" "samba_ad" {
@@ -50,6 +58,13 @@ resource "nomad_job" "samba_ad" {
     ad_realm = var.ad_realm
   })
   detach = false
+
+  # First-run provisions the AD directory (samba-tool domain provision)
+  # which is slow on top of the image pull. 5m is too tight.
+  timeouts {
+    create = "20m"
+    update = "15m"
+  }
 }
 
 resource "nomad_job" "uptime_kuma" {
