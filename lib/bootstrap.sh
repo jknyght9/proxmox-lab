@@ -106,7 +106,7 @@ function discoverCluster() {
   doing "Discovering Proxmox cluster topology..."
 
   # SSH to the bootstrap node using password auth (first-time only)
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR"
 
   # Check if we can reach the node
   if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$PROXMOX_IP" "true" 2>/dev/null; then
@@ -256,7 +256,7 @@ function verifyClusterInternet() {
 
   doing "Verifying internet connectivity from Proxmox nodes..."
 
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR"
   # Try multiple HTTPS targets — pass if ANY succeeds. Single-CDN outages
   # (e.g. archive.ubuntu.com having a bad day) shouldn't block bootstrap.
   # Each entry is "host|url" so the DNS probe and HTTPS probe stay aligned.
@@ -283,8 +283,10 @@ function verifyClusterInternet() {
         continue
       fi
       dns_ok=true
+      # -f -s (no -S) so a timeout/4xx is silent — exit code drives logic.
+      # 2>/dev/null on the local side suppresses ssh's stray warnings.
       if sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
-           "curl -fsS --connect-timeout 5 --max-time 25 -o /dev/null '$probe_url'"; then
+           "curl -fs --connect-timeout 5 --max-time 25 -o /dev/null '$probe_url'" 2>/dev/null; then
         https_ok=true
         working_target="$probe_host"
         break
@@ -388,7 +390,7 @@ function discoverStorage() {
 
   # Always fetch the live storage list first so both the saved-config
   # fast path and the interactive path can validate against it.
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR"
   local STORAGE_JSON
   STORAGE_JSON=$(sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$PROXMOX_IP" \
     "pvesh get /storage --output-format json" 2>/dev/null)
@@ -640,7 +642,7 @@ function discoverStorage() {
 function discoverNetworkBridges() {
   doing "Discovering network bridges..."
 
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR"
 
   # Get available bridges
   local BRIDGES
@@ -699,7 +701,7 @@ function discoverNetworkBridges() {
 function createAPIToken() {
   doing "Creating Proxmox API token..."
 
-  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+  local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o LogLevel=ERROR"
 
   # Check if token already exists and is valid
   if [ -f "$CREDENTIALS_FILE" ]; then
