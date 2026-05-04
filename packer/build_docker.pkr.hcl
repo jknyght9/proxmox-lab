@@ -6,6 +6,12 @@ build {
     inline = [
       "echo '[+] Waiting for cloud-init to finish...'",
       "cloud-init status --wait || true",
+      # Some lab networks (e.g. iotvf) block outbound HTTP/80; archive
+      # and security mirrors fail with "Connection failed". Both sites
+      # support HTTPS, so rewrite sources before the first apt call.
+      # Covers Ubuntu 24.04's deb822 file (.sources) AND legacy .list.
+      "echo '[+] Switching apt sources to HTTPS...'",
+      "sudo find /etc/apt -type f \\( -name '*.list' -o -name '*.sources' \\) -exec sed -i 's|http://archive\\.ubuntu\\.com|https://archive.ubuntu.com|g; s|http://security\\.ubuntu\\.com|https://security.ubuntu.com|g' {} +",
       "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get dist-upgrade -y",
       "echo \"root:${var.root_password}\" | sudo chpasswd"
     ]
