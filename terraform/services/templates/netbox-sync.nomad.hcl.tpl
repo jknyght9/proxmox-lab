@@ -11,11 +11,6 @@ job "netbox-sync" {
   group "sync" {
     count = 1
 
-    constraint {
-      attribute = "$${attr.unique.hostname}"
-      value     = "nomad01"
-    }
-
     vault {
       role        = "netbox-sync"
       change_mode = "restart"

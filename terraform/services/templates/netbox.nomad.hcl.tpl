@@ -7,7 +7,7 @@ job "netbox" {
 
     constraint {
       attribute = "$${attr.unique.hostname}"
-      value     = "nomad01"
+      value     = "nomad03"
     }
 
     # Allow extra time for first-run migrations
