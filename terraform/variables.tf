@@ -49,6 +49,12 @@ variable "bootstrap_dns" {
   description = "DNS server for initial provisioning (before Pi-hole is running). Typically the gateway."
 }
 
+variable "dns_use_dot" {
+  type        = bool
+  description = "Use DNS-over-TLS to Cloudflare/Quad9 as Pi-hole/Unbound's upstream. Set false on networks that block outbound 853/tcp (e.g. iotvf) — Unbound falls back to plain UDP/53 against bootstrap_dns instead."
+  default     = true
+}
+
 # =============================================================================
 # DNS Configuration
 # =============================================================================

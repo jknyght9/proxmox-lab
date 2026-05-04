@@ -977,6 +977,11 @@ proxmox_token_secret  = "${API_TOKEN_SECRET}"
 # DNS
 dns_postfix = "${DNS_POSTFIX}"
 dns_server  = "${NETWORK_DNS}"
+# Use DoT (Cloudflare/Quad9) for Pi-hole/Unbound upstream by default.
+# Set network.dns_use_dot to false in bootstrap.yml on networks that
+# block outbound 853/tcp (e.g. some corp/iot segments) — Unbound will
+# fall back to plain UDP/53 against bootstrap_dns instead.
+dns_use_dot = $(yq -r '.network.dns_use_dot // true' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "true")
 
 # Storage
 template_storage      = "${TEMPLATE_STORAGE}"

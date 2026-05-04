@@ -46,12 +46,18 @@ server:
     private-address: fd00::/8
     private-address: fe80::/10
 
-    # Enable DNS-over-TLS (DoT) for upstream queries
+%{ if dot_enabled ~}
+    # DNS-over-TLS (DoT) for upstream queries
     tls-upstream: yes
     tls-cert-bundle: /etc/ssl/certs/ca-certificates.crt
+%{ else ~}
+    # DoT disabled — network blocks outbound 853/tcp to public resolvers.
+    # Plain UDP/53 forward to bootstrap.yml's network.dns instead.
+%{ endif ~}
 
 forward-zone:
     name: "."
+%{ if dot_enabled ~}
     forward-tls-upstream: yes
     # Cloudflare DNS
     forward-addr: 1.1.1.1@853#cloudflare-dns.com
@@ -59,3 +65,6 @@ forward-zone:
     # Quad9 DNS
     forward-addr: 9.9.9.9@853#dns.quad9.net
     forward-addr: 149.112.112.112@853#dns.quad9.net
+%{ else ~}
+    forward-addr: ${upstream_dns}
+%{ endif ~}

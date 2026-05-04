@@ -97,6 +97,12 @@ variable "bootstrap_dns" {
   # Required - passed from parent module
 }
 
+variable "dns_use_dot" {
+  type        = bool
+  description = "Use DNS-over-TLS to Cloudflare/Quad9 as Unbound's upstream. Set false on networks that block outbound 853/tcp — Unbound will fall back to plain UDP/53 against var.bootstrap_dns instead."
+  default     = true
+}
+
 # DHCP Configuration (primarily for labnet/SDN networks)
 variable "dhcp_enabled" {
   type        = bool

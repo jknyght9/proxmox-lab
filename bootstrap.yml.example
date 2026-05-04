@@ -26,6 +26,11 @@ network:
                                 #   network.gateway. Set explicitly on networks where the
                                 #   gateway isn't a DNS server, or where 1.1.1.1/8.8.8.8
                                 #   are blocked.
+  # dns_use_dot: true           # Pi-hole/Unbound upstream uses DNS-over-TLS to
+                                #   Cloudflare/Quad9 by default. Set to false on
+                                #   networks that block outbound 853/tcp — Unbound
+                                #   will forward to plain UDP/53 against network.dns
+                                #   instead.
 
 dns_suffix: "mylab.lan"        # Domain suffix for all services
 

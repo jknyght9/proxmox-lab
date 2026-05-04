@@ -16,8 +16,13 @@ locals {
   primary_ip       = regex("^([^/]+)", local.primary_node.ip)[0]
   primary_ssh_host = lookup(var.node_ip_map, local.primary_node.target_node, local.default_ssh_host)
 
-  # Read unbound config file
-  unbound_conf = file("${path.module}/files/unbound.conf")
+  # Render unbound config. On networks where outbound DNS-over-TLS to
+  # Cloudflare/Quad9 is blocked (set var.dns_use_dot = false), Unbound
+  # falls back to plain UDP/53 against var.bootstrap_dns instead.
+  unbound_conf = templatefile("${path.module}/files/unbound.conf.tpl", {
+    dot_enabled  = var.dns_use_dot
+    upstream_dns = var.bootstrap_dns
+  })
 }
 
 resource "proxmox_virtual_environment_container" "dns" {

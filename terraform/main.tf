@@ -97,6 +97,7 @@ module "dns-main" {
   node_ip_map    = local.node_ip_map
   dns_zone       = var.dns_postfix
   bootstrap_dns  = var.bootstrap_dns
+  dns_use_dot    = var.dns_use_dot
 
   ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
   ssh_admin_public_key_file       = var.ssh_admin_public_key_file
