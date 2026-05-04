@@ -248,11 +248,23 @@ function _selectStorage() {
 # images won't download at all. Fail loudly here with a remediation
 # hint instead of letting the user discover it 20 minutes into a build.
 function verifyClusterInternet() {
+  # Escape hatch — useful when a CDN we probe is down but the host is fine.
+  if [ "${SETUP_SKIP_CONNECTIVITY_CHECK:-0}" = "1" ]; then
+    warn "Skipping connectivity check (SETUP_SKIP_CONNECTIVITY_CHECK=1)"
+    return 0
+  fi
+
   doing "Verifying internet connectivity from Proxmox nodes..."
 
   local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
-  local probe_host="archive.ubuntu.com"
-  local probe_url="https://${probe_host}/ubuntu/dists/noble/Release"
+  # Try multiple HTTPS targets — pass if ANY succeeds. Single-CDN outages
+  # (e.g. archive.ubuntu.com having a bad day) shouldn't block bootstrap.
+  # Each entry is "host|url" so the DNS probe and HTTPS probe stay aligned.
+  local probes=(
+    "archive.ubuntu.com|https://archive.ubuntu.com/ubuntu/dists/noble/Release"
+    "github.com|https://github.com/robots.txt"
+    "download.proxmox.com|https://download.proxmox.com/debian/pve/dists/bookworm/InRelease"
+  )
   local errors=0
 
   local nodes=("$PROXMOX_IP")
@@ -261,27 +273,31 @@ function verifyClusterInternet() {
   fi
 
   for ip in "${nodes[@]}"; do
-    local rc dns_ok=true http_ok=true
-    # DNS first — most common failure mode after a network reset
-    if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
-         "getent ahosts $probe_host >/dev/null 2>&1"; then
-      dns_ok=false
-    fi
-    # HTTP reachability (skip if DNS is broken — error message is clearer)
-    if [ "$dns_ok" = true ]; then
+    local dns_ok=false https_ok=false working_target=""
+    # Walk every probe target. First DNS+HTTPS pair that succeeds wins.
+    for entry in "${probes[@]}"; do
+      local probe_host="${entry%%|*}"
+      local probe_url="${entry##*|}"
       if ! sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
-           "curl -fsS --max-time 10 -o /dev/null '$probe_url'"; then
-        http_ok=false
+           "getent ahosts $probe_host >/dev/null 2>&1"; then
+        continue
       fi
-    fi
+      dns_ok=true
+      if sshpass -p "$PROXMOX_PASS" ssh $SSH_OPTS root@"$ip" \
+           "curl -fsS --max-time 10 -o /dev/null '$probe_url'"; then
+        https_ok=true
+        working_target="$probe_host"
+        break
+      fi
+    done
 
-    if [ "$dns_ok" = true ] && [ "$http_ok" = true ]; then
-      info "  $ip: ✓ DNS + HTTPS"
+    if [ "$dns_ok" = true ] && [ "$https_ok" = true ]; then
+      info "  $ip: ✓ DNS + HTTPS via ${working_target}"
     elif [ "$dns_ok" = false ]; then
-      error "  $ip: cannot resolve $probe_host"
+      error "  $ip: cannot resolve any of ${probes[@]%%|*}"
       errors=$((errors + 1))
     else
-      error "  $ip: DNS works but HTTPS to $probe_host failed"
+      error "  $ip: DNS works but HTTPS failed against every target tried"
       errors=$((errors + 1))
     fi
   done
@@ -299,6 +315,9 @@ function verifyClusterInternet() {
     info  "  - Default route missing"
     info  "      ssh root@<node> 'ip route' (must show: default via $NETWORK_GATEWAY)"
     info  "  - Outbound HTTPS blocked at firewall/router"
+    info  ""
+    info  "  Or, if you've verified the host has internet but a probed CDN is"
+    info  "  down: SETUP_SKIP_CONNECTIVITY_CHECK=1 ./setup.sh"
     info  ""
     info  "After fixing, re-run setup.sh option 1."
     return 1
