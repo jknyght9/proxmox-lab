@@ -58,7 +58,11 @@ build {
     inline = [
       "echo '[+] Installing GlusterFS'",
       "sudo apt-get install glusterfs-server -y",
-      "sudo systemctl start glusterd",
+      # Do NOT start glusterd here — starting it generates a UUID at
+      # /var/lib/glusterd/glusterd.info which would be baked into the
+      # template and inherited by every clone, breaking peer probe
+      # (all clones present the same identity). Enable only; first
+      # boot of each clone generates its own UUID.
       "sudo systemctl enable glusterd",
       "sudo mkdir -p /gluster/volume1"
     ]
@@ -135,6 +139,20 @@ build {
       "sudo apt-get -y autoremove --purge",
       "sudo apt-get -y clean",
       "sudo apt-get -y autoclean"
+    ]
+  }
+
+  # Defense in depth: even though we don't start glusterd above, wipe
+  # any per-host glusterd identity at template seal so cloned VMs
+  # always boot identity-free. Pairs with terraform/vm-nomad/main.tf
+  # gluster_init, which expects each clone to generate a fresh UUID
+  # the first time glusterd starts.
+  provisioner "shell" {
+    inline = [
+      "echo '[+] Resetting GlusterFS identity for clean clones'",
+      "sudo systemctl stop glusterd 2>/dev/null || true",
+      "sudo rm -rf /var/lib/glusterd/peers /var/lib/glusterd/glusterd.info /var/lib/glusterd/vols /var/lib/glusterd/snaps",
+      "sudo mkdir -p /var/lib/glusterd/peers"
     ]
   }
 
