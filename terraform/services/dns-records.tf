@@ -158,26 +158,9 @@ resource "null_resource" "nomad_dns_config" {
 }
 
 # --- Update Proxmox nodes to use Pi-hole DNS ---
-
-resource "null_resource" "proxmox_dns_config" {
-  for_each   = var.deploy_dns_records ? var.proxmox_node_ips : {}
-  depends_on = [null_resource.pihole_dns_records]
-
-  triggers = {
-    dns_server = local.dns_target_ip
-  }
-
-  connection {
-    type        = "ssh"
-    host        = each.value
-    user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "pvesh set /nodes/${each.key}/dns -dns1 ${local.dns_target_ip} -search ${var.dns_postfix}",
-      "echo '[+] DNS set to ${local.dns_target_ip} on ${each.key}'",
-    ]
-  }
-}
+# Moved out of the Layer 2 apply: switching the Proxmox host's DNS to
+# the lab Pi-hole is the LAST step of a deploy (everything else still
+# uses the bootstrap-time external DNS). Handled by the bash helpers
+# setProxmoxDNSToLab / revertProxmoxDNSToBootstrap in setup.sh, with
+# menu options d12/d13. This way a half-broken deploy never leaves
+# Proxmox unable to resolve archive.ubuntu.com on the next bootstrap.

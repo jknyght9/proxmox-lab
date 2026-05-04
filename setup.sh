@@ -163,6 +163,62 @@ function getNomad01IP() {
   echo "$ip"
 }
 
+# Switch every Proxmox node's primary DNS to the lab Pi-hole.
+# Source of truth for the target IP is dns_primary_ipv4 in
+# terraform/terraform.tfvars (BASE.4 by convention) — falls back to
+# the deployed dns_main_nodes[0].
+#
+# This is the LAST step of a successful deploy. Done as the final
+# action so a half-broken deploy never leaves Proxmox unable to
+# resolve archive.ubuntu.com on the next bootstrap.
+function setProxmoxDNSToLab() {
+  ensureClusterContext || return 1
+  local pihole_ip
+  pihole_ip=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null | head -1)
+  if [ -z "$pihole_ip" ]; then
+    error "Cannot determine Pi-hole DNS IP from terraform.tfvars"
+    return 1
+  fi
+  local search_domain
+  search_domain=$(yamlGet dns_suffix 2>/dev/null || jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+
+  doing "Switching Proxmox host DNS → ${pihole_ip} (lab Pi-hole)..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  ${node} (${ip}): dns1=${pihole_ip} search=${search_domain}"
+    sshRun "$REMOTE_USER" "$ip" \
+      "pvesh set /nodes/${node}/dns -dns1 ${pihole_ip} -search ${search_domain}" 2>/dev/null \
+      || warn "    failed on ${node}"
+  done
+  success "Proxmox DNS pointed at lab Pi-hole"
+}
+
+# Reverse of setProxmoxDNSToLab — used when tearing down or
+# diagnosing. Sets DNS back to the bootstrap.yml network.dns value
+# (which falls back to network.gateway).
+function revertProxmoxDNSToBootstrap() {
+  ensureClusterContext || return 1
+  _bootstrap_init_vars 2>/dev/null || true
+  readBootstrapConfig || return 1
+  local target="${NETWORK_DNS:-$NETWORK_GATEWAY}"
+  if [ -z "$target" ]; then
+    error "bootstrap.yml has neither network.dns nor network.gateway"
+    return 1
+  fi
+
+  doing "Reverting Proxmox host DNS → ${target} (from bootstrap.yml)..."
+  for i in "${!CLUSTER_NODES[@]}"; do
+    local node="${CLUSTER_NODES[$i]}"
+    local ip="${CLUSTER_NODE_IPS[$i]}"
+    info "  ${node} (${ip}): dns1=${target}"
+    sshRun "$REMOTE_USER" "$ip" \
+      "pvesh set /nodes/${node}/dns -dns1 ${target}" 2>/dev/null \
+      || warn "    failed on ${node}"
+  done
+  success "Proxmox DNS reverted to ${target}"
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -776,6 +832,12 @@ EOF
     fi
   fi
 
+  # ABSOLUTE LAST STEP: switch Proxmox host DNS to the lab Pi-hole.
+  # If anything earlier fails, we never get here — leaving Proxmox able
+  # to resolve archive.ubuntu.com etc. on the next bootstrap retry.
+  echo
+  setProxmoxDNSToLab || warn "Could not switch Proxmox DNS — fix manually with menu d12"
+
   echo
   success "Deployment complete!"
   echo
@@ -784,6 +846,8 @@ EOF
   info "  Traefik:   http://${NOMAD01_IP}:8081"
   info "  Nomad:     http://${NOMAD01_IP}:4646"
   info "  Authentik: https://${NOMAD01_IP}:9443"
+  echo
+  info "To revert PVE DNS to your bootstrap network DNS (e.g. before purge): ./setup.sh --dev → d13"
   echo
 }
 
@@ -917,6 +981,8 @@ function showMenu() {
     echo "   d9) Deploy Traefik only"
     echo "  d10) Deploy Authentik only"
     echo "  d11) Rebuild DNS records"
+    echo "  d12) Switch PVE DNS → lab Pi-hole (default last-step of deployAll)"
+    echo "  d13) Revert PVE DNS → bootstrap.yml network.dns"
   fi
   echo
 }
@@ -937,7 +1003,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d11]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d13]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -970,7 +1036,9 @@ while true; do
     d8|D8)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault; else error "Invalid option"; fi;;
     d9|D9)   if [ "$DEV_MODE" = true ]; then enableService "traefik";                                      else error "Invalid option"; fi;;
     d10|D10) if [ "$DEV_MODE" = true ]; then enableService "authentik";                                    else error "Invalid option"; fi;;
-    d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync -target=null_resource.proxmox_dns_config; else error "Invalid option"; fi;;
+    d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync; else error "Invalid option"; fi;;
+    d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && setProxmoxDNSToLab; else error "Invalid option"; fi;;
+    d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
