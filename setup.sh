@@ -801,23 +801,62 @@ EOF
   doing "Enabling Vault TLS (Layer 1 full apply)..."
   tf apply -auto-approve -var "nomad_address=http://${NOMAD01_IP}:4646"
 
-  # Vault seals on TLS redeploy — wait for it to come up, then unseal
+  # Vault seals on TLS redeploy — wait for it to come up, then unseal.
+  # Both phases must succeed for downstream services (Authentik, Samba,
+  # Netbox) to get their WIF tokens; if Vault stays sealed, every job
+  # that has `vault {}` in its template fails to allocate with
+  # "Vault is sealed" 503s.
   doing "Waiting for Vault to restart with TLS..."
+  local vault_up=false
   sleep 5
-  for i in {1..30}; do
-    if curl -sk --connect-timeout 2 "https://${NOMAD01_IP}:8200/v1/sys/health?uninitcode=200&sealedcode=200" >/dev/null 2>&1; then
+  for i in {1..60}; do
+    if curl -sk --connect-timeout 2 --max-time 5 \
+         "https://${NOMAD01_IP}:8200/v1/sys/seal-status" >/dev/null 2>&1; then
+      vault_up=true
       break
     fi
     sleep 2
   done
+  if [ "$vault_up" != true ]; then
+    error "Vault never came back up on https://${NOMAD01_IP}:8200 after TLS redeploy"
+    info  "  Check: ssh labadmin@${NOMAD01_IP} 'nomad job status vault; nomad alloc logs -job vault | tail -30'"
+    return 1
+  fi
 
-  # Unseal and update address to HTTPS
+  # Unseal — verify it actually worked. The original code fired curl into
+  # /dev/null and trusted it; if Vault was still loading data, the call
+  # silently 503'd and Vault stayed sealed. Now we poll seal-status.
   local UNSEAL_KEY
   UNSEAL_KEY=$(jq -r '.unseal_key' "$VAULT_CREDENTIALS_FILE")
+  if [ -z "$UNSEAL_KEY" ] || [ "$UNSEAL_KEY" = "null" ]; then
+    error "Unseal key missing from $VAULT_CREDENTIALS_FILE"
+    return 1
+  fi
+
   doing "Unsealing Vault (TLS)..."
-  curl -sk -X PUT "https://${NOMAD01_IP}:8200/v1/sys/unseal" \
-    -H "Content-Type: application/json" \
-    -d "{\"key\": \"$UNSEAL_KEY\"}" > /dev/null
+  local unsealed=false
+  for attempt in 1 2 3 4 5; do
+    curl -sk --max-time 10 -X PUT "https://${NOMAD01_IP}:8200/v1/sys/unseal" \
+      -H "Content-Type: application/json" \
+      -d "{\"key\": \"$UNSEAL_KEY\"}" >/dev/null 2>&1
+    sleep 2
+    local sealed
+    sealed=$(curl -sk --max-time 5 "https://${NOMAD01_IP}:8200/v1/sys/seal-status" 2>/dev/null \
+              | jq -r '.sealed // true')
+    if [ "$sealed" = "false" ]; then
+      unsealed=true
+      break
+    fi
+    warn "  Vault still sealed after attempt ${attempt}/5 — retrying..."
+    sleep 3
+  done
+  if [ "$unsealed" != true ]; then
+    error "Failed to unseal Vault after 5 attempts"
+    info  "  Manual: curl -sk -X PUT https://${NOMAD01_IP}:8200/v1/sys/unseal \\"
+    info  "                -H 'Content-Type: application/json' \\"
+    info  "                -d '{\"key\":\"<unseal-key-from-crypto/vault-credentials.json>\"}'"
+    return 1
+  fi
   success "Vault unsealed on HTTPS"
 
   # Update credentials and Layer 2 tfvars with HTTPS address
