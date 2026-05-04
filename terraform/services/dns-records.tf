@@ -132,30 +132,13 @@ resource "null_resource" "ad_dns_forwarding" {
 }
 
 # --- Switch Nomad VMs to Pi-hole DNS ---
-
-resource "null_resource" "nomad_dns_config" {
-  for_each   = var.deploy_dns_records ? var.nomad_node_ips : {}
-  depends_on = [null_resource.pihole_dns_records]
-
-  triggers = {
-    dns_server = local.dns_target_ip
-  }
-
-  connection {
-    type        = "ssh"
-    host        = each.value
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo resolvectl dns eth0 ${local.dns_target_ip}",
-      "sudo resolvectl domain eth0 ${var.dns_postfix}",
-      "echo '[+] DNS set to ${local.dns_target_ip} on ${each.key}'",
-    ]
-  }
-}
+# Moved out of the Layer 2 apply: same reason as proxmox_dns_config.
+# Switching Nomad VMs to Pi-hole DNS mid-deploy means subsequent
+# nomad jobs pull docker images through a Pi-hole that may not yet
+# have a working upstream — pulls fail with "server misbehaving" and
+# the deploy implodes. Switching is now the absolute last thing
+# deployAll does, via setNomadVMDNSToLab() in setup.sh. Manual
+# control via dev menu d12 / d13.
 
 # --- Update Proxmox nodes to use Pi-hole DNS ---
 # Moved out of the Layer 2 apply: switching the Proxmox host's DNS to

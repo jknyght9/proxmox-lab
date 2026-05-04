@@ -219,6 +219,77 @@ function revertProxmoxDNSToBootstrap() {
   success "Proxmox DNS reverted to ${target}"
 }
 
+# Helper: list all Nomad VM IPs from the bootstrap-generated tfvars.
+function _nomadVMIPs() {
+  awk '/nomad_vm_configs/,/^}/' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null \
+    | grep -oE '"nomad[0-9]+".*ip = "[^"]+"' \
+    | grep -oE 'ip = "[^"]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'
+}
+
+# Switch every Nomad VM's resolver to the lab Pi-hole. Uses
+# `resolvectl dns eth0` which is RUNTIME ONLY — a reboot reverts to
+# the bootstrap-time DNS from cloud-init. That's a feature, not a bug:
+# if a deploy goes sideways and the Pi-hole becomes unreachable, a
+# reboot of the affected VM gets you back to a working resolver.
+#
+# Also restarts Docker so its DNS cache picks up the new resolver
+# (Docker reads /etc/resolv.conf at daemon start; without a restart,
+# new container pulls keep using the stale upstream).
+#
+# This is the LAST mid-deploy step before setProxmoxDNSToLab. Same
+# rationale: never switch Nomad VMs to Pi-hole until every nomad_job
+# that pulls images has succeeded.
+function setNomadVMDNSToLab() {
+  local pihole_ip
+  pihole_ip=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null | head -1)
+  if [ -z "$pihole_ip" ]; then
+    error "Cannot determine Pi-hole DNS IP from terraform.tfvars"
+    return 1
+  fi
+  local search_domain
+  search_domain=$(yamlGet dns_suffix 2>/dev/null || jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  local key="$SCRIPT_DIR/crypto/labadmin"
+
+  doing "Switching Nomad VM DNS → ${pihole_ip} (lab Pi-hole)..."
+  for ip in $(_nomadVMIPs); do
+    info "  ${ip}: dns=${pihole_ip} domain=${search_domain}"
+    ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=5 labadmin@"$ip" "
+      sudo resolvectl dns eth0 ${pihole_ip}
+      sudo resolvectl domain eth0 ${search_domain}
+      sudo resolvectl flush-caches
+      sudo systemctl restart docker
+    " 2>/dev/null || warn "    failed on ${ip}"
+  done
+  success "Nomad VM DNS pointed at lab Pi-hole"
+}
+
+# Reverse of setNomadVMDNSToLab. Resets to network.dns from
+# bootstrap.yml (or network.gateway).
+function revertNomadVMDNSToBootstrap() {
+  _bootstrap_init_vars 2>/dev/null || true
+  readBootstrapConfig || return 1
+  local target="${NETWORK_DNS:-$NETWORK_GATEWAY}"
+  if [ -z "$target" ]; then
+    error "bootstrap.yml has neither network.dns nor network.gateway"
+    return 1
+  fi
+  local key="$SCRIPT_DIR/crypto/labadmin"
+
+  doing "Reverting Nomad VM DNS → ${target} (from bootstrap.yml)..."
+  for ip in $(_nomadVMIPs); do
+    info "  ${ip}: dns=${target}"
+    ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=5 labadmin@"$ip" "
+      sudo resolvectl dns eth0 ${target}
+      sudo resolvectl domain eth0 ''
+      sudo resolvectl flush-caches
+      sudo systemctl restart docker
+    " 2>/dev/null || warn "    failed on ${ip}"
+  done
+  success "Nomad VM DNS reverted to ${target}"
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -832,11 +903,13 @@ EOF
     fi
   fi
 
-  # ABSOLUTE LAST STEP: switch Proxmox host DNS to the lab Pi-hole.
-  # If anything earlier fails, we never get here — leaving Proxmox able
-  # to resolve archive.ubuntu.com etc. on the next bootstrap retry.
+  # ABSOLUTE LAST STEPS: switch DNS over to the lab Pi-hole.
+  # Order: Nomad VMs first, then Proxmox hosts. If anything earlier
+  # fails, we never get here — leaving everything still able to
+  # resolve archive.ubuntu.com / docker.io on the next retry.
   echo
-  setProxmoxDNSToLab || warn "Could not switch Proxmox DNS — fix manually with menu d12"
+  setNomadVMDNSToLab  || warn "Could not switch Nomad VM DNS — fix manually with menu d12"
+  setProxmoxDNSToLab  || warn "Could not switch Proxmox DNS — fix manually with menu d12"
 
   echo
   success "Deployment complete!"
@@ -981,8 +1054,8 @@ function showMenu() {
     echo "   d9) Deploy Traefik only"
     echo "  d10) Deploy Authentik only"
     echo "  d11) Rebuild DNS records"
-    echo "  d12) Switch PVE DNS → lab Pi-hole (default last-step of deployAll)"
-    echo "  d13) Revert PVE DNS → bootstrap.yml network.dns"
+    echo "  d12) Switch ALL DNS → lab Pi-hole (Nomad VMs + PVE hosts; default last-step of deployAll)"
+    echo "  d13) Revert ALL DNS → bootstrap.yml network.dns (Nomad VMs + PVE hosts)"
   fi
   echo
 }
@@ -1037,8 +1110,8 @@ while true; do
     d9|D9)   if [ "$DEV_MODE" = true ]; then enableService "traefik";                                      else error "Invalid option"; fi;;
     d10|D10) if [ "$DEV_MODE" = true ]; then enableService "authentik";                                    else error "Invalid option"; fi;;
     d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync; else error "Invalid option"; fi;;
-    d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && setProxmoxDNSToLab; else error "Invalid option"; fi;;
-    d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
+    d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && setNomadVMDNSToLab && setProxmoxDNSToLab; else error "Invalid option"; fi;;
+    d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && revertNomadVMDNSToBootstrap && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
