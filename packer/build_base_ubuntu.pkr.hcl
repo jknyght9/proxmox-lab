@@ -65,6 +65,18 @@ build {
 # Enable password auth so Packer can SSH before pubkey is fully provisioned
 # (guest agent starts before cloud-init finishes writing authorized_keys)
 ssh_pwauth: true
+
+# Force HTTPS on archive/security mirrors before any package install.
+# Some lab networks (e.g. iotvf) block outbound HTTP/80 — apt would
+# otherwise time out and the qemu-guest-agent install below fails.
+apt:
+  primary:
+    - arches: [default]
+      uri: https://archive.ubuntu.com/ubuntu
+  security:
+    - arches: [default]
+      uri: https://security.ubuntu.com/ubuntu
+
 packages:
   - qemu-guest-agent
 runcmd:
