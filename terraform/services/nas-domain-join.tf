@@ -63,6 +63,23 @@ resource "null_resource" "nas_domain_join" {
       AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
       DNS_IP="${var.dns_server_ip}"
 
+      # Wait for Vault to be unsealed before reading domain-join creds.
+      # See authentik-apps.tf for the same pattern + reasoning.
+      echo '[+] Waiting for Vault to be unsealed at ${var.vault_address}...'
+      for i in $(seq 1 60); do
+        vault_sealed=$(curl -sk --max-time 3 "${var.vault_address}/v1/sys/seal-status" 2>/dev/null \
+          | jq -r '.sealed' 2>/dev/null)
+        if [ "$vault_sealed" = "false" ]; then
+          echo '    Vault unsealed and ready'
+          break
+        fi
+        if [ "$i" = "60" ]; then
+          echo '[!] Vault still sealed (or unreachable) after 2 minutes — proceeding anyway'
+          break
+        fi
+        sleep 2
+      done
+
       # Get domain-join credentials from Vault
       DOMAIN_JOIN_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" \
         "${var.vault_address}/v1/secret/data/samba-ad/service-accounts" \

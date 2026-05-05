@@ -35,6 +35,27 @@ resource "null_resource" "authentik_apps" {
       API="https://${local.nomad01_ip}:9443/api/v3"
       TOKEN="${var.authentik_api_token}"
 
+      # Wait for Vault to be unsealed before any vault_address calls
+      # (OIDC client_secret writes for Vault and Netbox land in Vault
+      # near the end of this script). Mirrors the wait-for-gluster
+      # pattern in Nomad jobs — bash provisioners have no built-in
+      # retry budget, so a 503-sealed response from a freshly-restarted
+      # Vault would crash `set -e` mid-script with a confusing error.
+      echo '[+] Waiting for Vault to be unsealed at ${var.vault_address}...'
+      for i in $(seq 1 60); do
+        vault_sealed=$(curl -sk --max-time 3 "${var.vault_address}/v1/sys/seal-status" 2>/dev/null \
+          | jq -r '.sealed' 2>/dev/null)
+        if [ "$vault_sealed" = "false" ]; then
+          echo '    Vault unsealed and ready'
+          break
+        fi
+        if [ "$i" = "60" ]; then
+          echo '[!] Vault still sealed (or unreachable) after 2 minutes — proceeding anyway'
+          break
+        fi
+        sleep 2
+      done
+
       # Self-heal: Authentik's "authentik-bootstrap-token" row in postgres
       # only honours AUTHENTIK_BOOTSTRAP_TOKEN on first DB init. If a later
       # deploy regenerates random_password.authentik_api_token (state wipe,
