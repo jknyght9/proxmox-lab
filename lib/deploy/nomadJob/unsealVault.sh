@@ -40,8 +40,12 @@ function unsealVault() {
     return 1
   fi
 
+  # jq's `//` coalesces null OR false, so `.sealed // true` returns
+  # "true" even when Vault is unsealed. Read raw and treat empty as
+  # still-sealed.
   local IS_SEALED
-  IS_SEALED=$(echo "$HEALTH_RESPONSE" | jq -r '.sealed // true')
+  IS_SEALED=$(echo "$HEALTH_RESPONSE" | jq -r '.sealed' 2>/dev/null)
+  [ -z "$IS_SEALED" ] || [ "$IS_SEALED" = "null" ] && IS_SEALED="true"
 
   if [ "$IS_SEALED" = "false" ]; then
     success "Vault is already unsealed"
@@ -97,8 +101,10 @@ function isVaultSealed() {
     return 1
   fi
 
+  # See note above: read raw, don't coalesce false to true.
   local IS_SEALED
-  IS_SEALED=$(echo "$HEALTH_RESPONSE" | jq -r '.sealed // true')
+  IS_SEALED=$(echo "$HEALTH_RESPONSE" | jq -r '.sealed' 2>/dev/null)
+  [ -z "$IS_SEALED" ] || [ "$IS_SEALED" = "null" ] && IS_SEALED="true"
 
   [ "$IS_SEALED" = "true" ]
 }

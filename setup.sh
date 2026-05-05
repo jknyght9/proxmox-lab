@@ -847,9 +847,14 @@ EOF
       -H "Content-Type: application/json" \
       -d "{\"key\": \"$UNSEAL_KEY\"}" >/dev/null 2>&1
     sleep 2
+    # jq's `//` operator coalesces null OR false to the right side, so
+    # `.sealed // true` returned "true" even when Vault was unsealed
+    # (.sealed == false). Read the raw value and treat empty (failed
+    # curl) as still-sealed explicitly.
     local sealed
     sealed=$(curl -sk --max-time 5 "https://${NOMAD01_IP}:8200/v1/sys/seal-status" 2>/dev/null \
-              | jq -r '.sealed // true')
+              | jq -r '.sealed' 2>/dev/null)
+    [ -z "$sealed" ] || [ "$sealed" = "null" ] && sealed="true"
     if [ "$sealed" = "false" ]; then
       unsealed=true
       break

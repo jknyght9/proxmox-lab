@@ -358,9 +358,12 @@ EOF
       return $?
     fi
 
-    # Normal path: credentials file exists, unseal with saved key
+    # Normal path: credentials file exists, unseal with saved key.
+    # Read .sealed directly — `// true` would coalesce a real false
+    # (Vault unsealed) to "true" because jq's `//` is null-OR-false.
     local IS_SEALED
-    IS_SEALED=$(echo "$VAULT_STATUS" | jq -r '.sealed // true')
+    IS_SEALED=$(echo "$VAULT_STATUS" | jq -r '.sealed' 2>/dev/null)
+    [ -z "$IS_SEALED" ] || [ "$IS_SEALED" = "null" ] && IS_SEALED="true"
 
     if [ "$IS_SEALED" = "true" ]; then
       doing "Vault is sealed, unsealing with saved key..."
