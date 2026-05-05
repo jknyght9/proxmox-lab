@@ -121,8 +121,14 @@ resource "null_resource" "direct_provision" {
   depends_on = [proxmox_virtual_environment_container.dns, null_resource.enable_privileged]
 
   triggers = {
-    vmid       = proxmox_virtual_environment_container.dns[each.key].vm_id
-    privileged = var.enable_ha_vip ? null_resource.enable_privileged[each.key].id : "unprivileged"
+    # container_id captures the bpg/proxmox resource identity, which
+    # changes whenever the LXC is destroyed and recreated. Without
+    # this, a recreate keeps the same vm_id (it's an input, not an
+    # output) and Pi-hole install is silently skipped on the fresh
+    # container, leaving the LXC with no pihole-FTL.
+    container_id = proxmox_virtual_environment_container.dns[each.key].id
+    vmid         = proxmox_virtual_environment_container.dns[each.key].vm_id
+    privileged   = var.enable_ha_vip ? null_resource.enable_privileged[each.key].id : "unprivileged"
   }
 
   connection {
