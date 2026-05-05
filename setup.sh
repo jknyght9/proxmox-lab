@@ -859,6 +859,15 @@ EOF
   done
   if [ "$unsealed" != true ]; then
     error "Failed to unseal Vault after ${max_attempts} attempts"
+    # One diagnostic retry — surface the actual response so we can tell
+    # whether Vault is rejecting the key vs throwing 503 vs a TLS issue.
+    info  "  Diagnostic POST response:"
+    curl -sk --max-time 10 -w '\n  HTTP %{http_code}\n' -X PUT \
+      "https://${NOMAD01_IP}:8200/v1/sys/unseal" \
+      -H "Content-Type: application/json" \
+      -d "{\"key\": \"$UNSEAL_KEY\"}" 2>&1 | sed 's/^/    /'
+    info  "  Current seal-status:"
+    curl -sk --max-time 5 "https://${NOMAD01_IP}:8200/v1/sys/seal-status" 2>&1 | sed 's/^/    /'
     info  "  Manual: curl -sk -X PUT https://${NOMAD01_IP}:8200/v1/sys/unseal \\"
     info  "                -H 'Content-Type: application/json' \\"
     info  "                -d '{\"key\":\"<unseal-key-from-crypto/vault-credentials.json>\"}'"
