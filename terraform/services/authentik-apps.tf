@@ -35,6 +35,37 @@ resource "null_resource" "authentik_apps" {
       API="https://${local.nomad01_ip}:9443/api/v3"
       TOKEN="${var.authentik_api_token}"
 
+      # Self-heal: Authentik's "authentik-bootstrap-token" row in postgres
+      # only honours AUTHENTIK_BOOTSTRAP_TOKEN on first DB init. If a later
+      # deploy regenerates random_password.authentik_api_token (state wipe,
+      # Vault re-init, manual rotation), Vault holds the new value but the
+      # Authentik DB still has the old one — every subsequent API call
+      # returns 403, jq trips on null .results, the script exits 5.
+      # Sync the DB row to match Vault before any API call so the deploy
+      # is idempotent across re-runs.
+      echo '[+] Verifying Authentik bootstrap token matches Vault...'
+      ALLOC_ID=$(nomad job status authentik 2>/dev/null | awk '/run +running/ {print $1; exit}')
+      if [ -z "$ALLOC_ID" ]; then
+        echo "    [!] No running authentik alloc — skipping self-heal (API calls below will fail loudly if drift exists)"
+      else
+        DB_TOKEN=$(nomad alloc exec -task postgres "$ALLOC_ID" \
+          psql -U authentik -d authentik -t -A -c \
+          "SELECT key FROM authentik_core_token WHERE identifier='authentik-bootstrap-token';" \
+          2>/dev/null | tr -d '[:space:]')
+        if [ -z "$DB_TOKEN" ]; then
+          echo "    [!] Could not read bootstrap token from postgres yet — Authentik may still be migrating; skipping self-heal"
+        elif [ "$DB_TOKEN" = "$TOKEN" ]; then
+          echo "    Token already matches Vault"
+        else
+          echo "    Drift detected — UPDATEing Authentik DB to match Vault"
+          nomad alloc exec -task postgres "$ALLOC_ID" \
+            psql -U authentik -d authentik -c \
+            "UPDATE authentik_core_token SET key='$TOKEN' WHERE identifier='authentik-bootstrap-token';" \
+            > /dev/null
+          echo "    Token synced"
+        fi
+      fi
+
       echo '[+] Configuring Authentik applications via API...'
 
       # Helper: create or get resource by name/slug
