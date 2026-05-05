@@ -834,8 +834,15 @@ EOF
   fi
 
   doing "Unsealing Vault (TLS)..."
+  # 12 attempts × ~5s = ~60s budget. iotvf.lab's Vault alloc takes
+  # longer to settle after the TLS redeploy than jdclabs', and 5
+  # attempts (25s) was bailing out before the listener was ready
+  # to accept the unseal POST. Polling seal-status proves whether
+  # we actually unsealed regardless of POST status, so a generous
+  # budget is cheap.
   local unsealed=false
-  for attempt in 1 2 3 4 5; do
+  local max_attempts=12
+  for attempt in $(seq 1 $max_attempts); do
     curl -sk --max-time 10 -X PUT "https://${NOMAD01_IP}:8200/v1/sys/unseal" \
       -H "Content-Type: application/json" \
       -d "{\"key\": \"$UNSEAL_KEY\"}" >/dev/null 2>&1
@@ -847,11 +854,11 @@ EOF
       unsealed=true
       break
     fi
-    warn "  Vault still sealed after attempt ${attempt}/5 — retrying..."
+    warn "  Vault still sealed after attempt ${attempt}/${max_attempts} — retrying..."
     sleep 3
   done
   if [ "$unsealed" != true ]; then
-    error "Failed to unseal Vault after 5 attempts"
+    error "Failed to unseal Vault after ${max_attempts} attempts"
     info  "  Manual: curl -sk -X PUT https://${NOMAD01_IP}:8200/v1/sys/unseal \\"
     info  "                -H 'Content-Type: application/json' \\"
     info  "                -d '{\"key\":\"<unseal-key-from-crypto/vault-credentials.json>\"}'"
