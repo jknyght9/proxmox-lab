@@ -32,9 +32,11 @@ services:
       - ./packer:/packer:z # where your packer configs are stored
       - ./packer/.config:/root/.config:z
       - ./crypto:/crypto:ro # for SSH keys if needed
+      - ./logs:/logs:z
       - /var/run/docker.sock:/var/run/docker.sock # if using Docker builds
     environment:
       PACKER_LOG: "1"
+      PACKER_LOG_PATH: /logs/packer.log
     stdin_open: true
     tty: true
   # NOTE: step-ca removed — CA is now provided by Vault PKI secrets engine
