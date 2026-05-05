@@ -326,7 +326,13 @@ resource "null_resource" "gluster_init" {
 
       # Peer probe all other nodes
       [for ip in local.peer_ips : "sudo gluster peer probe ${ip}"],
-      "sleep 3",
+
+      # Wait for every probed peer to reach 'Peer in Cluster' state
+      # before attempting volume create. Without this, a probe can
+      # return ACC while peers are still 'Accepted peer request',
+      # and `gluster volume create` fails with "Host X is not in
+      # 'Peer in Cluster' state".
+      "for i in $(seq 1 30); do not_ready=$(sudo gluster peer status | grep -c 'Accepted peer request' || true); [ \"$not_ready\" = \"0\" ] && break; echo \"  peers not ready yet (attempt $i/30)\"; sleep 2; done",
       "sudo gluster pool list",
 
       # Create replicated volume (skip if already exists)

@@ -735,7 +735,10 @@ EOF
   DNS_POSTFIX=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
 
   initAndUnsealVault "$NOMAD01_IP"
-  success "Phase 3 complete: Vault initialized"
+  # HA: peers (nomad02/03) come up sealed. Unseal them so they can
+  # join the Raft cluster as voters.
+  unsealAllVaults http || warn "Some Vault peers still sealed — see above"
+  success "Phase 3 complete: Vault initialized + Raft peers unsealed"
 
   # ============================================
   # PHASE 4: Configure Services (Layer 2)
@@ -879,6 +882,11 @@ EOF
     return 1
   fi
   success "Vault unsealed on HTTPS"
+
+  # HA: TLS rollover restarted every Vault container, so all 3 peers
+  # are sealed. Unseal each so the Raft cluster comes back to a
+  # healthy quorum.
+  unsealAllVaults https || warn "Some Vault peers still sealed — see above"
 
   # Update credentials and Layer 2 tfvars with HTTPS address
   local tmp; tmp=$(mktemp)

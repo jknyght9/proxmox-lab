@@ -109,6 +109,102 @@ function isVaultSealed() {
   [ "$IS_SEALED" = "true" ]
 }
 
+# Walk every Vault instance in the Raft cluster and unseal each.
+# Idempotent — already-unsealed instances return 200 with no change.
+# Used after first init (the leader is unsealed but peers come up sealed)
+# and after a TLS rollover (all 3 reseal on container restart).
+#
+# Arguments: $1 = protocol (http or https — defaults to https)
+# Reads vault IPs from terraform.tfvars nomad_vm_configs.
+function unsealAllVaults() {
+  local proto="${1:-https}"
+  if [ ! -f "$VAULT_CREDENTIALS_FILE" ]; then
+    error "Cannot unseal cluster — credentials file missing"
+    return 1
+  fi
+  local UNSEAL_KEY
+  UNSEAL_KEY=$(jq -r '.unseal_key // empty' "$VAULT_CREDENTIALS_FILE")
+  if [ -z "$UNSEAL_KEY" ]; then
+    error "unseal_key missing from $VAULT_CREDENTIALS_FILE"
+    return 1
+  fi
+
+  # Pull Nomad VM IPs from Layer 1 tfvars (where bootstrap wrote them)
+  local vault_ips
+  vault_ips=$(awk '/nomad_vm_configs/,/^}/' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null \
+    | grep -oE '"nomad[0-9]+".*ip = "[^"]+"' \
+    | grep -oE 'ip = "[^"]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+  if [ -z "$vault_ips" ]; then
+    error "Could not parse nomad_vm_configs from terraform.tfvars"
+    return 1
+  fi
+
+  doing "Unsealing all Vault instances (Raft cluster)..."
+  local all_ok=true
+  for ip in $vault_ips; do
+    local addr="${proto}://${ip}:8200"
+    # Wait briefly for this instance to be reachable
+    local reachable=false
+    for i in {1..30}; do
+      if curl -sk --connect-timeout 2 --max-time 3 \
+           "${addr}/v1/sys/seal-status" >/dev/null 2>&1; then
+        reachable=true
+        break
+      fi
+      sleep 2
+    done
+    if [ "$reachable" != true ]; then
+      warn "  ${ip}: not reachable, skipping"
+      all_ok=false
+      continue
+    fi
+
+    # Already unsealed?
+    # NOTE: read .sealed raw — `// true` would coalesce a real `false`
+    # (Vault unsealed) to "true" because jq's `//` is null-OR-false.
+    # See unsealVault.sh:43 above for the same pattern explained.
+    local sealed
+    sealed=$(curl -sk --max-time 5 "${addr}/v1/sys/seal-status" 2>/dev/null \
+              | jq -r '.sealed' 2>/dev/null)
+    [ -z "$sealed" ] || [ "$sealed" = "null" ] && sealed="true"
+    if [ "$sealed" = "false" ]; then
+      info "  ${ip}: already unsealed"
+      continue
+    fi
+
+    # POST unseal, retry up to 3 times
+    local opened=false
+    for attempt in 1 2 3; do
+      curl -sk --max-time 10 -X PUT "${addr}/v1/sys/unseal" \
+        -H "Content-Type: application/json" \
+        -d "{\"key\": \"$UNSEAL_KEY\"}" >/dev/null 2>&1
+      sleep 2
+      sealed=$(curl -sk --max-time 5 "${addr}/v1/sys/seal-status" 2>/dev/null \
+                | jq -r '.sealed' 2>/dev/null)
+      [ -z "$sealed" ] || [ "$sealed" = "null" ] && sealed="true"
+      if [ "$sealed" = "false" ]; then
+        opened=true
+        break
+      fi
+      sleep 3
+    done
+    if [ "$opened" = true ]; then
+      info "  ${ip}: ✓ unsealed"
+    else
+      error "  ${ip}: failed to unseal after 3 attempts"
+      all_ok=false
+    fi
+  done
+
+  if [ "$all_ok" = true ]; then
+    success "All Vault instances unsealed"
+    return 0
+  else
+    warn "Some Vault instances are still sealed — see above"
+    return 1
+  fi
+}
+
 # Get Vault address from credentials file
 function getVaultAddress() {
   if [ -f "$VAULT_CREDENTIALS_FILE" ]; then

@@ -3,12 +3,22 @@
 # Replaces: configureNomadVaultIntegration.sh
 # =============================================================================
 
+locals {
+  # HA-aware Vault address for Nomad's WIF integration.
+  # `https://vault.<dns_postfix>` resolves to Traefik via Pi-hole, which
+  # load-balances across all 3 healthy Vault peers. Standby peers
+  # forward writes to the leader; reads on standby are served directly.
+  # If any single Vault dies, Traefik routes to a survivor — Nomad
+  # workloads keep getting tokens with no manual intervention.
+  vault_addr_for_nomad = "https://vault.${var.dns_postfix}"
+}
+
 resource "null_resource" "nomad_vault_config" {
   for_each   = var.nomad_node_ips
   depends_on = [vault_jwt_auth_backend.nomad]
 
   triggers = {
-    vault_address = var.vault_address
+    vault_address = local.vault_addr_for_nomad
     root_ca       = vault_pki_secret_backend_root_cert.root.issuing_ca
   }
 
@@ -26,7 +36,7 @@ resource "null_resource" "nomad_vault_config" {
       sudo tee /etc/nomad.d/vault.hcl > /dev/null <<'VAULTCONF'
 vault {
   enabled = true
-  address = "${var.vault_address}"
+  address = "${local.vault_addr_for_nomad}"
 
   default_identity {
     aud  = ["vault.io"]
@@ -37,7 +47,7 @@ vault {
 }
 VAULTCONF
       sudo systemctl restart nomad
-      echo '[+] Nomad restarted with Vault address: ${var.vault_address}'
+      echo '[+] Nomad restarted with Vault address: ${local.vault_addr_for_nomad}'
       EOT
     ]
   }

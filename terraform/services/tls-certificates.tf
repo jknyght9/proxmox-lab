@@ -11,9 +11,18 @@ resource "vault_pki_secret_backend_cert" "vault_listener" {
   backend     = vault_mount.pki_int.path
   name        = vault_pki_secret_backend_role.acme_certs.name
   common_name = "vault.${var.dns_postfix}"
-  alt_names   = ["nomad01.${var.dns_postfix}", "localhost", "vault"]
-  ip_sans     = [local.nomad01_ip, "127.0.0.1"]
-  ttl         = "8760h" # 1 year
+  # SANs cover every Nomad node where Vault might run. Required for
+  # Raft TLS — the leader presents this cert to peers and they verify
+  # against their own configured server name.
+  alt_names = concat(
+    [for name, _ in var.nomad_node_ips : "${name}.${var.dns_postfix}"],
+    ["localhost", "vault"]
+  )
+  ip_sans = concat(
+    [for _, ip in var.nomad_node_ips : ip],
+    ["127.0.0.1"]
+  )
+  ttl = "8760h" # 1 year
 }
 
 # Write cert + chain to a local temp file, then upload via file provisioner
@@ -29,15 +38,22 @@ resource "local_file" "vault_key_pem" {
 }
 
 resource "null_resource" "install_vault_cert" {
+  # Push the listener cert to every Nomad VM. The cert dir is on
+  # GlusterFS so technically a single push would replicate, but writing
+  # from each node makes the dependency graph explicit and tolerates
+  # any per-node read-after-write FS quirks.
+  for_each = var.nomad_node_ips
+
   depends_on = [local_file.vault_cert_pem, local_file.vault_key_pem]
 
   triggers = {
     cert_serial = vault_pki_secret_backend_cert.vault_listener.serial_number
+    host        = each.value
   }
 
   connection {
     type        = "ssh"
-    host        = local.nomad01_ip
+    host        = each.value
     user        = "labadmin"
     private_key = file(var.ssh_admin_private_key_file)
   }
@@ -63,7 +79,7 @@ resource "null_resource" "install_vault_cert" {
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem",
       "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/key.pem",
       "rm -f /tmp/vault-cert.pem /tmp/vault-key.pem",
-      "echo '[+] Vault listener cert installed (full chain)'",
+      "echo '[+] Vault listener cert installed on ${each.key} (full chain)'",
     ]
   }
 }
