@@ -290,6 +290,53 @@ function revertNomadVMDNSToBootstrap() {
   success "Nomad VM DNS reverted to ${target}"
 }
 
+# Download the internal root CA cert from Vault's unauthenticated PKI
+# endpoint and save it to crypto/. The cert is public material — no
+# auth required, works even if Vault is sealed (the listener doesn't
+# gate this path). Used for installing in browser/system trust stores
+# so https://*.<dns_postfix> stops throwing self-signed warnings.
+function downloadRootCA() {
+  ensureClusterContext 2>/dev/null || true
+  local dns_postfix
+  dns_postfix=$(jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
+  if [ -z "$dns_postfix" ]; then
+    error "dns_postfix not found in cluster-info.json — has the cluster been deployed?"
+    return 1
+  fi
+
+  local url="https://vault.${dns_postfix}/v1/pki/ca/pem"
+  local out="$CRYPTO_DIR/proxmox-lab-root-ca.crt"
+
+  doing "Downloading root CA from $url..."
+  if ! curl -sk --max-time 10 -f "$url" -o "$out"; then
+    rm -f "$out"
+    error "Failed to fetch CA cert"
+    info  "  Possible causes:"
+    info  "    - Vault not yet deployed or unreachable"
+    info  "    - DNS doesn't resolve vault.${dns_postfix} from this host"
+    info  "      (try direct: curl -sk https://<nomad01-ip>:8200/v1/pki/ca/pem)"
+    return 1
+  fi
+
+  if [ ! -s "$out" ] || ! head -1 "$out" | grep -q "BEGIN CERTIFICATE"; then
+    rm -f "$out"
+    error "Downloaded content isn't a PEM cert (Vault returned an error page?)"
+    return 1
+  fi
+
+  success "Saved to: $out"
+  if command -v openssl >/dev/null 2>&1; then
+    info "  Subject:   $(openssl x509 -in "$out" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+    info "  Not After: $(openssl x509 -in "$out" -noout -enddate 2>/dev/null | sed 's/^notAfter=//')"
+  fi
+  echo
+  info "Install on this workstation:"
+  info "  Linux/Fedora:  sudo cp $out /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust"
+  info "  Linux/Debian:  sudo cp $out /usr/local/share/ca-certificates/proxmox-lab-root-ca.crt && sudo update-ca-certificates"
+  info "  macOS:         sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain $out"
+  info "  Windows:       certutil -addstore -f \"ROOT\" $out  (run as Administrator)"
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -1124,6 +1171,7 @@ function showMenu() {
     echo "  d11) Rebuild DNS records"
     echo "  d12) Switch ALL DNS → lab Pi-hole (Nomad VMs + PVE hosts; default last-step of deployAll)"
     echo "  d13) Revert ALL DNS → bootstrap.yml network.dns (Nomad VMs + PVE hosts)"
+    echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
   fi
   echo
 }
@@ -1180,6 +1228,7 @@ while true; do
     d11|D11) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve -target=null_resource.pihole_dns_records -target=null_resource.pihole_nebula_sync; else error "Invalid option"; fi;;
     d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && setNomadVMDNSToLab && setProxmoxDNSToLab; else error "Invalid option"; fi;;
     d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && revertNomadVMDNSToBootstrap && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
+    d14|D14) if [ "$DEV_MODE" = true ]; then downloadRootCA;                                                  else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
