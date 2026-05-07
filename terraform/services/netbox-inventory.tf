@@ -50,14 +50,19 @@ resource "null_resource" "netbox_inventory" {
   provisioner "remote-exec" {
     inline = [
       <<-EOT
-      API="http://127.0.0.1:8080/api"
+      # Netbox is pinned to nomad03 by the template constraint. Reach it
+      # by IP; Pi-hole DNS isn't reachable from this provisioner because
+      # nomad01 (where this SSHes) still uses the gateway DNS until the
+      # final deploy step. 127.0.0.1 was the prior shape — broken since
+      # workload was distributed off nomad01.
+      API="http://${var.nomad_node_ips["nomad03"]}:8080/api"
       TOKEN="${var.netbox_api_token}"
       AUTH="Authorization: Token $TOKEN"
 
       # Wait for Netbox to be healthy (detach=true means Terraform doesn't wait)
       echo '[+] Waiting for Netbox to be ready...'
       for i in $(seq 1 60); do
-        if curl -sf http://127.0.0.1:8080/login/ >/dev/null 2>&1; then
+        if curl -sf --max-time 5 "http://${var.nomad_node_ips["nomad03"]}:8080/login/" >/dev/null 2>&1; then
           echo '[+] Netbox is ready'
           break
         fi
@@ -309,7 +314,8 @@ resource "null_resource" "netbox_proxmox_devices" {
       # No set -e — handle errors gracefully with placeholders
       NODE_NAME="${each.key}"
       NODE_IP="${each.value}"
-      API="http://${local.nomad01_ip}:8080/api"
+      # Netbox is pinned to nomad03 — see netbox.nomad.hcl.tpl constraint.
+      API="http://${var.nomad_node_ips["nomad03"]}:8080/api"
       TOKEN="${var.netbox_api_token}"
       AUTH="Authorization: Token $TOKEN"
 
