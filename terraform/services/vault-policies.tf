@@ -58,3 +58,9 @@ resource "vault_policy" "domain_join" {
   name   = "domain-join"
   policy = file("${path.module}/../../nomad/vault-policies/domain-join.hcl")
 }
+
+resource "vault_policy" "profile_reconciler" {
+  count  = var.deploy_samba_ad && length(local.profile_nases) > 0 ? 1 : 0
+  name   = "profile-reconciler"
+  policy = file("${path.module}/../../nomad/vault-policies/profile-reconciler.hcl")
+}

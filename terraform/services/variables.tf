@@ -338,6 +338,18 @@ variable "netbox_sync_timezone" {
   default = "UTC"
 }
 
+# Periodic profile-folder reconciler (AD users → per-user folders on profile NAS).
+# Default: every 15 minutes. Override in bootstrap.yml as profile_reconciler_cron.
+variable "profile_reconciler_cron" {
+  type    = string
+  default = "*/15 * * * *"
+}
+
+variable "profile_reconciler_timezone" {
+  type    = string
+  default = "UTC"
+}
+
 # =============================================================================
 # NAS Servers (AD domain join via API)
 # =============================================================================

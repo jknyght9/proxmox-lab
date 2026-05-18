@@ -4,7 +4,7 @@
 # =============================================================================
 
 resource "nomad_job" "traefik" {
-  count      = var.deploy_traefik ? 1 : 0
+  count = var.deploy_traefik ? 1 : 0
   depends_on = [
     null_resource.service_directories,
     null_resource.install_traefik_cert,
@@ -19,7 +19,7 @@ resource "nomad_job" "traefik" {
 }
 
 resource "nomad_job" "authentik" {
-  count      = var.deploy_authentik ? 1 : 0
+  count = var.deploy_authentik ? 1 : 0
   depends_on = [
     null_resource.service_directories,
     vault_policy.authentik,
@@ -43,7 +43,7 @@ resource "nomad_job" "authentik" {
 }
 
 resource "nomad_job" "samba_ad" {
-  count      = var.deploy_samba_ad ? 1 : 0
+  count = var.deploy_samba_ad ? 1 : 0
   depends_on = [
     null_resource.samba_directories,
     vault_policy.samba_ad,
@@ -68,7 +68,7 @@ resource "nomad_job" "samba_ad" {
 }
 
 resource "nomad_job" "uptime_kuma" {
-  count      = var.deploy_uptime_kuma ? 1 : 0
+  count = var.deploy_uptime_kuma ? 1 : 0
   depends_on = [
     null_resource.service_directories,
     null_resource.nomad_vault_config,
@@ -81,7 +81,7 @@ resource "nomad_job" "uptime_kuma" {
 }
 
 resource "nomad_job" "lam" {
-  count      = var.deploy_lam ? 1 : 0
+  count = var.deploy_lam ? 1 : 0
   depends_on = [
     vault_policy.lam,
     vault_jwt_auth_backend_role.lam,
@@ -97,7 +97,7 @@ resource "nomad_job" "lam" {
 }
 
 resource "nomad_job" "backup" {
-  count      = var.deploy_backup ? 1 : 0
+  count = var.deploy_backup ? 1 : 0
   depends_on = [
     vault_policy.backup,
     vault_jwt_auth_backend_role.backup,
@@ -113,7 +113,7 @@ resource "nomad_job" "backup" {
 }
 
 resource "nomad_job" "netbox" {
-  count      = var.deploy_netbox ? 1 : 0
+  count = var.deploy_netbox ? 1 : 0
   depends_on = [
     null_resource.service_directories,
     vault_policy.netbox,
@@ -169,7 +169,7 @@ resource "nomad_job" "netbox_sync" {
 }
 
 resource "nomad_job" "tailscale" {
-  count      = var.deploy_tailscale ? 1 : 0
+  count = var.deploy_tailscale ? 1 : 0
   depends_on = [
     vault_policy.tailscale,
     vault_jwt_auth_backend_role.tailscale,
@@ -178,6 +178,32 @@ resource "nomad_job" "tailscale" {
 
   jobspec = templatefile("${path.module}/templates/tailscale.nomad.hcl.tpl", {
     tailscale_subnet = coalesce(var.tailscale_advertise_routes, var.network_cidr)
+  })
+  detach = false
+}
+
+# Profile-folder reconciler — pre-creates per-user directories + ACLs on
+# every opted-in NAS so AD users can land directly into their roaming
+# profile share (no manual TrueNAS UI work per user). Deploys only when
+# at least one nas_servers entry has provides_profiles=true.
+resource "nomad_job" "profile_reconciler" {
+  count = var.deploy_samba_ad && length(local.profile_nases) > 0 ? 1 : 0
+  depends_on = [
+    vault_policy.profile_reconciler,
+    vault_jwt_auth_backend_role.profile_reconciler,
+    null_resource.nas_profile_share,
+    null_resource.nomad_vault_config,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/profile-reconciler.nomad.hcl.tpl", {
+    cron_schedule = var.profile_reconciler_cron
+    time_zone     = var.profile_reconciler_timezone
+    profile_nases = [for nas in var.nas_servers : {
+      name             = nas.name
+      address          = nas.address
+      profile_dataset  = nas.profile_dataset
+      profile_ad_group = nas.profile_ad_group
+    } if nas.provides_profiles && nas.type == "truenas" && nas.profile_dataset != ""]
   })
   detach = false
 }
