@@ -1336,7 +1336,7 @@ while true; do
     d2|D2)   if [ "$DEV_MODE" = true ]; then docker compose build packer >/dev/null 2>&1 && docker compose run --rm -it packer init . && docker compose run --rm -it packer build -only='ubuntu-docker.*' -only='ubuntu-nomad.*' .; else error "Invalid option"; fi;;
     d3|D3)   if [ "$DEV_MODE" = true ]; then resetProxmoxCredentials;                                      else error "Invalid option"; fi;;
     d4|D4)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve;             else error "Invalid option"; fi;;
-    d5|D5)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf-services apply -auto-approve;    else error "Invalid option"; fi;;
+    d5|D5)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && refreshLayer2Configs && tf-services apply -auto-approve; else error "Invalid option"; fi;;
     d6|D6)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.nomad; else error "Invalid option"; fi;;
     d7|D7)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=module.dns-main; else error "Invalid option"; fi;;
     d8|D8)   if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && tf apply -auto-approve -target=nomad_job.vault && initAndUnsealVault; else error "Invalid option"; fi;;
