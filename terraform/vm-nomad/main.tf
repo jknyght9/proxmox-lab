@@ -476,7 +476,54 @@ resource "null_resource" "nomad_restart" {
   }
 }
 
-# Step 5: Wait for Nomad cluster to form (all servers joined)
+# Step 5a: Point each Nomad VM at the Pi-hole DNS resolver. Cloud-init
+# uses gateway DNS so apt/acme can run on first boot (before Pi-hole
+# exists), but post-deploy we want internal DNS so vault.<domain>,
+# auth.<domain>, etc. resolve — Nomad's Vault fingerprint and JWT login
+# both require it. Gateway is kept as fallback in case Pi-hole is down.
+locals {
+  pihole_netplan_yaml = <<-NETPLAN
+    network:
+      version: 2
+      ethernets:
+        eth0:
+          nameservers:
+            addresses: [${var.dns_primary_ip}, ${var.network_gateway}]
+            search: [${var.dns_postfix}]
+  NETPLAN
+}
+
+resource "null_resource" "nomad_dns_switch" {
+  for_each   = var.dns_primary_ip != "" ? var.vm_configs : {}
+  depends_on = [null_resource.nomad_restart]
+
+  triggers = {
+    yaml = local.pihole_netplan_yaml
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "file" {
+    content     = local.pihole_netplan_yaml
+    destination = "/tmp/99-pihole-dns.yaml"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo install -m 600 -o root -g root /tmp/99-pihole-dns.yaml /etc/netplan/99-pihole-dns.yaml",
+      "rm /tmp/99-pihole-dns.yaml",
+      "sudo netplan apply",
+      "echo '[+] DNS switched to Pi-hole (${var.dns_primary_ip}) on ${each.value.name}'",
+    ]
+  }
+}
+
+# Step 5b: Wait for Nomad cluster to form (all servers joined)
 resource "null_resource" "nomad_cluster_health" {
   depends_on = [null_resource.nomad_restart]
 

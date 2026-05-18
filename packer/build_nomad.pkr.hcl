@@ -94,10 +94,18 @@ build {
   # Sequence Docker and Nomad after the GlusterFS mount so jobs never
   # bind-mount a pre-mount empty local directory on boot. Pairs with the
   # x-systemd.* options written into fstab by deployNomad.sh.
+  #
+  # The glusterd drop-in fixes a cold-boot race: glusterd.service reaches
+  # `active` ~3s before its localhost RPC can answer `gluster volume list`,
+  # so the fstab mount unit (ordered `x-systemd.after=glusterd.service`)
+  # fires too early and fails permanently with no retry. The ExecStartPost
+  # gate blocks systemd from marking glusterd active until volume listing
+  # actually responds, so downstream ordering means what it says.
   provisioner "shell" {
     inline = [
-      "echo '[+] Installing systemd drop-ins: docker/nomad wait for GlusterFS mount'",
-      "sudo mkdir -p /etc/systemd/system/docker.service.d /etc/systemd/system/nomad.service.d",
+      "echo '[+] Installing systemd drop-ins: glusterd readiness + docker/nomad wait for GlusterFS mount'",
+      "sudo mkdir -p /etc/systemd/system/glusterd.service.d /etc/systemd/system/docker.service.d /etc/systemd/system/nomad.service.d",
+      "printf '[Service]\\nExecStartPost=/bin/bash -c \"for i in {1..60}; do gluster volume list >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1\"\\n' | sudo tee /etc/systemd/system/glusterd.service.d/wait-ready.conf > /dev/null",
       "printf '[Unit]\\nRequiresMountsFor=/srv/gluster/nomad-data\\n' | sudo tee /etc/systemd/system/docker.service.d/wait-gluster.conf > /dev/null",
       "printf '[Unit]\\nRequiresMountsFor=/srv/gluster/nomad-data\\n' | sudo tee /etc/systemd/system/nomad.service.d/wait-gluster.conf > /dev/null",
       "sudo systemctl daemon-reload"
