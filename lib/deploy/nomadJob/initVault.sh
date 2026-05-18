@@ -42,7 +42,7 @@ function generateNASServersTfvars() {
   echo "nas_servers = ["
   for i in $(seq 0 $((COUNT - 1))); do
     echo "  {"
-    for key in name type address api_key admin_user admin_password; do
+    for key in name type address api_key admin_user admin_password provides_profiles profile_dataset profile_ad_group; do
       local val
       val=$(yq ".nas_servers[$i].$key // \"\"" "$BOOTSTRAP" 2>/dev/null)
       [ -n "$val" ] && [ "$val" != "null" ] && [ "$val" != '""' ] && echo "    $key = $val"

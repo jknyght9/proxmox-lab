@@ -78,6 +78,10 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 #     address: "192.168.1.50"           # Management IP or FQDN
 #     api_key: ""                       # TrueNAS: API key from UI
 #                                       # Synology: not needed (uses AD join creds)
+#     # --- Roaming-profile fields (optional; omit to skip profile setup on this NAS) ---
+#     # provides_profiles: true         # Opt-in: auto-create dataset, share, ACLs, per-user folders
+#     # profile_dataset: "pool/profiles" # ZFS dataset to create (no /mnt/ prefix). Required if provides_profiles.
+#     # profile_ad_group: "Domain Users" # AD group granted traverse on parent (default: Domain Users)
 #   - name: "synology-01"
 #     type: "synology"
 #     address: "192.168.1.51"

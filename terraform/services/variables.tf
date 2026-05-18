@@ -350,6 +350,11 @@ variable "nas_servers" {
     api_key        = optional(string, "")
     admin_user     = optional(string, "")
     admin_password = optional(string, "")
+    # Roaming-profile fields — opt-in per NAS. If provides_profiles=false (or
+    # omitted), the profile-share + reconciler logic is a no-op for this host.
+    provides_profiles = optional(bool, false)
+    profile_dataset   = optional(string, "")
+    profile_ad_group  = optional(string, "Domain Users")
   }))
   description = "NAS servers to join to the AD domain"
   default     = []
