@@ -42,9 +42,14 @@ function generateNASServersTfvars() {
   echo "nas_servers = ["
   for i in $(seq 0 $((COUNT - 1))); do
     echo "  {"
+    # Use -o=json so strings get JSON-quoted ("foo") and bools/numbers
+    # stay unquoted — both are valid HCL value syntax. Raw yq output
+    # (without -o=json) emits unquoted strings, which breaks HCL parsing
+    # the moment any field contains a space or special char (e.g.,
+    # profile_ad_group = "Domain Users").
     for key in name type address api_key admin_user admin_password provides_profiles profile_dataset profile_ad_group; do
       local val
-      val=$(yq ".nas_servers[$i].$key // \"\"" "$BOOTSTRAP" 2>/dev/null)
+      val=$(yq -o=json -I=0 ".nas_servers[$i].$key // \"\"" "$BOOTSTRAP" 2>/dev/null)
       [ -n "$val" ] && [ "$val" != "null" ] && [ "$val" != '""' ] && echo "    $key = $val"
     done
     echo "  },"
