@@ -85,8 +85,8 @@ API="https://$NAS_ADDR/api/v2.0"
 auth() { curl -sk -H "Authorization: Bearer $NAS_API_KEY" "$@"; }
 
 # Verify share is reachable / dataset exists before doing per-user work
-DS_ENC=$(printf '%%s' "$DATASET" | sed 's|/|%%2F|g')
-DS_CODE=$(auth -o /dev/null -w '%%{http_code}' "$API/pool/dataset/id/$DS_ENC")
+DS_ENC=$(printf '%s' "$DATASET" | sed 's|/|%2F|g')
+DS_CODE=$(auth -o /dev/null -w '%%%%{http_code}' "$API/pool/dataset/id/$DS_ENC")
 if [ "$DS_CODE" != "200" ]; then
   echo "[!] dataset $DATASET missing on ${nas.name} (HTTP $DS_CODE) — skipping; run terraform apply"
   continue 2>/dev/null || true
@@ -101,7 +101,7 @@ echo "$USERS" | while read -r USER; do
   USER_PATH="$MOUNT_PATH/$USER"
 
   STAT_CODE=$(auth -X POST -H "Content-Type: application/json" \
-    -o /dev/null -w '%%{http_code}' \
+    -o /dev/null -w '%%%%{http_code}' \
     "$API/filesystem/stat" -d "$(jq -n --arg p "$USER_PATH" '{path:$p}')")
 
   if [ "$STAT_CODE" = "200" ]; then
