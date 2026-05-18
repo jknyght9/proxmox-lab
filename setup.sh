@@ -427,6 +427,31 @@ function truenasLeaveAD() {
   done
 }
 
+# Force-run the profile-reconciler Nomad job. Useful right after adding a
+# new AD user — the periodic job runs every 15 min by default, so this
+# avoids waiting for the next tick. Idempotent: skips users whose folder
+# already exists.
+function reconcileProfileFolders() {
+  ensureClusterContext 2>/dev/null || true
+  local nomad_ip
+  nomad_ip=$(getNomad01IP)
+  if [ -z "$nomad_ip" ]; then
+    error "Could not determine nomad01 IP — has the cluster been deployed?"
+    return 1
+  fi
+
+  doing "Forcing profile-reconciler run on nomad01 ($nomad_ip)..."
+  ssh -o StrictHostKeyChecking=no -i "$CRYPTO_DIR/labadmin" labadmin@"$nomad_ip" \
+    'nomad job periodic force profile-reconciler' || {
+      error "profile-reconciler job not deployed — is at least one nas_servers entry opted-in (provides_profiles=true)?"
+      info  "  Configure in bootstrap.yml then re-run option 1 or d5"
+      return 1
+    }
+
+  success "Reconcile triggered. Watch logs:"
+  info "  ssh labadmin@${nomad_ip} 'nomad alloc logs -job profile-reconciler'"
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -1263,6 +1288,7 @@ function showMenu() {
     echo "  d13) Revert ALL DNS → bootstrap.yml network.dns (Nomad VMs + PVE hosts)"
     echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
     echo "  d15) TrueNAS — purge existing AD join (reads nas_servers from bootstrap.yml)"
+    echo "  d16) Reconcile profile folders (force the periodic job to run now)"
   fi
   echo
 }
@@ -1283,7 +1309,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d15]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d16]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1321,6 +1347,7 @@ while true; do
     d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && revertNomadVMDNSToBootstrap && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
     d14|D14) if [ "$DEV_MODE" = true ]; then downloadRootCA;                                                  else error "Invalid option"; fi;;
     d15|D15) if [ "$DEV_MODE" = true ]; then truenasLeaveAD;                                                  else error "Invalid option"; fi;;
+    d16|D16) if [ "$DEV_MODE" = true ]; then reconcileProfileFolders;                                         else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
