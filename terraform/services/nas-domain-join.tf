@@ -138,18 +138,30 @@ resource "null_resource" "nas_domain_join" {
         fi
 
         # Join AD
+        # Target OU=Workstations for the machine account: domain-join-svc
+        # was granted CreateChild rights there in samba-ad-accounts.tf, so
+        # creating a machine account in the default CN=Computers fails with
+        # "Insufficient access" / WERR_ACCESS_DENIED. Setting computer_account_ou
+        # routes the join to the correct OU.
         echo "[+] Joining AD domain (this may take 30-60s)..."
         HOSTNAME_UPPER=$(echo "$TRUENAS_HOSTNAME" | tr '[:lower:]' '[:upper:]')
+        COMPUTER_OU="OU=Workstations,${local.ad_base_dn}"
         JOIN_PAYLOAD=$(jq -n \
           --arg realm "$AD_REALM" \
           --arg domain "$AD_REALM_LOWER" \
           --arg pw "$DOMAIN_JOIN_PW" \
           --arg host "$HOSTNAME_UPPER" \
+          --arg ou "$COMPUTER_OU" \
           '{
             service_type: "ACTIVEDIRECTORY",
             credential: {credential_type: "KERBEROS_USER", username: "domain-join-svc", password: $pw},
             kerberos_realm: $realm,
-            configuration: {service_type: "ACTIVEDIRECTORY", hostname: $host, domain: $domain},
+            configuration: {
+              service_type: "ACTIVEDIRECTORY",
+              hostname: $host,
+              domain: $domain,
+              computer_account_ou: $ou
+            },
             enable: true
           }')
 
