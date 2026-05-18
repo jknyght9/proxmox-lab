@@ -23,13 +23,20 @@ variable "profile_drive_letter" {
   default     = "P"
 }
 
+# Auto-derive the profile server address from nas_servers if any NAS has
+# provides_profiles=true, otherwise fall back to the explicit var.profile_server
+# (backward-compatible: existing labs that set profile_server still work).
+locals {
+  effective_profile_server = length(local.profile_nases) > 0 ? values(local.profile_nases)[0].address : var.profile_server
+}
+
 # Deploy logon script to DC01's NETLOGON share
 resource "null_resource" "logon_script" {
-  count      = var.deploy_samba_ad && var.profile_server != "" ? 1 : 0
+  count      = var.deploy_samba_ad && local.effective_profile_server != "" ? 1 : 0
   depends_on = [null_resource.ad_service_accounts]
 
   triggers = {
-    profile_server = var.profile_server
+    profile_server = local.effective_profile_server
     profile_share  = var.profile_share
     drive_letter   = var.profile_drive_letter
     ad_realm       = var.ad_realm
@@ -56,7 +63,7 @@ resource "null_resource" "logon_script" {
       sudo tee "$SCRIPTS_DIR/logon.bat" > /dev/null <<'BATSCRIPT'
 @echo off
 REM Map profile drive to user's folder on file server
-net use ${var.profile_drive_letter}: \\${var.profile_server}\${var.profile_share}\%USERNAME% /persistent:yes 2>nul
+net use ${var.profile_drive_letter}: \\${local.effective_profile_server}\${var.profile_share}\%USERNAME% /persistent:yes 2>nul
 if errorlevel 1 (
     echo Warning: Could not map profile drive
 )
@@ -68,7 +75,7 @@ BATSCRIPT
 # Mount user profile from file server
 PROFILE_DIR="/home/$USER/profile"
 mkdir -p "$PROFILE_DIR"
-mount -t cifs //${var.profile_server}/${var.profile_share}/$USER "$PROFILE_DIR" \
+mount -t cifs //${local.effective_profile_server}/${var.profile_share}/$USER "$PROFILE_DIR" \
   -o sec=krb5,multiuser,nofail,uid=$UID,gid=$(id -g) 2>/dev/null || \
   echo "Warning: Could not mount profile drive"
 SHSCRIPT
