@@ -9,12 +9,12 @@ resource "null_resource" "service_directories" {
       "vault",
       "vault-tls",
       "certs",
-      var.deploy_traefik    ? "traefik,traefik/config,traefik/tls" : "",
-      var.deploy_authentik  ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
-      var.deploy_samba_ad   ? "" : "",  # samba uses /opt/samba-dc01 on host, not gluster
+      var.deploy_traefik ? "traefik,traefik/config,traefik/tls" : "",
+      var.deploy_authentik ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
+      var.deploy_samba_ad ? "" : "", # samba uses /opt/samba-dc01 on host, not gluster
       var.deploy_uptime_kuma ? "uptime-kuma" : "",
-      var.deploy_lam        ? "lam,lam/config,lam/session" : "",
-      var.deploy_netbox     ? "netbox,netbox/postgres,netbox/redis,netbox/data/media" : "",
+      var.deploy_lam ? "lam,lam/config,lam/session" : "",
+      var.deploy_netbox ? "netbox,netbox/postgres,netbox/redis,netbox/data/media" : "",
       "docs,docs/site",
     ]))
   }

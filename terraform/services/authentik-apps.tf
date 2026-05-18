@@ -15,10 +15,10 @@ resource "null_resource" "authentik_apps" {
   depends_on = [nomad_job.authentik]
 
   triggers = {
-    dns_postfix    = var.dns_postfix
-    deploy_uptime  = var.deploy_uptime_kuma
-    deploy_lam     = var.deploy_lam
-    deploy_netbox  = var.deploy_netbox
+    dns_postfix   = var.dns_postfix
+    deploy_uptime = var.deploy_uptime_kuma
+    deploy_lam    = var.deploy_lam
+    deploy_netbox = var.deploy_netbox
   }
 
   connection {

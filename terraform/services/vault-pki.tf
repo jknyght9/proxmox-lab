@@ -71,21 +71,21 @@ resource "vault_pki_secret_backend_config_urls" "int" {
 # --- ACME Role + Configuration ---
 
 resource "vault_pki_secret_backend_role" "acme_certs" {
-  backend                  = vault_mount.pki_int.path
-  name                     = "acme-certs"
-  allow_any_name           = true
-  allow_ip_sans            = true
-  allow_localhost           = true
-  allow_bare_domains       = true
-  allow_subdomains         = true
+  backend                     = vault_mount.pki_int.path
+  name                        = "acme-certs"
+  allow_any_name              = true
+  allow_ip_sans               = true
+  allow_localhost             = true
+  allow_bare_domains          = true
+  allow_subdomains            = true
   allow_wildcard_certificates = true
-  enforce_hostnames        = false
-  server_flag              = true
-  client_flag              = true
-  key_type                 = "ec"
-  key_bits                 = 256
-  ttl                      = "2160h"  # 90 days
-  max_ttl                  = "8760h"  # 1 year
+  enforce_hostnames           = false
+  server_flag                 = true
+  client_flag                 = true
+  key_type                    = "ec"
+  key_bits                    = 256
+  ttl                         = "2160h" # 90 days
+  max_ttl                     = "8760h" # 1 year
 }
 
 # ACME configuration on the intermediate CA
@@ -94,18 +94,18 @@ resource "vault_pki_secret_backend_config_acme" "int" {
     vault_pki_secret_backend_intermediate_set_signed.int,
     vault_pki_secret_backend_role.acme_certs,
   ]
-  backend                    = vault_mount.pki_int.path
-  enabled                    = true
-  default_directory_policy   = "sign-verbatim"
-  allowed_roles              = [vault_pki_secret_backend_role.acme_certs.name]
-  allow_role_ext_key_usage   = true
+  backend                  = vault_mount.pki_int.path
+  enabled                  = true
+  default_directory_policy = "sign-verbatim"
+  allowed_roles            = [vault_pki_secret_backend_role.acme_certs.name]
+  allow_role_ext_key_usage = true
 }
 
 # Cluster path for ACME directory
 resource "vault_pki_secret_backend_config_cluster" "int" {
   depends_on = [vault_pki_secret_backend_intermediate_set_signed.int]
   backend    = vault_mount.pki_int.path
-  path    = "https://${local.nomad01_ip}:8200/v1/pki_int"
+  path       = "https://${local.nomad01_ip}:8200/v1/pki_int"
 }
 
 # --- Root CA distribution to Nomad nodes ---

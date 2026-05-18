@@ -62,10 +62,10 @@ resource "null_resource" "ad_service_accounts" {
   depends_on = [nomad_job.samba_ad, vault_kv_secret_v2.samba_ad_accounts]
 
   triggers = {
-    ad_realm           = var.ad_realm
-    domain_join_pw     = random_password.domain_join[0].result
-    authentik_sync_pw  = random_password.authentik_sync[0].result
-    lam_bind_pw        = random_password.lam_bind[0].result
+    ad_realm          = var.ad_realm
+    domain_join_pw    = random_password.domain_join[0].result
+    authentik_sync_pw = random_password.authentik_sync[0].result
+    lam_bind_pw       = random_password.lam_bind[0].result
   }
 
   connection {

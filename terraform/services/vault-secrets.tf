@@ -28,7 +28,7 @@ resource "random_password" "pihole_root" {
 resource "random_password" "kasm_admin" {
   length           = 20
   special          = true
-  override_special = "!@#%^&*"  # Avoid shell-unsafe chars: ()=<>?:;'"
+  override_special = "!@#%^&*" # Avoid shell-unsafe chars: ()=<>?:;'"
   keepers          = { service = "kasm" }
 }
 
@@ -177,9 +177,9 @@ resource "vault_kv_secret_v2" "authentik" {
   data_json = jsonencode({
     secret_key        = random_password.authentik_secret_key[0].result
     postgres_password = random_password.authentik_postgres[0].result
-    admin_password       = random_password.authentik_admin[0].result
-    admin_email          = "admin@${var.dns_postfix}"
-    api_token            = random_password.authentik_api_token[0].result
+    admin_password    = random_password.authentik_admin[0].result
+    admin_email       = "admin@${var.dns_postfix}"
+    api_token         = random_password.authentik_api_token[0].result
   })
 }
 
@@ -272,15 +272,15 @@ resource "vault_kv_secret_v2" "cluster_config" {
   mount = vault_mount.secret.path
   name  = "config/cluster"
   data_json = jsonencode({
-    dns_postfix   = var.dns_postfix
-    dns_server    = var.dns_server_ip
-    network_cidr  = var.network_cidr
-    gateway       = var.network_gateway
-    ad_realm      = var.ad_realm
-    ad_domain     = var.ad_domain
+    dns_postfix    = var.dns_postfix
+    dns_server     = var.dns_server_ip
+    network_cidr   = var.network_cidr
+    gateway        = var.network_gateway
+    ad_realm       = var.ad_realm
+    ad_domain      = var.ad_domain
     ad_realm_lower = local.ad_realm_lower
-    base_dn       = local.ad_base_dn
-    dns_forwarder = var.dns_server_ip != "" ? var.dns_server_ip : var.network_gateway
+    base_dn        = local.ad_base_dn
+    dns_forwarder  = var.dns_server_ip != "" ? var.dns_server_ip : var.network_gateway
   })
 }
 
