@@ -16,7 +16,7 @@
 
 locals {
   # NAS hosts opted in to profile automation
-  profile_nas = {
+  profile_nases = {
     for nas in var.nas_servers :
     nas.name => nas
     if nas.provides_profiles && nas.type == "truenas" && nas.profile_dataset != ""
@@ -24,7 +24,7 @@ locals {
 }
 
 resource "null_resource" "nas_profile_share" {
-  for_each = var.deploy_samba_ad ? local.profile_nas : {}
+  for_each = var.deploy_samba_ad ? local.profile_nases : {}
   depends_on = [
     null_resource.nas_domain_join,
   ]
