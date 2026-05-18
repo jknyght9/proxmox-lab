@@ -183,7 +183,7 @@ resource "null_resource" "nas_domain_join" {
               *) sleep 5; WAITED=$((WAITED + 5)) ;;
             esac
           done
-          [ $WAITED -ge 180 ] && echo "[!] AD join timed out after 180s" && exit 1
+          if [ $WAITED -ge 180 ]; then echo "[!] AD join timed out after 180s"; exit 1; fi
         else
           echo "[!] AD join failed: $(echo "$JOB_ID" | jq -r '.message // .error // "unknown"' 2>/dev/null)"
           exit 1
