@@ -63,6 +63,13 @@ resource "null_resource" "nas_domain_join" {
       AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
       DNS_IP="${var.dns_server_ip}"
 
+      # Stderr to a debug file so we can see what went wrong despite
+      # terraform suppressing output (sensitive vars interpolated below).
+      DEBUG_LOG="/tmp/nas_join_$${NAS_NAME}.log"
+      exec 2>"$DEBUG_LOG"
+      set -x
+      echo "=== nas_domain_join $${NAS_NAME} run at $(date) ===" >&2
+
       # Wait for Vault to be unsealed before reading domain-join creds.
       # See authentik-apps.tf for the same pattern + reasoning.
       echo '[+] Waiting for Vault to be unsealed at ${var.vault_address}...'
