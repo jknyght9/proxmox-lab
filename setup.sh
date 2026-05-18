@@ -423,6 +423,38 @@ function truenasLeaveAD() {
       done
     fi
 
+    # Flush winbind/idmap cache so orphaned SIDs from the old AD don't
+    # pollute the user/group audit on rejoin. Endpoint name varies across
+    # SCALE versions — try the modern one then fall back to the legacy
+    # winbind cache call. Either failing is non-fatal.
+    doing "  Flushing AD/winbind cache..."
+    local cc_code
+    cc_code=$(curl -sk -X POST -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer $api_key" \
+      "$api/directoryservices/cache_clear" 2>/dev/null)
+    if [ "$cc_code" != "200" ]; then
+      curl -sk -X POST -o /dev/null \
+        -H "Authorization: Bearer $api_key" \
+        "$api/activedirectory/winbindd_cache_clear" >/dev/null 2>&1 \
+        || warn "    Cache flush API not available — restart middlewared on the NAS for the same effect"
+    fi
+
+    # Delete the 'profiles' SMB share so terraform's nas_profile_share can
+    # recreate it cleanly on the next deploy. The underlying dataset and
+    # all roaming-profile data are preserved.
+    doing "  Removing 'profiles' SMB share (dataset + data preserved)..."
+    local shares share_id
+    shares=$(curl -sk -H "Authorization: Bearer $api_key" "$api/sharing/smb" 2>/dev/null)
+    share_id=$(echo "$shares" | jq -r '.[] | select(.name == "profiles") | .id // empty' 2>/dev/null)
+    if [ -n "$share_id" ]; then
+      curl -sk -X DELETE -H "Authorization: Bearer $api_key" \
+        "$api/sharing/smb/id/$share_id" >/dev/null 2>&1 \
+        && info "    Deleted SMB share 'profiles' (id=$share_id)" \
+        || warn "    Failed to delete 'profiles' share id=$share_id"
+    else
+      info "    No 'profiles' share present — skipping"
+    fi
+
     success "  $name: AD purged ($domain). Reboot the NAS or restart 'middlewared' if rejoin misbehaves."
   done
 }
