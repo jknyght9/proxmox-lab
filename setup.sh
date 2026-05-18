@@ -337,6 +337,96 @@ function downloadRootCA() {
   info "  Windows:       certutil -addstore -f \"ROOT\" $out  (run as Administrator)"
 }
 
+# Purge an existing AD join from one or more TrueNAS hosts. Reads the
+# nas_servers block from bootstrap.yml and, for every entry with
+# type=truenas, disables the directory service and clears the kerberos
+# realm via the TrueNAS REST API. Intended for use *before* re-joining
+# a TrueNAS that's still bound to a previous lab's AD (where the old
+# DCs may be gone, so a graceful "leave with creds" isn't possible).
+# Synology entries are listed but skipped — leave path differs there.
+function truenasLeaveAD() {
+  if ! command -v yq >/dev/null 2>&1; then
+    error "yq is required to read bootstrap.yml"
+    return 1
+  fi
+  if [ ! -f "$SCRIPT_DIR/bootstrap.yml" ]; then
+    error "bootstrap.yml not found"
+    return 1
+  fi
+
+  local count
+  count=$(yq -r '.nas_servers | length // 0' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null)
+  if [ -z "$count" ] || [ "$count" = "null" ] || [ "$count" = "0" ]; then
+    error "No nas_servers configured in bootstrap.yml"
+    info "  Add a nas_servers block (see bootstrap.yml.example) and retry"
+    return 1
+  fi
+
+  local i name type addr api_key
+  for i in $(seq 0 $((count - 1))); do
+    name=$(yq -r ".nas_servers[$i].name // \"\"" "$SCRIPT_DIR/bootstrap.yml")
+    type=$(yq -r ".nas_servers[$i].type // \"\"" "$SCRIPT_DIR/bootstrap.yml")
+    addr=$(yq -r ".nas_servers[$i].address // \"\"" "$SCRIPT_DIR/bootstrap.yml")
+    api_key=$(yq -r ".nas_servers[$i].api_key // \"\"" "$SCRIPT_DIR/bootstrap.yml")
+
+    if [ "$type" != "truenas" ]; then
+      info "Skipping $name ($type) — purge supported for TrueNAS only"
+      continue
+    fi
+    if [ -z "$addr" ] || [ -z "$api_key" ]; then
+      warn "$name: missing address or api_key — skipping"
+      continue
+    fi
+
+    local api="https://$addr/api/v2.0"
+    doing "Checking AD state on $name ($addr)..."
+
+    local state enabled domain
+    state=$(curl -sk --connect-timeout 10 --max-time 30 \
+      -H "Authorization: Bearer $api_key" "$api/directoryservices" 2>/dev/null)
+    if [ -z "$state" ] || echo "$state" | jq -e '.error' >/dev/null 2>&1; then
+      error "  Cannot reach TrueNAS API at $addr (check address + api_key)"
+      continue
+    fi
+    enabled=$(echo "$state" | jq -r 'if (.service_type == "ACTIVEDIRECTORY" and .enable == true) then "true" else "false" end')
+    domain=$(echo "$state" | jq -r '.configuration.domain // .domainname // "unknown"')
+
+    if [ "$enabled" != "true" ]; then
+      success "  $name: not currently joined to AD (nothing to purge)"
+      continue
+    fi
+
+    warn "  $name is currently joined to AD: $domain"
+    read -rp "$(question "  Purge this AD config? [yes/NO]: ")" confirm
+    if [ "$confirm" != "yes" ]; then
+      info "  Skipped $name"
+      continue
+    fi
+
+    doing "  Disabling AD on $name..."
+    local resp
+    resp=$(curl -sk -X PUT -H "Authorization: Bearer $api_key" -H "Content-Type: application/json" \
+      "$api/directoryservices" -d '{"enable": false}' 2>/dev/null)
+    if echo "$resp" | jq -e '.error' >/dev/null 2>&1; then
+      error "  Disable failed: $(echo "$resp" | jq -r '.error // .message // .')"
+      continue
+    fi
+
+    doing "  Clearing kerberos realms..."
+    local realms realm_id
+    realms=$(curl -sk -H "Authorization: Bearer $api_key" "$api/kerberos/realm" 2>/dev/null)
+    if echo "$realms" | jq -e '. | type == "array"' >/dev/null 2>&1; then
+      for realm_id in $(echo "$realms" | jq -r '.[].id'); do
+        curl -sk -X DELETE -H "Authorization: Bearer $api_key" \
+          "$api/kerberos/realm/id/$realm_id" >/dev/null 2>&1 \
+          || warn "    Failed to delete realm id=$realm_id"
+      done
+    fi
+
+    success "  $name: AD purged ($domain). Reboot the NAS or restart 'middlewared' if rejoin misbehaves."
+  done
+}
+
 # Apply a specific Layer 2 service target
 function deployService() {
   local target="$1"
@@ -1172,6 +1262,7 @@ function showMenu() {
     echo "  d12) Switch ALL DNS → lab Pi-hole (Nomad VMs + PVE hosts; default last-step of deployAll)"
     echo "  d13) Revert ALL DNS → bootstrap.yml network.dns (Nomad VMs + PVE hosts)"
     echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
+    echo "  d15) TrueNAS — purge existing AD join (reads nas_servers from bootstrap.yml)"
   fi
   echo
 }
@@ -1192,7 +1283,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d13]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d15]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1229,6 +1320,7 @@ while true; do
     d12|D12) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && setNomadVMDNSToLab && setProxmoxDNSToLab; else error "Invalid option"; fi;;
     d13|D13) if [ "$DEV_MODE" = true ]; then ensureBootstrapComplete && ensureClusterContext && revertNomadVMDNSToBootstrap && revertProxmoxDNSToBootstrap; else error "Invalid option"; fi;;
     d14|D14) if [ "$DEV_MODE" = true ]; then downloadRootCA;                                                  else error "Invalid option"; fi;;
+    d15|D15) if [ "$DEV_MODE" = true ]; then truenasLeaveAD;                                                  else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;
