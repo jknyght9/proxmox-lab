@@ -115,13 +115,99 @@ resource "null_resource" "nas_domain_join" {
         fi
         echo "[+] Connected to TrueNAS $(echo "$SYS_INFO" | jq -r '.version // "unknown"')"
 
+        TRUENAS_HOSTNAME=$(curl -sk -H "Authorization: Bearer $API_KEY" \
+          "$API/network/configuration" | jq -r '.hostname // empty')
+        HOSTNAME_UPPER=$(echo "$TRUENAS_HOSTNAME" | tr '[:lower:]' '[:upper:]')
+        FQDN_LOWER="$(echo "$TRUENAS_HOSTNAME" | tr '[:upper:]' '[:lower:]').$AD_REALM_LOWER"
+
+        # Samba 4.x bumps the machine-account kvno 0 -> 1 during the join,
+        # but TrueNAS snapshots the keytab at kvno=0. The join FAILs with
+        # KRB5KDC_ERR_PREAUTH_FAILED. Re-export the keytab from the local
+        # DC at the current kvno, PUT it into TrueNAS, then retrigger
+        # directoryservices to re-sync the keytab DB -> disk.
+        apply_kvno_workaround() {
+          echo "[!] applying Samba/TrueNAS kvno-mismatch workaround"
+          local SAMBA_CID
+          # Nomad names docker containers <task>-<alloc_id>; only the
+          # alloc_id label is exposed via --filter, so match by name.
+          SAMBA_CID=$(docker ps --filter "name=^samba-ad-" --format '{{.ID}}' | head -1)
+          if [ -z "$SAMBA_CID" ]; then
+            echo "[!] Samba DC container not found on nomad01"; return 1
+          fi
+          docker exec "$SAMBA_CID" rm -f /tmp/nas.keytab
+          local p
+          for p in \
+            "$HOSTNAME_UPPER\$@$AD_REALM" \
+            "HOST/$HOSTNAME_UPPER@$AD_REALM" \
+            "HOST/$FQDN_LOWER@$AD_REALM" \
+            "RestrictedKrbHost/$HOSTNAME_UPPER@$AD_REALM" \
+            "RestrictedKrbHost/$FQDN_LOWER@$AD_REALM" \
+            "nfs/$HOSTNAME_UPPER@$AD_REALM" \
+            "nfs/$FQDN_LOWER@$AD_REALM"; do
+            docker exec "$SAMBA_CID" samba-tool domain exportkeytab \
+              /tmp/nas.keytab --principal="$p"
+          done
+          local KEYTAB_B64
+          KEYTAB_B64=$(docker exec "$SAMBA_CID" base64 -w 0 /tmp/nas.keytab)
+          docker exec "$SAMBA_CID" rm -f /tmp/nas.keytab
+          if [ -z "$KEYTAB_B64" ]; then
+            echo "[!] Failed to export keytab from Samba DC"; return 1
+          fi
+          local KEYTAB_ID
+          KEYTAB_ID=$(curl -sk -H "Authorization: Bearer $API_KEY" \
+            "$API/kerberos/keytab" \
+            | jq -r '.[] | select(.name == "AD_MACHINE_ACCOUNT") | .id')
+          local KEYTAB_PAYLOAD
+          KEYTAB_PAYLOAD=$(jq -n --arg name "AD_MACHINE_ACCOUNT" --arg file "$KEYTAB_B64" '{name: $name, file: $file}')
+          if [ -n "$KEYTAB_ID" ]; then
+            curl -sk -X PUT -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+              "$API/kerberos/keytab/id/$KEYTAB_ID" -d "$KEYTAB_PAYLOAD" >/dev/null
+          else
+            curl -sk -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+              "$API/kerberos/keytab" -d "$KEYTAB_PAYLOAD" >/dev/null
+          fi
+          # Minimal PUT — TrueNAS rejects it as "Explicit configuration is
+          # required", but the side effect re-reads the keytab DB -> disk
+          # and flips status to HEALTHY.
+          curl -sk -X PUT -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+            "$API/directoryservices" \
+            -d '{"service_type":"ACTIVEDIRECTORY","enable":true}' >/dev/null 2>&1 || true
+          # cifs stays stopped after the failed join.
+          curl -sk -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+            "$API/service/start" -d '{"service":"cifs"}' >/dev/null 2>&1 || true
+          # 5 min — recovery from a long FAULTED self-heal loop can take
+          # several minutes for cache/idmap to settle after the keytab swap.
+          local i STATUS=unknown
+          for i in $(seq 1 60); do
+            STATUS=$(curl -sk -H "Authorization: Bearer $API_KEY" \
+              "$API/directoryservices/status" | jq -r '.status // "unknown"')
+            if [ "$STATUS" = "HEALTHY" ]; then
+              echo "[+] directoryservices status HEALTHY"; return 0
+            fi
+            sleep 5
+          done
+          echo "[!] kvno workaround applied but directoryservices not HEALTHY after 5 min (status=$STATUS)"
+          return 1
+        }
+
         # Check if already joined
         AD_STATUS=$(curl -sk -H "Authorization: Bearer $API_KEY" "$API/directoryservices" 2>/dev/null)
         AD_ENABLED=$(echo "$AD_STATUS" | jq -r 'if (.service_type == "ACTIVEDIRECTORY" and .enable == true) then "true" else "false" end' 2>/dev/null)
 
         if [ "$AD_ENABLED" = "true" ]; then
           CURRENT_DOMAIN=$(echo "$AD_STATUS" | jq -r '.configuration.domain // "unknown"')
-          echo "[+] TrueNAS already joined to: $CURRENT_DOMAIN — skipping"
+          HEALTH=$(curl -sk -H "Authorization: Bearer $API_KEY" \
+            "$API/directoryservices/status" | jq -r '.status // "unknown"')
+          if [ "$HEALTH" = "HEALTHY" ]; then
+            echo "[+] TrueNAS already joined to $CURRENT_DOMAIN (HEALTHY) — skipping"
+            exit 0
+          fi
+          # FAULTED with enable=true is the kvno-mismatch post-state:
+          # the join already created the AD-side machine account at
+          # kvno=1; the keytab in TrueNAS is stuck at kvno=0. Re-export
+          # the keytab from the DC and PUT it back; no re-join needed.
+          echo "[!] TrueNAS joined to $CURRENT_DOMAIN but status=$HEALTH"
+          apply_kvno_workaround || exit 1
           exit 0
         fi
 
@@ -130,10 +216,6 @@ resource "null_resource" "nas_domain_join" {
         curl -sk -X PUT -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
           "$API/network/configuration" \
           -d "{\"nameserver1\":\"$DNS_IP\",\"nameserver2\":\"\",\"nameserver3\":\"\"}" >/dev/null
-
-        # Get hostname for AD registration
-        TRUENAS_HOSTNAME=$(curl -sk -H "Authorization: Bearer $API_KEY" \
-          "$API/network/configuration" | jq -r '.hostname // empty')
 
         # Ensure Kerberos realm exists
         echo "[+] Registering Kerberos realm..."
@@ -151,7 +233,6 @@ resource "null_resource" "nas_domain_join" {
         # "Insufficient access" / WERR_ACCESS_DENIED. Setting computer_account_ou
         # routes the join to the correct OU.
         echo "[+] Joining AD domain (this may take 30-60s)..."
-        HOSTNAME_UPPER=$(echo "$TRUENAS_HOSTNAME" | tr '[:lower:]' '[:upper:]')
         COMPUTER_OU="OU=Workstations,${local.ad_base_dn}"
         JOIN_PAYLOAD=$(jq -n \
           --arg realm "$AD_REALM" \
@@ -186,6 +267,12 @@ resource "null_resource" "nas_domain_join" {
               FAILED)
                 ERR=$(curl -sk -H "Authorization: Bearer $API_KEY" \
                   "$API/core/get_jobs?id=$JOB_ID" | jq -r '.[0].error // "unknown"')
+                if echo "$ERR" | grep -qi PREAUTH; then
+                  echo "[!] AD join PREAUTH-failed (kvno mismatch)"
+                  apply_kvno_workaround || exit 1
+                  echo "[+] TrueNAS joined to AD: $AD_REALM_LOWER (via kvno workaround)"
+                  break
+                fi
                 echo "[!] AD join failed: $ERR"; exit 1 ;;
               *) sleep 5; WAITED=$((WAITED + 5)) ;;
             esac
