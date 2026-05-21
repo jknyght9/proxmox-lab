@@ -55,14 +55,41 @@ job "lam" {
     task "lam" {
       driver = "docker"
 
+      # Override 9.6.RC1's USER=www-data so the bootstrap script can sed
+      # /usr/share/ldap-account-manager/lib/treeview.inc. apache2 drops
+      # back to www-data via its own config after binding port 80.
+      user = "root"
+
       config {
-        image       = "ghcr.io/ldapaccountmanager/lam:9.5.2"
-        ports       = ["http"]
+        image   = "ghcr.io/ldapaccountmanager/lam:9.6.RC1"
+        ports   = ["http"]
+        command = "/bin/bash"
+        args    = ["/local/lam-bootstrap.sh"]
 
         volumes = [
           "/srv/gluster/nomad-data/lam/config:/etc/ldap-account-manager",
+          "/srv/gluster/nomad-data/lam/profile:/var/lib/ldap-account-manager/config",
           "/srv/gluster/nomad-data/lam/session:/var/lib/ldap-account-manager/sess",
         ]
+      }
+
+      # Bootstrap: patches LAM <=9.6.RC1 treeview bug + forces followReferrals=true.
+      # See lib/treeview.inc::getNodeIcon — array_map() crashes when Samba AD
+      # returns LDAP referrals (Configuration/DomainDnsZones/ForestDnsZones
+      # partitions) as entries with no objectClass attribute. followReferrals=true
+      # makes LAM chase the refs and get real entries with objectClass set; the
+      # PHP patch keeps the page rendering even if a refless entry slips through.
+      template {
+        data = <<EOH
+#!/bin/bash
+set -e
+sed -i "s|array_map(strtolower(...), \$attributes\['objectclass'\])|array_map(strtolower(...), \$attributes['objectclass'] ?? [])|" /usr/share/ldap-account-manager/lib/treeview.inc
+sed -i 's|"followReferrals": "false"|"followReferrals": "true"|' /var/lib/ldap-account-manager/config/unix.sample.conf 2>/dev/null || true
+[ -f /var/lib/ldap-account-manager/config/lam.conf ] && sed -i 's|"followReferrals": "false"|"followReferrals": "true"|' /var/lib/ldap-account-manager/config/lam.conf
+exec /usr/local/bin/start.sh
+EOH
+        destination = "local/lam-bootstrap.sh"
+        perms       = "0755"
       }
 
       # AD config injected from Vault KV via template
