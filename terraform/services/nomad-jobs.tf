@@ -16,6 +16,9 @@ resource "nomad_job" "traefik" {
   jobspec = templatefile("${path.module}/templates/traefik.nomad.hcl.tpl", {
     dns_server  = var.dns_server_ip
     dns_postfix = var.dns_postfix
+    nomad01_ip  = local.nomad01_ip
+    nomad_ips   = [for _, ip in var.nomad_node_ips : ip]
+    dns01_ip    = var.dns_server_ip
   })
   detach = false
 }

@@ -96,6 +96,82 @@ EOH
         change_mode = "noop"
       }
 
+      # Authentik forward-auth middleware + routers for Nomad UI, Pi-hole UI,
+      # and the Traefik dashboard. Previously written to gluster by
+      # null_resource.traefik_config (vm-nomad/main.tf); now rendered into
+      # the alloc-local file-provider dir so Traefik picks it up the same
+      # way it picks up tls.yml. Content mirrors vm-nomad/templates/
+      # traefik-authentik.yml.tpl — keep them in sync until Phase 3 deletes
+      # the vm-nomad copy.
+      template {
+        data = <<EOH
+http:
+  middlewares:
+    authentik:
+      forwardAuth:
+        address: http://${nomad01_ip}:9000/outpost.goauthentik.io/auth/traefik
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-authentik-username
+          - X-authentik-groups
+          - X-authentik-email
+          - X-authentik-name
+          - X-authentik-uid
+          - X-authentik-jwt
+          - X-authentik-meta-app
+          - X-authentik-meta-provider
+
+  routers:
+    nomad:
+      rule: "Host(`nomad.${dns_postfix}`)"
+      entryPoints:
+        - websecure
+      service: nomad
+      middlewares:
+        - authentik
+      tls: {}
+
+    pihole:
+      rule: "Host(`pihole.${dns_postfix}`)"
+      entryPoints:
+        - websecure
+      service: pihole
+      middlewares:
+        - authentik
+      tls: {}
+
+    traefik-dashboard:
+      rule: "Host(`traefik.${dns_postfix}`)"
+      entryPoints:
+        - websecure
+      service: traefik-dashboard
+      middlewares:
+        - authentik
+      tls: {}
+
+  services:
+    nomad:
+      loadBalancer:
+        servers:
+%{ for ip in nomad_ips ~}
+          - url: "http://${ip}:4646"
+%{ endfor ~}
+
+    pihole:
+      loadBalancer:
+        servers:
+          - url: "http://${dns01_ip}:80"
+
+    traefik-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://${nomad01_ip}:8081"
+EOH
+        destination = "local/config/authentik.yml"
+        perms       = "0644"
+        change_mode = "noop"
+      }
+
       resources {
         cpu    = 200
         memory = 256
