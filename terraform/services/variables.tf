@@ -157,6 +157,18 @@ variable "deploy_netbox" {
   default     = false
 }
 
+variable "deploy_csi" {
+  type        = bool
+  description = "Deploy the CSI plugin (csi-driver-nfs) that mounts NFS shares from the cluster_state NAS into Nomad jobs. Required before any service can be migrated off GlusterFS."
+  default     = false
+}
+
+variable "csi_driver_nfs_version" {
+  type        = string
+  description = "Image tag for registry.k8s.io/sig-storage/nfsplugin"
+  default     = "v4.11.0"
+}
+
 variable "configure_netbox" {
   type        = bool
   description = "Configure Netbox provider resources (requires Netbox to be running first)"

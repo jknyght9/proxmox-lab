@@ -207,3 +207,31 @@ resource "nomad_job" "profile_reconciler" {
   })
   detach = false
 }
+
+
+# =============================================================================
+# CSI plugin (csi-driver-nfs) — controller + node jobs
+# =============================================================================
+# Phase 1 of the GlusterFS → NAS-backed-CSI migration. Mounts the per-service
+# NFS shares created by null_resource.nas_share into Nomad allocations.
+# See plans/serene-brewing-cray.md for migration arc.
+
+resource "nomad_job" "csi_controller" {
+  count      = var.deploy_csi ? 1 : 0
+  depends_on = [null_resource.nas_share]
+
+  jobspec = templatefile("${path.module}/templates/csi-controller.nomad.hcl.tpl", {
+    csi_driver_nfs_version = var.csi_driver_nfs_version
+  })
+  detach = false
+}
+
+resource "nomad_job" "csi_node" {
+  count      = var.deploy_csi ? 1 : 0
+  depends_on = [nomad_job.csi_controller]
+
+  jobspec = templatefile("${path.module}/templates/csi-node.nomad.hcl.tpl", {
+    csi_driver_nfs_version = var.csi_driver_nfs_version
+  })
+  detach = false
+}
