@@ -7,13 +7,15 @@ resource "nomad_job" "traefik" {
   count = var.deploy_traefik ? 1 : 0
   depends_on = [
     null_resource.service_directories,
-    null_resource.install_traefik_cert,
-    null_resource.traefik_tls_config,
     null_resource.nomad_vault_config,
+    vault_policy.traefik,
+    vault_jwt_auth_backend_role.traefik,
+    vault_pki_secret_backend_role.acme_certs,
   ]
 
   jobspec = templatefile("${path.module}/templates/traefik.nomad.hcl.tpl", {
-    dns_server = var.dns_server_ip
+    dns_server  = var.dns_server_ip
+    dns_postfix = var.dns_postfix
   })
   detach = false
 }

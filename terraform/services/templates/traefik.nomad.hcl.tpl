@@ -5,42 +5,25 @@ job "traefik" {
   group "traefik" {
     network {
       mode = "host"
-      port "http"      { static = 80 }
-      port "https"     { static = 443 }
+      port "http" { static = 80 }
+      port "https" { static = 443 }
       port "dashboard" { static = 8081 }
     }
 
-    volume "traefik-data" {
-      type   = "host"
-      source = "gluster-data"
-    }
-
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # Vault integration — each Traefik alloc mints its own wildcard cert
+    # from Vault PKI via the templates below. No shared filesystem for
+    # cert files. change_signal=USR1 makes Traefik reload in-place when
+    # the cert is renewed (Nomad re-renders the templates near lease
+    # expiry, signals USR1, Traefik picks up the new cert without
+    # restarting the container).
+    vault {
+      role          = "traefik"
+      change_mode   = "signal"
+      change_signal = "SIGUSR1"
     }
 
     task "traefik" {
       driver = "docker"
-
-      volume_mount {
-        volume      = "traefik-data"
-        destination = "/data"
-      }
 
       config {
         image        = "traefik:v3.6.14"
@@ -64,10 +47,53 @@ job "traefik" {
           "--providers.nomad.exposedByDefault=false",
           "--providers.nomad.namespaces=default",
           "--providers.nomad.allowEmptyServices=true",
-          "--providers.file.directory=/data/traefik/config",
+          "--providers.file.directory=/local/config",
           "--providers.file.watch=true",
           "--serversTransport.insecureSkipVerify=true",
         ]
+      }
+
+      # Wildcard cert (leaf + issuing CA). Lease tied to ttl below;
+      # Nomad re-fetches when ~1/3 lease remains and signals USR1.
+      template {
+        data = <<EOH
+{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=720h" }}
+{{ .Data.certificate }}
+{{ .Data.issuing_ca }}
+{{ end }}
+EOH
+        destination   = "local/tls/cert.pem"
+        perms         = "0644"
+        change_mode   = "signal"
+        change_signal = "SIGUSR1"
+      }
+
+      template {
+        data = <<EOH
+{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=720h" }}
+{{ .Data.private_key }}
+{{ end }}
+EOH
+        destination   = "local/tls/key.pem"
+        perms         = "0600"
+        change_mode   = "signal"
+        change_signal = "SIGUSR1"
+      }
+
+      # File-provider config — points Traefik at the templated cert files.
+      # Static content, doesn't change at runtime; no signal on change.
+      template {
+        data = <<EOH
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /local/tls/cert.pem
+        keyFile: /local/tls/key.pem
+EOH
+        destination = "local/config/tls.yml"
+        perms       = "0644"
+        change_mode = "noop"
       }
 
       resources {

@@ -196,3 +196,23 @@ resource "vault_jwt_auth_backend_role" "profile_reconciler" {
   token_ttl      = 3600
   bound_claims   = { nomad_job_id = "profile-reconciler" }
 }
+
+resource "vault_jwt_auth_backend_role" "traefik" {
+  count                   = var.deploy_traefik ? 1 : 0
+  backend                 = vault_jwt_auth_backend.nomad.path
+  role_name               = "traefik"
+  role_type               = "jwt"
+  bound_audiences         = ["vault.io"]
+  user_claim              = "/nomad_job_id"
+  user_claim_json_pointer = true
+  claim_mappings = {
+    nomad_namespace = "nomad_namespace"
+    nomad_job_id    = "nomad_job_id"
+    nomad_task      = "nomad_task"
+  }
+  token_type     = "service"
+  token_policies = ["traefik"]
+  token_period   = 3600
+  token_ttl      = 3600
+  bound_claims   = { nomad_job_id = "traefik" }
+}

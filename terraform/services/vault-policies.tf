@@ -64,3 +64,9 @@ resource "vault_policy" "profile_reconciler" {
   name   = "profile-reconciler"
   policy = file("${path.module}/../../nomad/vault-policies/profile-reconciler.hcl")
 }
+
+resource "vault_policy" "traefik" {
+  count  = var.deploy_traefik ? 1 : 0
+  name   = "traefik"
+  policy = file("${path.module}/../../nomad/vault-policies/traefik.hcl")
+}

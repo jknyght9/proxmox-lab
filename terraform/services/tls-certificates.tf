@@ -85,103 +85,12 @@ resource "null_resource" "install_vault_cert" {
 }
 
 # --- Traefik Wildcard Certificate ---
-
-resource "vault_pki_secret_backend_cert" "traefik_wildcard" {
-  count      = var.deploy_traefik ? 1 : 0
-  depends_on = [vault_pki_secret_backend_role.acme_certs]
-
-  backend     = vault_mount.pki_int.path
-  name        = vault_pki_secret_backend_role.acme_certs.name
-  common_name = "*.${var.dns_postfix}"
-  alt_names   = [var.dns_postfix]
-  ttl         = "8760h" # 1 year
-}
-
-resource "local_file" "traefik_cert_pem" {
-  count    = var.deploy_traefik ? 1 : 0
-  filename = "${path.module}/rendered/traefik-cert.pem"
-  content  = "${vault_pki_secret_backend_cert.traefik_wildcard[0].certificate}\n${vault_pki_secret_backend_cert.traefik_wildcard[0].ca_chain}"
-}
-
-resource "local_file" "traefik_key_pem" {
-  count           = var.deploy_traefik ? 1 : 0
-  filename        = "${path.module}/rendered/traefik-key.pem"
-  content         = vault_pki_secret_backend_cert.traefik_wildcard[0].private_key
-  file_permission = "0600"
-}
-
-resource "null_resource" "install_traefik_cert" {
-  count      = var.deploy_traefik ? 1 : 0
-  depends_on = [local_file.traefik_cert_pem, local_file.traefik_key_pem]
-
-  triggers = {
-    cert_serial = vault_pki_secret_backend_cert.traefik_wildcard[0].serial_number
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.nomad01_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = ["sudo mkdir -p /srv/gluster/nomad-data/traefik/tls"]
-  }
-
-  provisioner "file" {
-    source      = local_file.traefik_cert_pem[0].filename
-    destination = "/tmp/traefik-cert.pem"
-  }
-
-  provisioner "file" {
-    source      = local_file.traefik_key_pem[0].filename
-    destination = "/tmp/traefik-key.pem"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo cp /tmp/traefik-cert.pem /srv/gluster/nomad-data/traefik/tls/cert.pem",
-      "sudo cp /tmp/traefik-key.pem /srv/gluster/nomad-data/traefik/tls/key.pem",
-      "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/cert.pem",
-      "sudo chmod 644 /srv/gluster/nomad-data/traefik/tls/key.pem",
-      "rm -f /tmp/traefik-cert.pem /tmp/traefik-key.pem",
-      "echo '[+] Traefik wildcard cert installed (full chain)'",
-    ]
-  }
-}
-
-# Deploy TLS dynamic config for Traefik file provider
-resource "null_resource" "traefik_tls_config" {
-  count      = var.deploy_traefik ? 1 : 0
-  depends_on = [null_resource.install_traefik_cert]
-
-  triggers = {
-    cert_serial = vault_pki_secret_backend_cert.traefik_wildcard[0].serial_number
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.nomad01_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/traefik/config",
-      <<-EOT
-      sudo tee /srv/gluster/nomad-data/traefik/config/tls.yml > /dev/null <<'TLSYML'
-tls:
-  stores:
-    default:
-      defaultCertificate:
-        certFile: /data/traefik/tls/cert.pem
-        keyFile: /data/traefik/tls/key.pem
-TLSYML
-      EOT
-      ,
-      "echo '[+] Traefik TLS config deployed'",
-    ]
-  }
-}
+#
+# Traefik mints its own cert via a Nomad `template` block that POSTs to
+# pki_int/issue/acme-certs at startup and renews automatically. The
+# terraform-side `vault_pki_secret_backend_cert.traefik_wildcard`,
+# `local_file.traefik_{cert,key}_pem`, `null_resource.install_traefik_cert`,
+# and `null_resource.traefik_tls_config` resources were removed in commit
+# X (CSI migration prep) — terraform no longer owns Traefik's TLS material.
+# See terraform/services/templates/traefik.nomad.hcl.tpl for the runtime
+# fetch + reload-on-renew wiring.
