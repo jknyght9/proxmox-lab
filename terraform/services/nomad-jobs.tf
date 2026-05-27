@@ -131,6 +131,9 @@ resource "nomad_job" "netbox" {
     vault_jwt_auth_backend_role.netbox,
     vault_kv_secret_v2.netbox,
     null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.netbox_pg,
+    nomad_csi_volume_registration.netbox_redis,
+    nomad_csi_volume_registration.netbox_data,
   ]
 
   jobspec = templatefile("${path.module}/templates/netbox.nomad.hcl.tpl", {

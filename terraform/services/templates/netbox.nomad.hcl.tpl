@@ -29,24 +29,28 @@ job "netbox" {
       port "redis"    { static = 6380 }
     }
 
-    # Ensure GlusterFS is mounted before any data tasks start
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # State lives on the cluster_state NAS via CSI/NFS — three datasets:
+    # postgres data (16K recordsize), Redis AOF, and the server/worker/
+    # housekeeping shared media dir. Root CA cert for OIDC discovery is
+    # fetched from Vault PKI by a template stanza in the server task
+    # (the only one that needs it).
+    volume "pg" {
+      type            = "csi"
+      source          = "netbox-pg-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
+    }
+    volume "redis" {
+      type            = "csi"
+      source          = "netbox-redis-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
+    }
+    volume "data" {
+      type            = "csi"
+      source          = "netbox-data-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
     }
 
     # PostgreSQL — primary database
@@ -54,12 +58,19 @@ job "netbox" {
       driver = "docker"
       user   = "root"
 
+      # Give postgres a full minute to flush WAL on shutdown — same
+      # reasoning as the authentik postgres task; default 5s is tight.
+      kill_timeout = "60s"
+
       config {
         image        = "postgres:17"
         network_mode = "host"
-        volumes = [
-          "/srv/gluster/nomad-data/netbox/postgres:/var/lib/postgresql/data",
-        ]
+      }
+
+      volume_mount {
+        volume      = "pg"
+        destination = "/var/lib/postgresql/data"
+        read_only   = false
       }
 
       template {
@@ -96,9 +107,12 @@ EOH
         image        = "redis:8-alpine"
         network_mode = "host"
         args         = ["--port", "6380", "--appendonly", "yes"]
-        volumes = [
-          "/srv/gluster/nomad-data/netbox/redis:/data",
-        ]
+      }
+
+      volume_mount {
+        volume      = "redis"
+        destination = "/data"
+        read_only   = false
       }
 
       resources {
@@ -122,11 +136,28 @@ EOH
         image        = "netboxcommunity/netbox:v4.5.8"
         network_mode = "host"
         volumes = [
-          "/srv/gluster/nomad-data/netbox/data/media:/opt/netbox/netbox/media",
-          "/srv/gluster/nomad-data/certs:/certs:ro",
           "local/nginx-unit.json:/etc/unit/nginx-unit.json:ro",
           "local/extra.py:/etc/netbox/config/extra.py:ro",
         ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/opt/netbox/netbox/media"
+        read_only   = false
+      }
+
+      # Root CA cert pulled from Vault at template-render time. Replaces
+      # the gluster /srv/gluster/nomad-data/certs:/certs:ro bind-mount.
+      # Used by REQUESTS_CA_BUNDLE / SSL_CERT_FILE for OIDC discovery
+      # against auth.<domain>.
+      template {
+        data        = <<EOH
+{{ with secret "pki/cert/ca" }}{{ .Data.certificate }}{{ end }}
+EOH
+        destination = "local/certs/root_ca.crt"
+        perms       = "0644"
+        change_mode = "noop"
       }
 
       # Custom NGINX Unit config — changes status port from 8081 (Traefik conflict) to 8082
@@ -160,8 +191,8 @@ SUPERUSER_NAME=admin
 REMOTE_AUTH_ENABLED=True
 REMOTE_AUTH_BACKEND=social_core.backends.open_id_connect.OpenIdConnectAuth
 # Trust internal CA for OIDC discovery
-REQUESTS_CA_BUNDLE=/certs/root_ca.crt
-SSL_CERT_FILE=/certs/root_ca.crt
+REQUESTS_CA_BUNDLE=/local/certs/root_ca.crt
+SSL_CERT_FILE=/local/certs/root_ca.crt
 EOH
         destination = "secrets/netbox.env"
         env         = true
@@ -255,9 +286,12 @@ SSOCFG
         network_mode = "host"
         entrypoint   = ["/usr/bin/bash", "-c"]
         args         = ["echo 'Waiting for Netbox server...'; while ! curl -sf http://127.0.0.1:8080/login/ >/dev/null 2>&1; do sleep 5; done; echo 'Server ready, starting worker'; /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py rqworker"]
-        volumes = [
-          "/srv/gluster/nomad-data/netbox/data/media:/opt/netbox/netbox/media",
-        ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/opt/netbox/netbox/media"
+        read_only   = false
       }
 
       template {
@@ -295,9 +329,12 @@ EOH
         network_mode = "host"
         entrypoint   = ["/usr/bin/bash", "-c"]
         args         = ["echo 'Waiting for Netbox server...'; while ! curl -sf http://127.0.0.1:8080/login/ >/dev/null 2>&1; do sleep 5; done; echo 'Server ready, starting housekeeping'; while true; do /opt/netbox/venv/bin/python /opt/netbox/netbox/manage.py housekeeping; sleep 3600; done"]
-        volumes = [
-          "/srv/gluster/nomad-data/netbox/data/media:/opt/netbox/netbox/media",
-        ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/opt/netbox/netbox/media"
+        read_only   = false
       }
 
       template {

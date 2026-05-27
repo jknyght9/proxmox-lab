@@ -238,6 +238,91 @@ resource "nomad_csi_volume_registration" "authentik_data" {
   }
 }
 
+# --- netbox (Postgres + Redis + media) ---------------------------------------
+resource "nomad_csi_volume_registration" "netbox_pg" {
+  count = var.deploy_csi && var.deploy_netbox ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "netbox-pg-data"
+  name        = "netbox-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["netbox-pg"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["netbox-pg"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["netbox-pg"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "netbox_redis" {
+  count = var.deploy_csi && var.deploy_netbox ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "netbox-redis-data"
+  name        = "netbox-redis-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["netbox-redis"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["netbox-redis"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["netbox-redis"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "netbox_data" {
+  count = var.deploy_csi && var.deploy_netbox ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "netbox-data-data"
+  name        = "netbox-data-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["netbox-data"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["netbox-data"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["netbox-data"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.

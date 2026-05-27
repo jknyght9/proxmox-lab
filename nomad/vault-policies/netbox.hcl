@@ -19,3 +19,11 @@ path "secret/metadata/netbox" {
 path "secret/metadata/netbox-oidc" {
   capabilities = ["read", "list"]
 }
+
+# Allow reading the root CA cert so the Nomad template stanza can write
+# it to /local/certs/root_ca.crt — Netbox's REQUESTS_CA_BUNDLE points
+# there for validating OIDC discovery against internal HTTPS endpoints.
+# Replaces the gluster-mounted /certs path.
+path "pki/cert/ca" {
+  capabilities = ["read"]
+}
