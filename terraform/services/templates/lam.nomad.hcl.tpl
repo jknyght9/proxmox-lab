@@ -30,26 +30,26 @@ job "lam" {
       }
     }
 
-    # Belt-and-suspenders: refuse to start if the gluster volume isn't
-    # actually mounted (host-level RequiresMountsFor should already guarantee
-    # this, but this catches manual-unmount and runtime-drop edge cases).
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # LAM state lives on the cluster_state NAS via three separate CSI
+    # volumes (Nomad CSI has no subpath semantics, so each container path
+    # gets its own NFS share). See csi-volumes.tf for registrations.
+    volume "config" {
+      type            = "csi"
+      source          = "lam-config-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
+    }
+    volume "profile" {
+      type            = "csi"
+      source          = "lam-profile-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
+    }
+    volume "session" {
+      type            = "csi"
+      source          = "lam-session-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
     }
 
     task "lam" {
@@ -65,12 +65,22 @@ job "lam" {
         ports   = ["http"]
         command = "/bin/bash"
         args    = ["/local/lam-bootstrap.sh"]
+      }
 
-        volumes = [
-          "/srv/gluster/nomad-data/lam/config:/etc/ldap-account-manager",
-          "/srv/gluster/nomad-data/lam/profile:/var/lib/ldap-account-manager/config",
-          "/srv/gluster/nomad-data/lam/session:/var/lib/ldap-account-manager/sess",
-        ]
+      volume_mount {
+        volume      = "config"
+        destination = "/etc/ldap-account-manager"
+        read_only   = false
+      }
+      volume_mount {
+        volume      = "profile"
+        destination = "/var/lib/ldap-account-manager/config"
+        read_only   = false
+      }
+      volume_mount {
+        volume      = "session"
+        destination = "/var/lib/ldap-account-manager/sess"
+        read_only   = false
       }
 
       # Bootstrap: patches LAM <=9.6.RC1 treeview bug + forces followReferrals=true.

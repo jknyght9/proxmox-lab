@@ -63,6 +63,112 @@ resource "nomad_csi_volume_registration" "uptime_kuma" {
   }
 }
 
+# --- lam (LDAP Account Manager) — three separate shares -----------------------
+# LAM has three distinct container mount paths (apache config, server profile,
+# PHP sessions). Each gets its own dataset+share since Nomad CSI doesn't
+# support subpath mounting.
+resource "nomad_csi_volume_registration" "lam_config" {
+  count = var.deploy_csi && var.deploy_lam ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "lam-config-data"
+  name        = "lam-config-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["lam-config"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-config"]
+  }
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-config"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "lam_profile" {
+  count = var.deploy_csi && var.deploy_lam ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "lam-profile-data"
+  name        = "lam-profile-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["lam-profile"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-profile"]
+  }
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-profile"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "lam_session" {
+  count = var.deploy_csi && var.deploy_lam ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "lam-session-data"
+  name        = "lam-session-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["lam-session"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-session"]
+  }
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["lam-session"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.

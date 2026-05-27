@@ -34,7 +34,13 @@ locals {
     traefik           = { recordsize = "128K", description = "Traefik TLS certs + acme.json" }
     uptime-kuma       = { recordsize = "128K", description = "Uptime Kuma embedded MariaDB" }
     docs              = { recordsize = "128K", description = "MkDocs build artifacts" }
-    lam               = { recordsize = "128K", description = "LAM profile state + session" }
+    # LAM has three distinct mount paths: apache+php config (image-provided),
+    # the LAM server profile (lam.conf — the only one with real state), and
+    # PHP sessions (ephemeral). Nomad CSI has no subpath semantics so each
+    # gets its own dataset rather than three subdirs of one share.
+    lam-config        = { recordsize = "128K", description = "LAM apache/php config (mostly image defaults)" }
+    lam-profile       = { recordsize = "128K", description = "LAM server profile (lam.conf + admin bind)" }
+    lam-session       = { recordsize = "128K", description = "LAM PHP sessions (ephemeral)" }
   }
 
   # Look up the NAS that provides cluster_state by name in var.nas_servers.

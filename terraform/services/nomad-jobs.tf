@@ -89,6 +89,9 @@ resource "nomad_job" "lam" {
     vault_kv_secret_v2.cluster_config,
     null_resource.nomad_vault_config,
     null_resource.lam_bootstrap,
+    nomad_csi_volume_registration.lam_config,
+    nomad_csi_volume_registration.lam_profile,
+    nomad_csi_volume_registration.lam_session,
   ]
 
   jobspec = templatefile("${path.module}/templates/lam.nomad.hcl.tpl", {
