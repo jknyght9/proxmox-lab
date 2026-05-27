@@ -62,3 +62,41 @@ resource "nomad_csi_volume_registration" "uptime_kuma" {
     mount_flags = ["nfsvers=4.1", "hard"]
   }
 }
+
+# --- docs (MkDocs build artifacts) -------------------------------------------
+# Read-only multi-node — any Nomad node can serve the docs from the same NFS
+# share. access_mode reflects that the consuming job mounts read_only.
+resource "nomad_csi_volume_registration" "docs" {
+  count = var.deploy_csi ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "docs-data"
+  name        = "docs-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["docs"]}#"
+
+  capability {
+    access_mode     = "multi-node-reader-only"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["docs"]
+  }
+
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["docs"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard", "ro"]
+  }
+}

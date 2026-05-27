@@ -138,7 +138,12 @@ resource "nomad_job" "netbox" {
 }
 
 resource "nomad_job" "docs" {
-  depends_on = [null_resource.service_directories, null_resource.nomad_vault_config, null_resource.docs_build]
+  depends_on = [
+    null_resource.service_directories,
+    null_resource.nomad_vault_config,
+    null_resource.docs_build,
+    nomad_csi_volume_registration.docs,
+  ]
 
   jobspec = templatefile("${path.module}/templates/docs.nomad.hcl.tpl", {
     dns_postfix = var.dns_postfix

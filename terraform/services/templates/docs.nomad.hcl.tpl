@@ -15,23 +15,17 @@ job "docs" {
       port "http" { static = 8090 }
     }
 
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # MkDocs build artifacts live on the cluster_state NAS via CSI/NFS.
+    # See nas-shares.tf for the dataset/share and csi-volumes.tf for the
+    # registration. The previous gluster mount kept the site under a
+    # docs/site subdir; the NFS share now holds the site contents directly
+    # at root (so volume_mount destination can be /usr/share/nginx/html).
+    volume "data" {
+      type            = "csi"
+      source          = "docs-data"
+      access_mode     = "multi-node-reader-only"
+      attachment_mode = "file-system"
+      read_only       = true
     }
 
     task "nginx" {
@@ -41,9 +35,14 @@ job "docs" {
         image        = "nginx:stable-alpine"
         network_mode = "host"
         volumes = [
-          "/srv/gluster/nomad-data/docs/site:/usr/share/nginx/html:ro",
           "local/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
         ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/usr/share/nginx/html"
+        read_only   = true
       }
 
       template {
