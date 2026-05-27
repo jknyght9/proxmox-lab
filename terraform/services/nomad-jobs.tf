@@ -31,6 +31,8 @@ resource "nomad_job" "authentik" {
     vault_jwt_auth_backend_role.authentik,
     vault_kv_secret_v2.authentik,
     null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.authentik_pg,
+    nomad_csi_volume_registration.authentik_data,
   ]
 
   jobspec = templatefile("${path.module}/templates/authentik.nomad.hcl.tpl", {

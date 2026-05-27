@@ -24,26 +24,21 @@ job "authentik" {
       port "postgres" { static = 5432 }
     }
 
-    # Belt-and-suspenders: refuse to start if the gluster volume isn't
-    # actually mounted. Runs before postgres (sidecar=true prestart) so
-    # the DB cannot initialize into an empty pre-mount directory.
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # State lives on the cluster_state NAS via CSI/NFS. The lab's root
+    # CA cert (previously bind-mounted from /srv/gluster/nomad-data/certs)
+    # is now fetched per-task from Vault's PKI mount at template-render
+    # time — see the server + worker template stanzas below.
+    volume "pg" {
+      type            = "csi"
+      source          = "authentik-pg-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
+    }
+    volume "data" {
+      type            = "csi"
+      source          = "authentik-data-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
     }
 
     # PostgreSQL - Database for Authentik
@@ -53,12 +48,20 @@ job "authentik" {
 
       user = "root"
 
+      # Postgres needs more than the default 5s to flush WAL + close
+      # connections on shutdown. Without this we risk dirty shutdowns
+      # that postgres recovers from, but slowly, on next start.
+      kill_timeout = "60s"
+
       config {
         image        = "postgres:17"
         network_mode = "host"
-        volumes = [
-          "/srv/gluster/nomad-data/authentik/postgres:/var/lib/postgresql/data",
-        ]
+      }
+
+      volume_mount {
+        volume      = "pg"
+        destination = "/var/lib/postgresql/data"
+        read_only   = false
       }
 
       template {
@@ -95,13 +98,29 @@ EOH
         image        = "ghcr.io/goauthentik/server:2026.2.2"
         network_mode = "host"
         args         = ["server"]
-        volumes = [
-          "/srv/gluster/nomad-data/authentik/data:/data",
-          "/srv/gluster/nomad-data/certs:/certs:ro",
-          # Custom branding (disabled — uncomment after placing files in branding/)
-          # "/srv/gluster/nomad-data/authentik/branding/background.png:/web/dist/assets/images/flow_background.jpg:ro",
-          # "/srv/gluster/nomad-data/authentik/branding/logo.svg:/web/dist/assets/images/icon_left_brand.svg:ro",
-        ]
+        # Custom branding (disabled — uncomment after placing files in
+        # the authentik-data NFS share's branding/ subdir):
+        # volumes = [
+        #   "/path-on-host/branding/background.png:/web/dist/assets/images/flow_background.jpg:ro",
+        # ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/data"
+        read_only   = false
+      }
+
+      # Root CA cert pulled from Vault at template-render time. Replaces
+      # the gluster /srv/gluster/nomad-data/certs:/certs bind-mount.
+      # Authentik reads this via REQUESTS_CA_BUNDLE / SSL_CERT_FILE.
+      template {
+        data        = <<EOH
+{{ with secret "pki/cert/ca" }}{{ .Data.certificate }}{{ end }}
+EOH
+        destination = "local/certs/root_ca.crt"
+        perms       = "0644"
+        change_mode = "noop"
       }
 
       template {
@@ -123,9 +142,11 @@ AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
 AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
 AUTHENTIK_MEDIA_ROOT=/data/media
-# Trust internal CA for HTTPS requests
-REQUESTS_CA_BUNDLE=/certs/root_ca.crt
-SSL_CERT_FILE=/certs/root_ca.crt
+# Trust internal CA for HTTPS requests — file lives in the alloc-local
+# /local/certs dir, populated by the template stanza above. Nomad's
+# docker driver mounts /local/ into the container automatically.
+REQUESTS_CA_BUNDLE=/local/certs/root_ca.crt
+SSL_CERT_FILE=/local/certs/root_ca.crt
 EOH
         destination = "secrets/authentik.env"
         env         = true
@@ -171,10 +192,22 @@ EOH
         image        = "ghcr.io/goauthentik/server:2026.2.2"
         network_mode = "host"
         args         = ["worker"]
-        volumes = [
-          "/srv/gluster/nomad-data/authentik/data:/data",
-          "/srv/gluster/nomad-data/certs:/certs:ro",
-        ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/data"
+        read_only   = false
+      }
+
+      # Root CA cert via Vault PKI — same pattern as server task above.
+      template {
+        data        = <<EOH
+{{ with secret "pki/cert/ca" }}{{ .Data.certificate }}{{ end }}
+EOH
+        destination = "local/certs/root_ca.crt"
+        perms       = "0644"
+        change_mode = "noop"
       }
 
       template {
@@ -195,8 +228,8 @@ AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_MEDIA_ROOT=/data/media
 # Trust internal CA for HTTPS requests
-REQUESTS_CA_BUNDLE=/certs/root_ca.crt
-SSL_CERT_FILE=/certs/root_ca.crt
+REQUESTS_CA_BUNDLE=/local/certs/root_ca.crt
+SSL_CERT_FILE=/local/certs/root_ca.crt
 EOH
         destination = "secrets/authentik.env"
         env         = true

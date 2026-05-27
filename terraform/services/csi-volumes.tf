@@ -169,6 +169,75 @@ resource "nomad_csi_volume_registration" "lam_session" {
   }
 }
 
+# --- authentik (Postgres + media/branding) ------------------------------------
+resource "nomad_csi_volume_registration" "authentik_pg" {
+  count = var.deploy_csi && var.deploy_authentik ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "authentik-pg-data"
+  name        = "authentik-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["authentik-pg"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["authentik-pg"]
+  }
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["authentik-pg"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "authentik_data" {
+  count = var.deploy_csi && var.deploy_authentik ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "authentik-data-data"
+  name        = "authentik-data-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["authentik-data"]}#"
+
+  capability {
+    access_mode     = "single-node-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = {
+    server = local.csi_server
+    share  = local.csi_share_path["authentik-data"]
+  }
+  context = {
+    server = local.csi_server
+    share  = local.csi_share_path["authentik-data"]
+  }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.
