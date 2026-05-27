@@ -39,6 +39,15 @@ resource "random_password" "lam_bind" {
   lifecycle { prevent_destroy = true }
 }
 
+resource "random_password" "kasm_bind" {
+  count            = var.deploy_samba_ad ? 1 : 0
+  length           = 24
+  special          = true
+  override_special = "!@#%^&*"
+  keepers          = { service = "kasm-bind" }
+  lifecycle { prevent_destroy = true }
+}
+
 # --- Store service account credentials in Vault ---
 
 resource "vault_kv_secret_v2" "samba_ad_accounts" {
@@ -52,6 +61,8 @@ resource "vault_kv_secret_v2" "samba_ad_accounts" {
     authentik_sync_dn       = "CN=authentik-sync,CN=Users,${local.ad_base_dn}"
     lam_bind_password       = random_password.lam_bind[0].result
     lam_bind_dn             = "CN=lam-admin,CN=Users,${local.ad_base_dn}"
+    kasm_bind_password      = random_password.kasm_bind[0].result
+    kasm_bind_dn            = "CN=kasm-bind,CN=Users,${local.ad_base_dn}"
   })
 }
 
@@ -66,6 +77,7 @@ resource "null_resource" "ad_service_accounts" {
     domain_join_pw    = random_password.domain_join[0].result
     authentik_sync_pw = random_password.authentik_sync[0].result
     lam_bind_pw       = random_password.lam_bind[0].result
+    kasm_bind_pw      = random_password.kasm_bind[0].result
   }
 
   connection {
@@ -100,14 +112,18 @@ resource "null_resource" "ad_service_accounts" {
 
       BASE_DN="${local.ad_base_dn}"
 
+      # `samba-tool ou show` doesn't exist in this Samba version — use
+      # `ou list` for the existence check (matches on bare "OU=Name" line).
+      OUS=$(docker exec $CONTAINER samba-tool ou list 2>/dev/null)
+
       # Create OU=Workstations if not exists
       echo '[+] Creating OU=Workstations...'
-      docker exec $CONTAINER samba-tool ou show "OU=Workstations,$BASE_DN" 2>/dev/null || \
+      echo "$OUS" | grep -qx "OU=Workstations" || \
         docker exec $CONTAINER samba-tool ou create "OU=Workstations,$BASE_DN" --description="Domain-joined workstations"
 
       # Create OU=Service Accounts if not exists
       echo '[+] Creating OU=Service Accounts...'
-      docker exec $CONTAINER samba-tool ou show "OU=Service Accounts,$BASE_DN" 2>/dev/null || \
+      echo "$OUS" | grep -qx "OU=Service Accounts" || \
         docker exec $CONTAINER samba-tool ou create "OU=Service Accounts,$BASE_DN" --description="Automated service accounts"
 
       # Create domain-join-svc account
@@ -149,6 +165,19 @@ resource "null_resource" "ad_service_accounts" {
         docker exec $CONTAINER samba-tool user setpassword lam-admin --newpassword='${random_password.lam_bind[0].result}'
       fi
 
+      # Create kasm-bind account
+      echo '[+] Creating kasm-bind account...'
+      if ! docker exec $CONTAINER samba-tool user show kasm-bind 2>/dev/null; then
+        docker exec $CONTAINER samba-tool user create kasm-bind '${random_password.kasm_bind[0].result}' \
+          --given-name="Kasm" --surname="Bind" \
+          --description="Read-only LDAP bind for Kasm Workspaces" \
+          --use-username-as-cn
+        docker exec $CONTAINER samba-tool user setexpiry kasm-bind --noexpiry
+      else
+        echo '    Account already exists, updating password...'
+        docker exec $CONTAINER samba-tool user setpassword kasm-bind --newpassword='${random_password.kasm_bind[0].result}'
+      fi
+
       # Grant domain-join-svc permission to create computer objects in OU=Workstations
       echo '[+] Delegating permissions for domain-join-svc...'
       docker exec $CONTAINER samba-tool dsacl set \
@@ -165,6 +194,7 @@ resource "null_resource" "ad_service_accounts" {
       echo '    - domain-join-svc: domain join operations'
       echo '    - authentik-sync: LDAP read for Authentik'
       echo '    - lam-admin: User/group management via LAM'
+      echo '    - kasm-bind: LDAP read for Kasm Workspaces'
       EOT
     ]
   }
