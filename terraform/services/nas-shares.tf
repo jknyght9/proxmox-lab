@@ -26,8 +26,14 @@ locals {
     vault             = { recordsize = "128K", description = "Vault Raft + keystore" }
     authentik-pg      = { recordsize = "16K", description = "Authentik PostgreSQL data" }
     authentik-data    = { recordsize = "128K", description = "Authentik media + branding + certs" }
-    samba-dc01        = { recordsize = "128K", description = "Samba AD DC01 state (sysvol + sam.ldb)" }
-    samba-dc02        = { recordsize = "128K", description = "Samba AD DC02 state" }
+    # samba-dc01/dc02 intentionally omitted — Samba AD stores state on
+    # local disk (/opt/samba-dc01, /opt/samba-dc02) because GlusterFS FUSE
+    # didn't support POSIX ACLs and NFSv4 doesn't faithfully map them to
+    # Samba's semantics either. Each DC has its own copy; replication is
+    # handled by AD itself rather than the storage layer. Backup story:
+    # the Phase-2 application-consistency sidecar plan calls for periodic
+    # `samba-tool domain backup` writes into a separate NAS path (not in
+    # this migration arc; tracked as future hardening work).
     netbox-pg         = { recordsize = "16K", description = "Netbox PostgreSQL data" }
     netbox-data       = { recordsize = "128K", description = "Netbox media + reports + scripts" }
     netbox-redis      = { recordsize = "128K", description = "Netbox Redis AOF" }
