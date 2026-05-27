@@ -21,7 +21,20 @@ locals {
     nomad_ips   = local.all_ips
     dns01_ip    = var.dns_primary_ip
   })
-  peer_ips    = [for k in local.sorted_vm_keys : local.vm_ips[k] if k != local.master_key]
+
+  # Effective IP for internal service FQDNs baked into /etc/hosts.
+  # Uses the Traefik HA VIP if set, otherwise nomad01.
+  internal_vip_ip = var.traefik_ha_vip != "" ? split("/", var.traefik_ha_vip)[0] : local.master_ip
+
+  # Rendered cloud-init hosts.debian.tmpl override — single source of
+  # truth, embedded in cloud-init for fresh VMs and pushed to existing
+  # VMs by null_resource.hosts_template_override.
+  hosts_template_content = templatefile("${path.module}/cloudinit/hosts.debian.tmpl.tpl", {
+    internal_vip_ip = local.internal_vip_ip
+    dns_postfix     = var.dns_postfix
+  })
+
+  peer_ips = [for k in local.sorted_vm_keys : local.vm_ips[k] if k != local.master_key]
 }
 
 # Render cloud-init user data templates
@@ -29,9 +42,10 @@ resource "local_file" "nomad_user_data" {
   for_each = var.vm_configs
   filename = "${path.module}/rendered/${each.value.name}-user-data.yml"
   content = templatefile("${path.module}/cloudinit/nomad-user-data.tmpl", {
-    dns_postfix         = var.dns_postfix
-    hostname            = each.value.name
-    ssh_authorized_keys = file(var.ssh_admin_public_key_file)
+    dns_postfix             = var.dns_postfix
+    hostname                = each.value.name
+    ssh_authorized_keys     = file(var.ssh_admin_public_key_file)
+    hosts_template_content  = local.hosts_template_content
   })
 }
 
@@ -78,8 +92,9 @@ resource "proxmox_virtual_environment_vm" "nomad" {
   }
 
   cpu {
-    sockets = 1
+    sockets = each.value.sockets
     cores   = each.value.cores
+    type    = each.value.cpu_type
   }
 
   memory {
@@ -491,6 +506,44 @@ locals {
             addresses: [${var.dns_primary_ip}, ${var.network_gateway}]
             search: [${var.dns_postfix}]
   NETPLAN
+}
+
+# Push the augmented /etc/cloud/templates/hosts.debian.tmpl to each Nomad
+# VM and refresh /etc/hosts now. Cloud-init's write_files only runs at
+# instance creation, so this exists to update already-deployed VMs and to
+# regenerate /etc/hosts on every change without waiting for a reboot.
+resource "null_resource" "hosts_template_override" {
+  for_each   = var.vm_configs
+  depends_on = [null_resource.nomad_restart]
+
+  triggers = {
+    content = local.hosts_template_content
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value.ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "file" {
+    content     = local.hosts_template_content
+    destination = "/tmp/hosts.debian.tmpl"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo install -m 644 -o root -g root /tmp/hosts.debian.tmpl /etc/cloud/templates/hosts.debian.tmpl",
+      "rm /tmp/hosts.debian.tmpl",
+      # Regenerate /etc/hosts now so we don't need a reboot. The
+      # `update_etc_hosts` cloud-init module is what reads the template
+      # under manage_etc_hosts:true; --frequency always forces re-run.
+      "sudo cloud-init single --name cc_update_etc_hosts --frequency always 2>/dev/null || sudo cloud-init single --name update_etc_hosts --frequency always",
+      "echo '[+] /etc/hosts regenerated on ${each.value.name}'",
+      "getent hosts vault.${var.dns_postfix} auth.${var.dns_postfix} traefik.${var.dns_postfix}",
+    ]
+  }
 }
 
 resource "null_resource" "nomad_dns_switch" {

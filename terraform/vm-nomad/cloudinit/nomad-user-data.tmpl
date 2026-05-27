@@ -33,6 +33,17 @@ write_files:
       net.ipv4.ip_forward = 1
       net.ipv6.conf.all.forwarding = 1
 
+  # Override the stock /etc/cloud/templates/hosts.debian.tmpl so cloud-init
+  # bakes the internal service FQDNs into /etc/hosts on every boot. Without
+  # this, manage_etc_hosts:true regenerates /etc/hosts from the stock
+  # template at boot, wiping any manual entries — and Nomad client workloads
+  # (plus Vault's container) can't resolve vault/auth/traefik while
+  # resolv.conf still points at the network gateway during bootstrap.
+  - path: /etc/cloud/templates/hosts.debian.tmpl
+    permissions: "0644"
+    content: |
+      ${indent(6, hosts_template_content)}
+
 runcmd:
   - mkdir -p /opt/nomad/data
   - chown -R nomad:nomad /opt/nomad || true

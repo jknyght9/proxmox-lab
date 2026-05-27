@@ -834,7 +834,7 @@ function generateTfvarsFromBootstrap() {
     local nomad_ip="${BASE_IP}.${nomad_octet}"
     local nomad_name="nomad$(printf '%02d' $((i+1)))"
     local vm_id=$((905 + i))
-    NOMAD_CONFIGS_HCL+="  \"${nomad_name}\" = { vm_id = ${vm_id}, name = \"${nomad_name}\", ip = \"${nomad_ip}\", cores = 4, memory = 8192, disk_size = \"100G\", vm_state = \"running\", target_node = \"${target_node}\", target_storage = \"${RUNTIME_STORAGE}\" }\n"
+    NOMAD_CONFIGS_HCL+="  \"${nomad_name}\" = { vm_id = ${vm_id}, name = \"${nomad_name}\", ip = \"${nomad_ip}\", cores = 4, memory = 8192, sockets = 1, cpu_type = \"qemu64\", disk_size = \"100G\", vm_state = \"running\", target_node = \"${target_node}\", target_storage = \"${RUNTIME_STORAGE}\" }\n"
     nomad_octet=$((nomad_octet + 1))
   done
 

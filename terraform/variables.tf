@@ -142,6 +142,10 @@ variable "nomad_vm_configs" {
     vm_state       = string
     target_node    = string
     target_storage = string
+    # Optional so existing tfvars without these fields still validate.
+    # Override per-VM when scaling up: `sockets = 2, cpu_type = "host"`.
+    sockets  = optional(number, 1)
+    cpu_type = optional(string, "qemu64")
   }))
   description = "Nomad VM configurations keyed by hostname"
   default     = {}

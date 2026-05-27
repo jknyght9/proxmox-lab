@@ -95,6 +95,9 @@ variable "vm_configs" {
     vm_state       = string
     target_node    = string
     target_storage = string
+    # Optional so existing tfvars without these fields still validate.
+    sockets  = optional(number, 1)
+    cpu_type = optional(string, "qemu64")
   }))
   description = "Nomad VM configurations. Required — must be passed in by parent module from bootstrap-generated tfvars (no hardcoded defaults so we don't quietly use a previous lab's IPs)."
 }
