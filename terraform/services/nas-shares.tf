@@ -31,7 +31,9 @@ locals {
     netbox-pg         = { recordsize = "16K", description = "Netbox PostgreSQL data" }
     netbox-data       = { recordsize = "128K", description = "Netbox media + reports + scripts" }
     netbox-redis      = { recordsize = "128K", description = "Netbox Redis AOF" }
-    traefik           = { recordsize = "128K", description = "Traefik TLS certs + acme.json" }
+    # traefik intentionally omitted — Traefik mints its own TLS cert from
+    # Vault PKI via a Nomad template stanza, no shared filesystem needed.
+    # See terraform/services/templates/traefik.nomad.hcl.tpl.
     uptime-kuma       = { recordsize = "128K", description = "Uptime Kuma embedded MariaDB" }
     docs              = { recordsize = "128K", description = "MkDocs build artifacts" }
     # LAM has three distinct mount paths: apache+php config (image-provided),
