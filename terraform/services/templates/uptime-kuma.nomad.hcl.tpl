@@ -16,26 +16,14 @@ job "uptime-kuma" {
       port "http" { static = 3001 }
     }
 
-    # Belt-and-suspenders: refuse to start if the gluster volume isn't
-    # actually mounted. Prevents Uptime Kuma from creating a fresh SQLite
-    # DB in a pre-mount empty directory (this is how we lost state before).
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
+    # State lives on the cluster_state NAS via the csi-driver-nfs plugin.
+    # See terraform/services/nas-shares.tf for dataset/share provisioning
+    # and csi-volumes.tf for the volume registration.
+    volume "data" {
+      type            = "csi"
+      source          = "uptime-kuma-data"
+      access_mode     = "single-node-writer"
+      attachment_mode = "file-system"
     }
 
     task "uptime-kuma" {
@@ -48,9 +36,12 @@ job "uptime-kuma" {
         # so a first-time start against an empty directory is expected.
         image        = "louislam/uptime-kuma:2.2.1"
         network_mode = "host"
-        volumes = [
-          "/srv/gluster/nomad-data/uptime-kuma:/app/data",
-        ]
+      }
+
+      volume_mount {
+        volume      = "data"
+        destination = "/app/data"
+        read_only   = false
       }
 
       resources {

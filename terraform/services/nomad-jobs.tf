@@ -72,6 +72,7 @@ resource "nomad_job" "uptime_kuma" {
   depends_on = [
     null_resource.service_directories,
     null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.uptime_kuma,
   ]
 
   jobspec = templatefile("${path.module}/templates/uptime-kuma.nomad.hcl.tpl", {
