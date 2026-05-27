@@ -79,6 +79,14 @@ job "vault" {
         network_mode = "host"
         privileged   = true
         args         = ["server", "-config=/local/vault.hcl"]
+        # Bake internal FQDNs into the container's /etc/hosts so OIDC
+        # discovery (https://auth.<domain>/...) and self-referential
+        # callbacks work even when host DNS hasn't switched to Pi-hole.
+        extra_hosts = [
+          "vault.${dns_postfix}:${internal_vip_ip}",
+          "auth.${dns_postfix}:${internal_vip_ip}",
+          "traefik.${dns_postfix}:${internal_vip_ip}",
+        ]
         volumes = [
           # Per-node data dir — Raft requires each peer to have its own
           # storage path. Multiple peers writing to the same directory

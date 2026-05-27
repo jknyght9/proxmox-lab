@@ -80,7 +80,12 @@ resource "nomad_job" "vault" {
     # Raft retry_join targets — every Nomad VM gets a Vault. Each peer
     # tries to join all the others; whoever's leader (or whoever's first
     # to init) wins.
-    nomad_node_ips    = values(module.nomad.vm_ips)
+    nomad_node_ips = values(module.nomad.vm_ips)
+    # IP to seed into the container's /etc/hosts for vault/auth/traefik
+    # FQDNs so Vault can resolve them without depending on Pi-hole DNS
+    # (Nomad VM resolv.conf points at the gateway during deploy, and
+    # cloud-init manage_etc_hosts wipes any /etc/hosts patch on reboot).
+    internal_vip_ip = var.nomad_traefik_ha_vip != "" ? split("/", var.nomad_traefik_ha_vip)[0] : values(module.nomad.vm_ips)[0]
   })
 
   # Vault starts sealed after every restart — it can't pass health checks
