@@ -47,7 +47,7 @@ function generateNASServersTfvars() {
     # (without -o=json) emits unquoted strings, which breaks HCL parsing
     # the moment any field contains a space or special char (e.g.,
     # profile_ad_group = "Domain Users").
-    for key in name type address api_key admin_user admin_password provides_profiles profile_dataset profile_ad_group; do
+    for key in name type address api_key admin_user admin_password pool provides_profiles profile_dataset profile_ad_group; do
       local val
       val=$(yq -o=json -I=0 ".nas_servers[$i].$key // \"\"" "$BOOTSTRAP" 2>/dev/null)
       [ -n "$val" ] && [ "$val" != "null" ] && [ "$val" != '""' ] && echo "    $key = $val"
@@ -55,6 +55,55 @@ function generateNASServersTfvars() {
     echo "  },"
   done
   echo "]"
+}
+
+# generateNASStorageTfvars — emit the nas_storage object (cluster_state +
+# snapshots) from bootstrap.yml storage.cluster_state / storage.snapshots.
+# Sub-keys live under the existing storage:* block to avoid colliding with
+# the Proxmox storage pool overrides (storage.templates, storage.runtime).
+# Empty / missing → emits a zero-valued block; the cluster_state.nas being
+# blank is what gates whether nas-shares.tf creates any datasets.
+function generateNASStorageTfvars() {
+  local BOOTSTRAP="${SCRIPT_DIR}/bootstrap.yml"
+  if ! command -v yq >/dev/null 2>&1 || [ ! -f "$BOOTSTRAP" ]; then
+    cat <<'EOF'
+nas_storage = {
+  cluster_state = { nas = "", dataset_root = "nomad", allow_hosts = "" }
+  snapshots = {
+    schedule          = "hourly"
+    retention_hourly  = 96
+    retention_daily   = 30
+    retention_monthly = 12
+    replicate_to      = { nas = "", pool = "" }
+  }
+}
+EOF
+    return 0
+  fi
+
+  local cs_nas cs_root cs_hosts s_sched s_h s_d s_m r_nas r_pool
+  cs_nas=$(yq -r '.storage.cluster_state.nas // ""' "$BOOTSTRAP" 2>/dev/null)
+  cs_root=$(yq -r '.storage.cluster_state.dataset_root // "nomad"' "$BOOTSTRAP" 2>/dev/null)
+  cs_hosts=$(yq -r '.storage.cluster_state.allow_hosts // ""' "$BOOTSTRAP" 2>/dev/null)
+  s_sched=$(yq -r '.storage.snapshots.schedule // "hourly"' "$BOOTSTRAP" 2>/dev/null)
+  s_h=$(yq -r '.storage.snapshots.retention_hourly // 96' "$BOOTSTRAP" 2>/dev/null)
+  s_d=$(yq -r '.storage.snapshots.retention_daily // 30' "$BOOTSTRAP" 2>/dev/null)
+  s_m=$(yq -r '.storage.snapshots.retention_monthly // 12' "$BOOTSTRAP" 2>/dev/null)
+  r_nas=$(yq -r '.storage.snapshots.replicate_to.nas // ""' "$BOOTSTRAP" 2>/dev/null)
+  r_pool=$(yq -r '.storage.snapshots.replicate_to.pool // ""' "$BOOTSTRAP" 2>/dev/null)
+
+  cat <<EOF
+nas_storage = {
+  cluster_state = { nas = "$cs_nas", dataset_root = "$cs_root", allow_hosts = "$cs_hosts" }
+  snapshots = {
+    schedule          = "$s_sched"
+    retention_hourly  = $s_h
+    retention_daily   = $s_d
+    retention_monthly = $s_m
+    replicate_to      = { nas = "$r_nas", pool = "$r_pool" }
+  }
+}
+EOF
 }
 
 # Write terraform/services/terraform.tfvars from current bootstrap.yml +
@@ -220,6 +269,9 @@ profile_drive_letter = "$(yq -r '.profile_drive_letter // "P"' "${SCRIPT_DIR}/bo
 
 # NAS servers (from bootstrap.yml)
 $(generateNASServersTfvars)
+
+# NAS storage role bindings (from bootstrap.yml storage.cluster_state + storage.snapshots)
+$(generateNASStorageTfvars)
 
 # UniFi Controller (from bootstrap.yml)
 unifi_address = "$(yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"

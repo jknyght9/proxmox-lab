@@ -34,14 +34,37 @@ network:
 
 dns_suffix: "mylab.lan"        # Domain suffix for all services
 
-# Optional: override auto-detected storage pools
-# If omitted, bootstrap discovers available pools and picks the best option.
+# Storage configuration:
+#   - Top half (templates, runtime, snippets, vztmpl, lxc) overrides
+#     Proxmox-side storage pool auto-detection.
+#   - Bottom half (cluster_state, snapshots) configures NAS-backed pooled
+#     storage for stateful Nomad services. cluster_state.nas REQUIRES a
+#     matching entry in `nas_servers` below (and that entry's `pool`).
+#     This is what replaces GlusterFS; deploys refuse to start stateful
+#     services without it.
 # storage:
+#   # --- Proxmox storage pools (optional overrides) ---
 #   templates: "nfs-templates"  # Storage for Packer template images (must support 'images' content)
 #   runtime:   "local-lvm"      # Storage for running VMs and LXC containers
 #   snippets:  "local"          # Storage for cloud-init vendor data (must support 'snippets' content)
 #   vztmpl:    "local"          # Storage for downloaded LXC templates (must support 'vztmpl' content)
 #   lxc:       "local-lvm"      # Storage for LXC container rootfs (block-level preferred)
+#
+#   # --- NAS-backed cluster storage (required for stateful services) ---
+#   cluster_state:
+#     nas: "nas01"              # Name of an entry in nas_servers (below)
+#     dataset_root: "nomad"     # → creates <pool>/nomad/<service> on the NAS
+#     allow_hosts: ""           # CIDR; blank = use network.cidr
+#
+#   # --- Snapshot + replication policy (replaces old `backup:` block) ---
+#   snapshots:
+#     schedule: "hourly"                 # hourly | daily | both
+#     retention_hourly: 96
+#     retention_daily: 30
+#     retention_monthly: 12
+#     # replicate_to:                    # OPTIONAL — ZFS replication target
+#     #   nas: "nas02"                   # different NAS for offsite
+#     #   pool: "pool_backup"            # or different pool on same NAS
 
 # =============================================================================
 # High Availability (optional — uncomment to enable keepalived VIPs)
@@ -78,6 +101,9 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 #     address: "192.168.1.50"           # Management IP or FQDN
 #     api_key: ""                       # TrueNAS: API key from UI
 #                                       # Synology: not needed (uses AD join creds)
+#     pool: "pool_data"                 # REQUIRED if this NAS is referenced by
+#                                       # any storage role (storage.cluster_state.nas,
+#                                       # provides_profiles, etc.). ZFS pool name.
 #     # --- Roaming-profile fields (optional; omit to skip profile setup on this NAS) ---
 #     # provides_profiles: true         # Opt-in: auto-create dataset, share, ACLs, per-user folders
 #     # profile_dataset: "pool/profiles" # ZFS dataset to create (no /mnt/ prefix). Required if provides_profiles.
@@ -105,28 +131,17 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # netbox_sync_timezone: "UTC"
 
 # =============================================================================
-# Periodic Backups (optional — Nomad batch job archives Vault, Authentik DB,
-# Samba, Netbox, etc. to NFS or SMB nightly)
+# Periodic Backups — superseded by `storage.snapshots` above.
 # =============================================================================
-# Credentials are stored in Vault, not in tfstate. backup.type controls
-# which set of fields below is used; the other set is ignored.
-
-# backup:
-#   type: "nfs"                            # "nfs" or "smb"
+# The old explicit `backup:` Nomad job (nightly tar+pg_dump to NFS/SMB) has
+# been replaced by ZFS snapshots on the NAS, configured under
+# storage.snapshots. ZFS snapshots are cheaper (copy-on-write), faster to
+# restore (zfs clone), and atomic per-dataset. Per-DB application-consistent
+# safety nets (pg_dump + vault raft snapshot save) run as sidecars inside the
+# same dataset, so each snapshot captures both live files and a logical dump.
 #
-#   # NFS target (when type=nfs)
-#   nfs_server: "nas.example.lan"
-#   nfs_path:   "/mnt/pool/backups/proxmox-lab"
-#
-#   # SMB target (when type=smb)
-#   # smb_server:   "nas.example.lan"
-#   # smb_share:    "backups"
-#   # smb_user:     "backup-user"
-#   # smb_password: "..."
-#
-#   retention_days: 7
-#   cron:           "0 2 * * *"            # nightly at 02:00
-#   timezone:       "UTC"
+# If you still have a `backup:` block in your bootstrap.yml from an older
+# deploy, it's safe to delete — the parser ignores it.
 
 # =============================================================================
 # Tailscale Subnet Routers (optional — every Nomad node joins the tailnet
