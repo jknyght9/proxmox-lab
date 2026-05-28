@@ -59,7 +59,7 @@ resource "null_resource" "install_vault_cert" {
   }
 
   provisioner "remote-exec" {
-    inline = ["sudo mkdir -p /srv/gluster/nomad-data/vault-tls"]
+    inline = ["sudo mkdir -p /var/lib/vault-tls"]
   }
 
   provisioner "file" {
@@ -74,12 +74,52 @@ resource "null_resource" "install_vault_cert" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo cp /tmp/vault-cert.pem /srv/gluster/nomad-data/vault-tls/cert.pem",
-      "sudo cp /tmp/vault-key.pem /srv/gluster/nomad-data/vault-tls/key.pem",
-      "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/cert.pem",
-      "sudo chmod 644 /srv/gluster/nomad-data/vault-tls/key.pem",
+      "sudo cp /tmp/vault-cert.pem /var/lib/vault-tls/cert.pem",
+      "sudo cp /tmp/vault-key.pem /var/lib/vault-tls/key.pem",
+      "sudo chmod 644 /var/lib/vault-tls/cert.pem",
+      "sudo chmod 644 /var/lib/vault-tls/key.pem",
       "rm -f /tmp/vault-cert.pem /tmp/vault-key.pem",
       "echo '[+] Vault listener cert installed on ${each.key} (full chain)'",
+    ]
+  }
+}
+
+# Push the root CA cert to each Nomad VM so the Vault container can read
+# it via /certs/root_ca.crt at startup (used by retry_join for TLS verify
+# of peer cluster). Previously came from /srv/gluster/nomad-data/certs;
+# Vault is the one service that can't fetch from itself via a template
+# stanza (chicken-egg on TLS bootstrap), so we ship it via SSH like the
+# listener cert.
+resource "null_resource" "install_vault_root_ca" {
+  for_each   = var.nomad_node_ips
+  depends_on = [vault_pki_secret_backend_root_cert.root]
+
+  triggers = {
+    cert = vault_pki_secret_backend_root_cert.root.certificate
+    host = each.value
+  }
+
+  connection {
+    type        = "ssh"
+    host        = each.value
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = ["sudo mkdir -p /var/lib/vault-tls"]
+  }
+
+  provisioner "file" {
+    content     = vault_pki_secret_backend_root_cert.root.certificate
+    destination = "/tmp/root_ca.crt"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo cp /tmp/root_ca.crt /var/lib/vault-tls/root_ca.crt",
+      "sudo chmod 644 /var/lib/vault-tls/root_ca.crt",
+      "rm -f /tmp/root_ca.crt",
     ]
   }
 }

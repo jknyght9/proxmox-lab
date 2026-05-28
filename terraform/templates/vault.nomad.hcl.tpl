@@ -11,33 +11,11 @@ job "vault" {
       port "cluster" { static = 8201 }
     }
 
-    # Belt-and-suspenders: refuse to start if the gluster brick isn't
-    # mounted. Per-node Raft data lives under
-    # /srv/gluster/nomad-data/vault/<hostname>, so we still need the
-    # mount even though Raft does its own replication on top.
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
-    }
-
-    # Each Vault instance lives at /srv/gluster/nomad-data/vault/<hostname>.
-    # Pre-creating the directory is handled by null_resource.vault_directories
-    # in terraform/main.tf — this prestart double-checks and creates if missing,
-    # so the docker bind-mount doesn't fall back to a root-owned auto-created path.
+    # Per-peer Vault data lives on each Nomad VM's local disk at
+    # /var/lib/vault-data. Raft replicates between peers; storage layer
+    # isn't shared. Prestart ensures the directory exists with permissive
+    # mode so the Docker bind-mount writes succeed even if cloud-init
+    # didn't run.
     task "ensure-data-dir" {
       driver = "raw_exec"
       lifecycle {
@@ -48,7 +26,7 @@ job "vault" {
         command = "/bin/bash"
         args = [
           "-c",
-          "sudo mkdir -p /srv/gluster/nomad-data/vault/$${node.unique.name} && sudo chmod 777 /srv/gluster/nomad-data/vault/$${node.unique.name}"
+          "sudo mkdir -p /var/lib/vault-data && sudo chmod 777 /var/lib/vault-data"
         ]
       }
       resources {
@@ -88,12 +66,16 @@ job "vault" {
           "traefik.${dns_postfix}:${internal_vip_ip}",
         ]
         volumes = [
-          # Per-node data dir — Raft requires each peer to have its own
-          # storage path. Multiple peers writing to the same directory
-          # would corrupt the WAL.
-          "/srv/gluster/nomad-data/vault/$${node.unique.name}:/data/vault",
-          "/srv/gluster/nomad-data/certs:/certs:ro",
-          "/srv/gluster/nomad-data/vault-tls:/tls:ro",
+          # Per-peer Raft data on local disk. Each Nomad VM's path is
+          # independent — Raft replicates between peers, no shared
+          # storage. Listener cert + root CA both live in
+          # /var/lib/vault-tls (pushed by null_resource.install_vault_cert
+          # and null_resource.install_vault_root_ca in tls-certificates.tf).
+          # Two bind-mounts of the same source preserve the existing /tls
+          # and /certs paths in the rendered vault.hcl.
+          "/var/lib/vault-data:/data/vault",
+          "/var/lib/vault-tls:/certs:ro",
+          "/var/lib/vault-tls:/tls:ro",
         ]
       }
 

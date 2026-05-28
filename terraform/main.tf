@@ -63,8 +63,8 @@ resource "null_resource" "vault_directories" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/vault/${each.key} /srv/gluster/nomad-data/vault-tls /srv/gluster/nomad-data/certs",
-      "sudo chmod 777 /srv/gluster/nomad-data/vault/${each.key} /srv/gluster/nomad-data/vault-tls",
+      "sudo mkdir -p /var/lib/vault-data /var/lib/vault-tls",
+      "sudo chmod 777 /var/lib/vault-data /var/lib/vault-tls",
     ]
   }
 }
