@@ -3,11 +3,10 @@
 #
 # The docs/ directory and mkdocs.yml are mounted into the Terraform container
 # at /docs and /mkdocs.yml. This resource copies them to nomad01, builds the
-# static site using Docker, and deploys to GlusterFS.
+# static site using Docker, and deploys to the docs CSI/NFS share.
 # =============================================================================
 
 resource "null_resource" "docs_build" {
-  depends_on = [null_resource.service_directories]
 
   triggers = {
     dns_postfix = var.dns_postfix
@@ -78,10 +77,14 @@ resource "null_resource" "docs_build" {
         -e 's/&lt;nomad01-ip&gt;/${local.nomad01_ip}/g' \
         -e 's/<nomad01-ip>/${local.nomad01_ip}/g' {} +
 
-      # Deploy to GlusterFS
-      sudo mkdir -p /srv/gluster/nomad-data/docs/site
-      sudo cp -r /tmp/docs-build-site/* /srv/gluster/nomad-data/docs/site/
-      sudo chmod -R 755 /srv/gluster/nomad-data/docs/site
+      # Deploy to the docs CSI/NFS share. Mount the NFS export ad-hoc,
+      # rsync the built site (so removals get cleaned too), unmount.
+      sudo mkdir -p /tmp/nfs-docs
+      sudo mount -t nfs -o nfsvers=4.1 ${local.cluster_state_nas.address}:/mnt/${local.cluster_state_dataset_root}/docs /tmp/nfs-docs
+      sudo rsync -a --delete /tmp/docs-build-site/ /tmp/nfs-docs/
+      sudo chmod -R 755 /tmp/nfs-docs
+      sudo umount /tmp/nfs-docs
+      sudo rmdir /tmp/nfs-docs
 
       # Cleanup
       rm -rf /tmp/docs-build /tmp/docs-build-mkdocs.yml /tmp/docs-build-site

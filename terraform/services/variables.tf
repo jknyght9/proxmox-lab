@@ -183,10 +183,7 @@ variable "netbox_api_token" {
 }
 
 
-variable "deploy_backup" {
-  type    = bool
-  default = false
-}
+# Removed: var.deploy_backup. See vault-secrets.tf / nomad-jobs.tf comments.
 
 # =============================================================================
 # UniFi Controller (for Netbox inventory sync)
@@ -205,52 +202,10 @@ variable "unifi_api_key" {
   default     = ""
 }
 
-# =============================================================================
-# Periodic Backups (NFS or SMB target — credentials stored in Vault)
-# =============================================================================
-
-variable "backup_type" {
-  type        = string
-  description = "Backup target type: 'nfs' or 'smb'"
-  default     = "nfs"
-}
-
-variable "backup_nfs_server" {
-  type        = string
-  description = "NFS server hostname or IP (only when backup_type='nfs')"
-  default     = ""
-}
-
-variable "backup_nfs_path" {
-  type        = string
-  description = "NFS export path (e.g. /mnt/pool/backups)"
-  default     = ""
-}
-
-variable "backup_smb_server" {
-  type        = string
-  description = "SMB server hostname or IP (only when backup_type='smb')"
-  default     = ""
-}
-
-variable "backup_smb_share" {
-  type        = string
-  description = "SMB share name"
-  default     = ""
-}
-
-variable "backup_smb_user" {
-  type        = string
-  description = "SMB authenticating user"
-  default     = ""
-}
-
-variable "backup_smb_password" {
-  type        = string
-  sensitive   = true
-  description = "SMB user password (stored in Vault, not in tfstate output)"
-  default     = ""
-}
+# Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
+# backup Nomad job was retired in Phase 2/3 of the storage migration;
+# ZFS snapshots on the cluster_state NAS handle the backup role now
+# (configured via storage.snapshots in bootstrap.yml).
 
 # =============================================================================
 # Tailscale Subnet Routers (optional — every Nomad node runs tailscaled,
@@ -319,24 +274,9 @@ variable "ad_domain" {
   default     = ""
 }
 
-# =============================================================================
-# Backup Configuration
-# =============================================================================
-
-variable "backup_cron" {
-  type    = string
-  default = "0 2 * * *"
-}
-
-variable "backup_timezone" {
-  type    = string
-  default = "UTC"
-}
-
-variable "backup_retention_days" {
-  type    = number
-  default = 7
-}
+# Removed: var.backup_cron / backup_timezone / backup_retention_days.
+# Snapshot cadence + retention now live under storage.snapshots in
+# bootstrap.yml; see plans/serene-brewing-cray.md.
 
 # Periodic Netbox inventory sync (UniFi → Netbox).
 # Default: every 6 hours. Override in bootstrap.yml as netbox_sync_cron.

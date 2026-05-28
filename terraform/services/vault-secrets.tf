@@ -223,22 +223,9 @@ resource "vault_kv_secret_v2" "unifi" {
   })
 }
 
-# Backup credentials. The backup Nomad job reads this at runtime via WIF
-# and uses the values to mount the NFS/SMB target before archiving.
-resource "vault_kv_secret_v2" "backup" {
-  count = var.deploy_backup ? 1 : 0
-  mount = vault_mount.secret.path
-  name  = "backup"
-  data_json = jsonencode({
-    backup_type  = var.backup_type
-    nfs_server   = var.backup_nfs_server
-    nfs_path     = var.backup_nfs_path
-    smb_server   = var.backup_smb_server
-    smb_share    = var.backup_smb_share
-    smb_user     = var.backup_smb_user
-    smb_password = var.backup_smb_password
-  })
-}
+# Removed: vault_kv_secret_v2.backup. The explicit backup job was retired
+# in Phase 2/3; ZFS snapshots on the cluster_state NAS handle the backup
+# role now. See plans/serene-brewing-cray.md.
 
 # Tailscale auth key. The tailscale system job reads this at runtime via
 # WIF and joins the tailnet on every Nomad node, advertising the lab

@@ -23,7 +23,6 @@ resource "null_resource" "netbox_inventory" {
     deploy_netbox    = var.deploy_netbox
     deploy_uptime    = var.deploy_uptime_kuma
     deploy_lam       = var.deploy_lam
-    deploy_backup    = var.deploy_backup
     deploy_tailscale = var.deploy_tailscale
     unifi_address    = var.unifi_address
   }
@@ -36,7 +35,6 @@ resource "null_resource" "netbox_inventory" {
     nomad_job.samba_ad,
     nomad_job.uptime_kuma,
     nomad_job.lam,
-    nomad_job.backup,
     nomad_job.tailscale,
   ]
 

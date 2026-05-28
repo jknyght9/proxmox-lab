@@ -23,11 +23,7 @@ resource "vault_policy" "samba_ad" {
   policy = file("${path.module}/../../nomad/vault-policies/samba-ad.hcl")
 }
 
-resource "vault_policy" "backup" {
-  count  = var.deploy_backup ? 1 : 0
-  name   = "backup"
-  policy = file("${path.module}/../../nomad/vault-policies/backup.hcl")
-}
+# Removed: vault_policy.backup. See nomad-jobs.tf for context.
 
 resource "vault_policy" "lam" {
   count  = var.deploy_lam ? 1 : 0

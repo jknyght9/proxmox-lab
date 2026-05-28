@@ -1,78 +1,27 @@
 # =============================================================================
-# GlusterFS Service Directories — created before Nomad jobs deploy
+# Service Directories — created before Nomad jobs deploy
 # Replaces: mkdir calls scattered across deploy scripts
+#
+# Post-gluster-decommission this only handles:
+#   - Samba DCs (local-disk per Nomad VM, not migrated to CSI/NFS)
+#   - LAM config bootstrap (NFS share is pre-created in Phase 0, but
+#     we still need to seed it from the container image's defaults)
+#
+# All other services either get their state from the cluster_state NAS
+# (Phase 0 created the datasets + shares) or from Vault PKI / Nomad
+# template stanzas at runtime. The old gluster mkdir was a no-op for
+# everything except Samba and LAM-bootstrap after Phase 2 landed; this
+# file now reflects that.
 # =============================================================================
 
-resource "null_resource" "service_directories" {
-  triggers = {
-    services = join(",", compact([
-      "vault",
-      "vault-tls",
-      "certs",
-      var.deploy_traefik ? "traefik,traefik/config,traefik/tls" : "",
-      var.deploy_authentik ? "authentik,authentik/postgres,authentik/data,authentik/data/media" : "",
-      var.deploy_samba_ad ? "" : "", # samba uses /opt/samba-dc01 on host, not gluster
-      var.deploy_uptime_kuma ? "uptime-kuma" : "",
-      var.deploy_lam ? "lam,lam/config,lam/session" : "",
-      var.deploy_netbox ? "netbox,netbox/postgres,netbox/redis,netbox/data/media" : "",
-      "docs,docs/site",
-    ]))
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.nomad01_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      <<-EOT
-      echo '[+] Creating GlusterFS service directories...'
-      GLUSTER="/srv/gluster/nomad-data"
-
-      # Core (always) — Vault container runs as root but needs write access
-      sudo mkdir -p $GLUSTER/vault $GLUSTER/vault-tls $GLUSTER/certs
-      sudo chmod 777 $GLUSTER/vault $GLUSTER/vault-tls
-
-      %{if var.deploy_traefik}
-      sudo mkdir -p $GLUSTER/traefik/config $GLUSTER/traefik/tls
-      %{endif}
-
-      %{if var.deploy_authentik}
-      sudo mkdir -p $GLUSTER/authentik/postgres $GLUSTER/authentik/data/media
-      sudo chown -R 1000:1000 $GLUSTER/authentik/data
-      # Branding disabled — uncomment to enable custom branding
-      # sudo mkdir -p $GLUSTER/authentik/branding
-      # [ -f $GLUSTER/authentik/branding/background.png ] || sudo touch $GLUSTER/authentik/branding/background.png
-      # [ -f $GLUSTER/authentik/branding/logo.svg ] || sudo touch $GLUSTER/authentik/branding/logo.svg
-      %{endif}
-
-      %{if var.deploy_uptime_kuma}
-      sudo mkdir -p $GLUSTER/uptime-kuma
-      %{endif}
-
-      %{if var.deploy_lam}
-      sudo mkdir -p $GLUSTER/lam/config $GLUSTER/lam/session
-      %{endif}
-
-      %{if var.deploy_netbox}
-      sudo mkdir -p $GLUSTER/netbox/postgres $GLUSTER/netbox/redis $GLUSTER/netbox/data/media
-      %{endif}
-
-      sudo mkdir -p $GLUSTER/docs/site
-
-      echo '[+] Service directories created'
-      EOT
-    ]
-  }
-}
-
-# LAM config bootstrap — extract defaults from container image
+# LAM config bootstrap — extract defaults from container image once.
+# The lam-config CSI volume's NFS share (Phase 0) starts empty; LAM's
+# entrypoint will regenerate lam.conf, but image-shipped helpers like
+# apache.conf live in /etc/ldap-account-manager and need to be seeded.
+# We mount the NFS share temporarily on nomad01, dump the container's
+# defaults into it, unmount.
 resource "null_resource" "lam_bootstrap" {
-  count      = var.deploy_lam ? 1 : 0
-  depends_on = [null_resource.service_directories]
+  count = var.deploy_lam ? 1 : 0
 
   triggers = {
     deploy_lam = var.deploy_lam
@@ -89,26 +38,31 @@ resource "null_resource" "lam_bootstrap" {
     inline = [
       <<-EOT
       set -e
-      GLUSTER="/srv/gluster/nomad-data"
-      if [ -f $GLUSTER/lam/config/config.cfg ]; then
-        echo '[+] LAM config already exists, skipping bootstrap'
+      MNT=/tmp/nfs-lam-bootstrap
+      sudo mkdir -p $MNT
+      sudo mount -t nfs -o nfsvers=4.1 ${local.cluster_state_nas.address}:/mnt/${local.cluster_state_dataset_root}/lam-config $MNT
+      if [ -f $MNT/config.cfg ]; then
+        echo '[+] LAM config already seeded, skipping bootstrap'
+        sudo umount $MNT && sudo rmdir $MNT
         exit 0
       fi
-      echo '[+] Bootstrapping LAM default config from container...'
+      echo '[+] Bootstrapping LAM default config from container into NFS share...'
       sudo docker rm -f lam-bootstrap 2>/dev/null || true
-      sudo docker pull ghcr.io/ldapaccountmanager/lam:9.5.2
-      sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:9.5.2
-      sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $GLUSTER/lam/config/
+      sudo docker pull ghcr.io/ldapaccountmanager/lam:9.6.RC1
+      sudo docker create --name lam-bootstrap ghcr.io/ldapaccountmanager/lam:9.6.RC1
+      sudo docker cp lam-bootstrap:/etc/ldap-account-manager/. $MNT/
       sudo docker rm lam-bootstrap
-      sudo chmod -R 777 $GLUSTER/lam
+      sudo chmod -R 777 $MNT
+      sudo umount $MNT && sudo rmdir $MNT
       echo '[+] LAM config bootstrapped'
-      ls -la $GLUSTER/lam/config/
       EOT
     ]
   }
 }
 
-# Samba DC uses local storage on each node, not GlusterFS
+# Samba DC uses local storage on each node — never on shared storage
+# (POSIX-ACL semantics, AD replication handles redundancy). One mkdir
+# per DC's host VM.
 resource "null_resource" "samba_directories" {
   for_each = var.deploy_samba_ad ? {
     dc01 = { node = "nomad01", ip = var.nomad_node_ips["nomad01"], dir = "/opt/samba-dc01" }

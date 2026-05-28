@@ -77,25 +77,9 @@ resource "vault_jwt_auth_backend_role" "samba_ad" {
   bound_claims   = { nomad_job_id = "samba-ad" }
 }
 
-resource "vault_jwt_auth_backend_role" "backup" {
-  count                   = var.deploy_backup ? 1 : 0
-  backend                 = vault_jwt_auth_backend.nomad.path
-  role_name               = "backup"
-  role_type               = "jwt"
-  bound_audiences         = ["vault.io"]
-  user_claim              = "/nomad_job_id"
-  user_claim_json_pointer = true
-  claim_mappings = {
-    nomad_namespace = "nomad_namespace"
-    nomad_job_id    = "nomad_job_id"
-    nomad_task      = "nomad_task"
-  }
-  token_type     = "service"
-  token_policies = ["backup"]
-  token_period   = 3600
-  token_ttl      = 3600
-  bound_claims   = { nomad_job_id = "backup" }
-}
+# Removed: vault_jwt_auth_backend_role.backup. The explicit backup Nomad
+# job was retired in Phase 2/3 of the storage migration; see
+# plans/serene-brewing-cray.md.
 
 resource "vault_jwt_auth_backend_role" "lam" {
   count                   = var.deploy_lam ? 1 : 0

@@ -134,27 +134,11 @@ resource "null_resource" "install_root_ca" {
   }
 }
 
-# --- Save root CA to GlusterFS for containers ---
-
-resource "null_resource" "gluster_root_ca" {
-  depends_on = [vault_pki_secret_backend_root_cert.root]
-
-  triggers = {
-    root_ca = vault_pki_secret_backend_root_cert.root.issuing_ca
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.nomad01_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo mkdir -p /srv/gluster/nomad-data/certs",
-      "echo '${vault_pki_secret_backend_root_cert.root.issuing_ca}' | sudo tee /srv/gluster/nomad-data/certs/root_ca.crt > /dev/null",
-      "echo '[+] Root CA saved to GlusterFS'",
-    ]
-  }
-}
+# Note: the previous null_resource.gluster_root_ca that pushed the root
+# CA to /srv/gluster/nomad-data/certs/root_ca.crt was removed in the
+# Phase-3 cleanup. Consumers that need the root CA now get it from:
+#   - Vault PKI directly via Nomad template stanza
+#     (authentik, netbox — see those job templates)
+#   - SSH+write to /var/lib/vault-tls/root_ca.crt per Nomad VM
+#     (vault — see null_resource.install_vault_root_ca in
+#     tls-certificates.tf; chicken-egg requires this for vault itself)

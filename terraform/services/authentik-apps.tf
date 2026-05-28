@@ -252,8 +252,12 @@ resource "null_resource" "authentik_apps" {
           "${var.vault_address}/v1/sys/auth/oidc" \
           -d '{"type":"oidc","description":"Authentik SSO"}' > /dev/null 2>&1 || true
 
-        # Get root CA for OIDC discovery
-        CA_PEM=$(cat /srv/gluster/nomad-data/certs/root_ca.crt 2>/dev/null || echo "")
+        # Get root CA for OIDC discovery — read directly from Vault's PKI
+        # mount instead of the old gluster cert path (decommissioned in
+        # Phase 3 of the storage migration).
+        CA_PEM=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" \
+          "${var.vault_address}/v1/pki/cert/ca" \
+          | jq -r '.data.certificate // ""')
 
         # Configure OIDC (uses jq to safely embed CA cert with newlines)
         OIDC_PAYLOAD=$(jq -n \

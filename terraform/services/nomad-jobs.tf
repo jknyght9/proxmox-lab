@@ -6,7 +6,6 @@
 resource "nomad_job" "traefik" {
   count = var.deploy_traefik ? 1 : 0
   depends_on = [
-    null_resource.service_directories,
     null_resource.nomad_vault_config,
     vault_policy.traefik,
     vault_jwt_auth_backend_role.traefik,
@@ -26,7 +25,6 @@ resource "nomad_job" "traefik" {
 resource "nomad_job" "authentik" {
   count = var.deploy_authentik ? 1 : 0
   depends_on = [
-    null_resource.service_directories,
     vault_policy.authentik,
     vault_jwt_auth_backend_role.authentik,
     vault_kv_secret_v2.authentik,
@@ -77,7 +75,6 @@ resource "nomad_job" "samba_ad" {
 resource "nomad_job" "uptime_kuma" {
   count = var.deploy_uptime_kuma ? 1 : 0
   depends_on = [
-    null_resource.service_directories,
     null_resource.nomad_vault_config,
     nomad_csi_volume_registration.uptime_kuma,
   ]
@@ -107,26 +104,15 @@ resource "nomad_job" "lam" {
   detach = false
 }
 
-resource "nomad_job" "backup" {
-  count = var.deploy_backup ? 1 : 0
-  depends_on = [
-    vault_policy.backup,
-    vault_jwt_auth_backend_role.backup,
-    null_resource.nomad_vault_config,
-  ]
-
-  jobspec = templatefile("${path.module}/templates/backup.nomad.hcl.tpl", {
-    backup_cron           = var.backup_cron
-    backup_timezone       = var.backup_timezone
-    backup_retention_days = var.backup_retention_days
-  })
-  detach = false
-}
+# Removed: nomad_job.backup. The explicit tar+pg_dump backup Nomad job
+# was replaced in Phase 2/3 by ZFS snapshots on the cluster_state NAS
+# (configured via storage.snapshots in bootstrap.yml). See
+# plans/serene-brewing-cray.md. The bootstrap.yml `backup:` block is
+# also deprecated; existing entries are ignored by the tfvars generator.
 
 resource "nomad_job" "netbox" {
   count = var.deploy_netbox ? 1 : 0
   depends_on = [
-    null_resource.service_directories,
     vault_policy.netbox,
     vault_jwt_auth_backend_role.netbox,
     vault_kv_secret_v2.netbox,
@@ -152,7 +138,6 @@ resource "nomad_job" "netbox" {
 
 resource "nomad_job" "docs" {
   depends_on = [
-    null_resource.service_directories,
     null_resource.nomad_vault_config,
     null_resource.docs_build,
     nomad_csi_volume_registration.docs,
