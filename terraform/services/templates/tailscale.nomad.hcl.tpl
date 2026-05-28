@@ -11,28 +11,6 @@ job "tailscale" {
       role = "tailscale"
     }
 
-    # Belt-and-suspenders: refuse to start if the gluster volume isn't
-    # actually mounted (host-level RequiresMountsFor should already guarantee
-    # this, but this catches manual-unmount and runtime-drop edge cases).
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/bash"
-        args = [
-          "-c",
-          "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"
-        ]
-      }
-      resources {
-        cpu    = 10
-        memory = 16
-      }
-    }
-
     # Tailscale containerboot installs forward rules in iptables-legacy,
     # but Docker installs a FORWARD-DROP policy in iptables-nft. On
     # kernels where both backends are active simultaneously, Docker's
@@ -72,8 +50,12 @@ job "tailscale" {
         privileged   = true
 
         volumes = [
-          # Per-node state directory to avoid conflicts
-          "/srv/gluster/nomad-data/tailscale/$${node.unique.name}:/var/lib/tailscale",
+          # State on each Nomad VM's local disk. System job + per-node
+          # bind-mount means each alloc reads/writes its own host's path —
+          # no collisions, no shared filesystem required. Cluster_state
+          # NAS-side snapshots wouldn't help here (tailscaled.state is
+          # current-or-new credentials, not rollback-friendly).
+          "/var/lib/tailscale-state:/var/lib/tailscale",
           "/dev/net/tun:/dev/net/tun",
         ]
       }
