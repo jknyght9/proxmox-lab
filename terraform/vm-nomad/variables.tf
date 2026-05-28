@@ -45,15 +45,9 @@ variable "nomad_region" {
   default = "global"
 }
 
-variable "gluster_mount_path" {
-  type    = string
-  default = "/srv/gluster/nomad-data"
-}
-
-variable "gluster_volume_name" {
-  type    = string
-  default = "nomad-data"
-}
+# Removed: var.gluster_mount_path and var.gluster_volume_name. The
+# GlusterFS install was retired in Phase 3 of the storage migration;
+# services moved to CSI/NFS on the cluster_state NAS or local disk.
 
 variable "node_ip_map" {
   type        = map(string)

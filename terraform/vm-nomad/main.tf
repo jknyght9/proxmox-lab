@@ -1,26 +1,14 @@
 locals {
   proxmox_api_host = regex("^https?://([^:/]+)", var.proxmox_endpoint)[0]
   # Use IPs for retry_join — DNS names aren't available at boot time
-  nomad_servers    = join(",", [for k, v in var.vm_configs : "\"${v.ip}\""])
-  sorted_vm_keys   = sort(keys(var.vm_configs))
-
-  # GlusterFS configuration
-  gluster_brick  = "/data/gluster/${var.gluster_volume_name}"
-  gluster_volume = var.gluster_volume_name
+  nomad_servers  = join(",", [for k, v in var.vm_configs : "\"${v.ip}\""])
+  sorted_vm_keys = sort(keys(var.vm_configs))
 
   # Static IPs — known from vm_configs, no guest agent discovery needed
-  vm_ips = { for k, v in var.vm_configs : k => v.ip }
-  master_key  = local.sorted_vm_keys[0]
-  master_ip   = local.vm_ips[local.master_key]
-  all_ips     = [for k in local.sorted_vm_keys : local.vm_ips[k]]
-
-  # Rendered Traefik authentik middleware config
-  traefik_authentik_yml = templatefile("${path.module}/templates/traefik-authentik.yml.tpl", {
-    dns_postfix = var.dns_postfix
-    nomad01_ip  = local.vm_ips[local.sorted_vm_keys[0]]
-    nomad_ips   = local.all_ips
-    dns01_ip    = var.dns_primary_ip
-  })
+  vm_ips     = { for k, v in var.vm_configs : k => v.ip }
+  master_key = local.sorted_vm_keys[0]
+  master_ip  = local.vm_ips[local.master_key]
+  all_ips    = [for k in local.sorted_vm_keys : local.vm_ips[k]]
 
   # Effective IP for internal service FQDNs baked into /etc/hosts.
   # Uses the Traefik HA VIP if set, otherwise nomad01.
@@ -153,11 +141,10 @@ resource "null_resource" "nomad_config" {
   depends_on = [proxmox_virtual_environment_vm.nomad]
 
   triggers = {
-    nomad_servers          = local.nomad_servers
-    nomad_datacenter       = var.nomad_datacenter
-    nomad_region           = var.nomad_region
-    gluster_mount          = var.gluster_mount_path
-    vm_ip                  = each.value.ip
+    nomad_servers    = local.nomad_servers
+    nomad_datacenter = var.nomad_datacenter
+    nomad_region     = var.nomad_region
+    vm_ip            = each.value.ip
   }
 
   connection {
@@ -196,11 +183,6 @@ server {
 
 client {
   enabled = true
-
-  host_volume "gluster-data" {
-    path      = "${var.gluster_mount_path}"
-    read_only = false
-  }
 }
 
 plugin "docker" {
@@ -245,8 +227,7 @@ VAULTCONF
       # enabled during the Packer build, so Nomad is already running with
       # whatever config was on disk at boot — without raw_exec enabled,
       # docker volumes allowed, etc. Restart so the new config takes
-      # effect; without this the wait-for-gluster prestart task on every
-      # downstream Nomad job fails with "missing drivers: raw_exec".
+      # effect.
       sudo systemctl restart nomad
       echo '[+] Nomad configuration written and reloaded on ${each.value.name}'
       EOT
@@ -291,189 +272,25 @@ CERTSCRIPT
   }
 }
 
-# =============================================================================
-# GlusterFS Cluster Setup
-# =============================================================================
+# GlusterFS removed in Phase 3 of the storage migration — all services
+# moved either to CSI/NFS on the cluster_state NAS or to local disk
+# per Nomad VM. Previous resources here:
+#   - null_resource.gluster_brick_setup    (per-VM brick dir creation)
+#   - null_resource.gluster_init           (peer probe + volume create + tuning)
+#   - null_resource.gluster_mount          (fstab entry + mount on each VM)
+#   - null_resource.gluster_mount_sentinel (sentinel file for wait-for-gluster prestart)
+#   - null_resource.traefik_config         (push authentik.yml to gluster — now
+#                                           inlined in the traefik Nomad template
+#                                           via a `template {}` stanza)
+# See plans/serene-brewing-cray.md for the migration arc.
 
-# Step 1: Create brick directories on each node
-resource "null_resource" "gluster_brick_setup" {
-  for_each   = var.vm_configs
-  depends_on = [proxmox_virtual_environment_vm.nomad]
-
-  triggers = {
-    vm_id = proxmox_virtual_environment_vm.nomad[each.key].vm_id
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.vm_ips[each.key]
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "echo '[+] Setting up GlusterFS brick on ${each.value.name}...'",
-      "sudo mkdir -p ${local.gluster_brick}",
-      "sudo mkdir -p ${var.gluster_mount_path}",
-    ]
-  }
-}
-
-# Step 2: Initialize GlusterFS cluster from master node (peer probe + volume create)
-resource "null_resource" "gluster_init" {
-  depends_on = [null_resource.gluster_brick_setup]
-
-  triggers = {
-    cluster_ips = join(",", local.all_ips)
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.master_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = flatten([
-      "echo '[+] Initializing GlusterFS cluster from ${local.master_ip}...'",
-
-      # Peer probe all other nodes
-      [for ip in local.peer_ips : "sudo gluster peer probe ${ip}"],
-
-      # Wait for every probed peer to reach 'Peer in Cluster' state
-      # before attempting volume create. Without this, a probe can
-      # return ACC while peers are still 'Accepted peer request',
-      # and `gluster volume create` fails with "Host X is not in
-      # 'Peer in Cluster' state".
-      "for i in $(seq 1 30); do not_ready=$(sudo gluster peer status | grep -c 'Accepted peer request' || true); [ \"$not_ready\" = \"0\" ] && break; echo \"  peers not ready yet (attempt $i/30)\"; sleep 2; done",
-      "sudo gluster pool list",
-
-      # Create replicated volume (skip if already exists)
-      "sudo gluster volume info ${local.gluster_volume} >/dev/null 2>&1 || sudo gluster volume create ${local.gluster_volume} replica ${length(local.all_ips)} ${join(" ", [for ip in local.all_ips : "${ip}:${local.gluster_brick}"])} force",
-      "sudo gluster volume info ${local.gluster_volume} | grep -q 'Status: Started' || sudo gluster volume start ${local.gluster_volume}",
-
-      # Set recommended GlusterFS options
-      "sudo gluster volume set ${local.gluster_volume} cluster.quorum-type auto || true",
-      "sudo gluster volume set ${local.gluster_volume} cluster.self-heal-daemon on || true",
-      "sudo gluster volume set ${local.gluster_volume} cluster.data-self-heal on || true",
-      "sudo gluster volume set ${local.gluster_volume} cluster.metadata-self-heal on || true",
-      "sudo gluster volume set ${local.gluster_volume} cluster.entry-self-heal on || true",
-      "sudo gluster volume set ${local.gluster_volume} performance.client-io-threads on || true",
-      "sudo gluster volume set ${local.gluster_volume} network.ping-timeout 10 || true",
-
-      "echo '[+] GlusterFS volume ${local.gluster_volume} ready'",
-    ])
-  }
-}
-
-# Step 3: Mount GlusterFS and configure fstab on all nodes
-resource "null_resource" "gluster_mount" {
-  for_each   = var.vm_configs
-  depends_on = [null_resource.gluster_init]
-
-  triggers = {
-    volume = local.gluster_volume
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.vm_ips[each.key]
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "echo '[+] Mounting GlusterFS on ${each.value.name}...'",
-      "sudo mkdir -p ${var.gluster_mount_path}",
-      # Hardened fstab line — the x-systemd.* options make the generated
-      # mount unit depend on glusterd, and nofail keeps a bad mount from
-      # blocking boot. Pairs with the RequiresMountsFor drop-ins baked
-      # into the Packer image for docker.service and nomad.service so
-      # neither service starts before the mount is up. Idempotent:
-      # replaces any pre-existing gluster line.
-      "sudo sed -i '\\|^localhost:/${local.gluster_volume}[[:space:]]|d' /etc/fstab",
-      "echo 'localhost:/${local.gluster_volume} ${var.gluster_mount_path} glusterfs defaults,_netdev,nofail,x-systemd.requires=glusterd.service,x-systemd.after=glusterd.service 0 0' | sudo tee -a /etc/fstab >/dev/null",
-      "sudo systemctl daemon-reload",
-      "mountpoint -q ${var.gluster_mount_path} || sudo mount -t glusterfs localhost:/${local.gluster_volume} ${var.gluster_mount_path}",
-      "echo '[+] GlusterFS mounted at ${var.gluster_mount_path}'",
-    ]
-  }
-}
-
-# Step 3b: Write the .mount-sentinel marker that per-job wait-for-gluster
-# prestart tasks read to confirm the volume is really mounted (not a
-# pre-mount empty local directory). Written through a single node —
-# gluster replicates it to all peers.
-resource "null_resource" "gluster_mount_sentinel" {
-  depends_on = [null_resource.gluster_mount]
-
-  triggers = {
-    volume = local.gluster_volume
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.master_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "printf 'v1\\n' | sudo tee ${var.gluster_mount_path}/.mount-sentinel >/dev/null",
-      "sudo chmod 644 ${var.gluster_mount_path}/.mount-sentinel",
-    ]
-  }
-}
-
-# Step 4: Deploy Traefik middleware config to GlusterFS (replaces envsubst in deployTraefik.sh)
-resource "null_resource" "traefik_config" {
-  depends_on = [null_resource.gluster_mount]
-
-  triggers = {
-    config_hash = sha256(local.traefik_authentik_yml)
-  }
-
-  connection {
-    type        = "ssh"
-    host        = local.master_ip
-    user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo mkdir -p ${var.gluster_mount_path}/traefik/config",
-      "sudo mkdir -p ${var.gluster_mount_path}/traefik/tls",
-    ]
-  }
-
-  provisioner "file" {
-    content     = local.traefik_authentik_yml
-    destination = "/tmp/authentik.yml"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "sudo cp /tmp/authentik.yml ${var.gluster_mount_path}/traefik/config/authentik.yml",
-      "sudo chmod 644 ${var.gluster_mount_path}/traefik/config/authentik.yml",
-      "rm /tmp/authentik.yml",
-      "echo '[+] Traefik authentik middleware config deployed'",
-    ]
-  }
-}
-
-# Step 5: Restart Nomad on each node (after GlusterFS mount + config written)
+# Restart Nomad on each node after nomad_config writes /etc/nomad.d/nomad.hcl.
 resource "null_resource" "nomad_restart" {
   for_each   = var.vm_configs
-  depends_on = [null_resource.gluster_mount, null_resource.nomad_config]
+  depends_on = [null_resource.nomad_config]
 
   triggers = {
-    gluster_mount = null_resource.gluster_mount[each.key].id
-    nomad_config  = null_resource.nomad_config[each.key].id
+    nomad_config = null_resource.nomad_config[each.key].id
   }
 
   connection {
