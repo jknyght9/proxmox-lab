@@ -31,13 +31,13 @@ job "authentik" {
     volume "pg" {
       type            = "csi"
       source          = "authentik-pg-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
     volume "data" {
       type            = "csi"
       source          = "authentik-data-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
 

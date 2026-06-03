@@ -37,19 +37,19 @@ job "netbox" {
     volume "pg" {
       type            = "csi"
       source          = "netbox-pg-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
     volume "redis" {
       type            = "csi"
       source          = "netbox-redis-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
     volume "data" {
       type            = "csi"
       source          = "netbox-data-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
 

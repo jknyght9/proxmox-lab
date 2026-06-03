@@ -36,19 +36,19 @@ job "lam" {
     volume "config" {
       type            = "csi"
       source          = "lam-config-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
     volume "profile" {
       type            = "csi"
       source          = "lam-profile-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
     volume "session" {
       type            = "csi"
       source          = "lam-session-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
 

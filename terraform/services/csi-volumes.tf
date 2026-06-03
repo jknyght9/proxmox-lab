@@ -43,7 +43,7 @@ resource "nomad_csi_volume_registration" "uptime_kuma" {
   external_id = "${local.csi_server}#${local.csi_share_path["uptime-kuma"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -82,7 +82,7 @@ resource "nomad_csi_volume_registration" "lam_config" {
   external_id = "${local.csi_server}#${local.csi_share_path["lam-config"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -116,7 +116,7 @@ resource "nomad_csi_volume_registration" "lam_profile" {
   external_id = "${local.csi_server}#${local.csi_share_path["lam-profile"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -150,7 +150,7 @@ resource "nomad_csi_volume_registration" "lam_session" {
   external_id = "${local.csi_server}#${local.csi_share_path["lam-session"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -185,7 +185,7 @@ resource "nomad_csi_volume_registration" "authentik_pg" {
   external_id = "${local.csi_server}#${local.csi_share_path["authentik-pg"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -219,7 +219,7 @@ resource "nomad_csi_volume_registration" "authentik_data" {
   external_id = "${local.csi_server}#${local.csi_share_path["authentik-data"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -254,7 +254,7 @@ resource "nomad_csi_volume_registration" "netbox_pg" {
   external_id = "${local.csi_server}#${local.csi_share_path["netbox-pg"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -282,7 +282,7 @@ resource "nomad_csi_volume_registration" "netbox_redis" {
   external_id = "${local.csi_server}#${local.csi_share_path["netbox-redis"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 
@@ -310,7 +310,7 @@ resource "nomad_csi_volume_registration" "netbox_data" {
   external_id = "${local.csi_server}#${local.csi_share_path["netbox-data"]}#"
 
   capability {
-    access_mode     = "single-node-writer"
+    access_mode     = "multi-node-multi-writer"
     attachment_mode = "file-system"
   }
 

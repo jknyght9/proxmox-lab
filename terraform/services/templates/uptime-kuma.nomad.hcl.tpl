@@ -22,7 +22,7 @@ job "uptime-kuma" {
     volume "data" {
       type            = "csi"
       source          = "uptime-kuma-data"
-      access_mode     = "single-node-writer"
+      access_mode     = "multi-node-multi-writer"
       attachment_mode = "file-system"
     }
 
