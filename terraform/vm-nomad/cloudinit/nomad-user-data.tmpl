@@ -33,6 +33,23 @@ write_files:
       net.ipv4.ip_forward = 1
       net.ipv6.conf.all.forwarding = 1
 
+  # Block needrestart from auto-restarting Nomad or Vault when
+  # unattended-upgrades touches their library deps. Without this, a
+  # liblzma5/xz-utils-class upgrade triggers needrestart, which
+  # systemctl-restarts Nomad — and the vault system job alloc goes with
+  # it. Restarted Vault peers come back sealed (Shamir, no auto-unseal),
+  # and if more than one peer is sealed at once you lose Raft quorum
+  # until an operator runs the unseal cycle manually.
+  # See [[unattended-upgrades-vault-seal]] in memory for the full story.
+  - path: /etc/needrestart/conf.d/00-nomad-vault.conf
+    permissions: "0644"
+    content: |
+      # Operator-driven restarts only for Nomad + Vault.
+      $nrconf{override_rc} = {
+          qr(^nomad\.service$) => 0,
+          qr(^vault\.service$) => 0,
+      };
+
   # Override the stock /etc/cloud/templates/hosts.debian.tmpl so cloud-init
   # bakes the internal service FQDNs into /etc/hosts on every boot. Without
   # this, manage_etc_hosts:true regenerates /etc/hosts from the stock
