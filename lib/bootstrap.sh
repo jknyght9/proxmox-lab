@@ -377,6 +377,112 @@ function validateStorageOverrides() {
   return 0
 }
 
+# Validate the storage.cluster_state block + reach the NAS. The lab needs
+# a working NAS to stand up any stateful service (per Phase 3 of the storage
+# migration — see plans/serene-brewing-cray.md). Fail fast here with a
+# clear message rather than letting terraform fail mid-deploy.
+#
+# Globals: BOOTSTRAP_FILE
+# Returns: 0 if cluster_state is configured and the NAS is reachable, 1 on
+#          missing / unreachable / mismatched.
+function validateNASStorage() {
+  doing "Validating NAS storage configuration..."
+
+  local cs_nas cs_root
+  cs_nas=$(yq -r '.storage.cluster_state.nas // ""' "$BOOTSTRAP_FILE" 2>/dev/null)
+  cs_root=$(yq -r '.storage.cluster_state.dataset_root // "nomad"' "$BOOTSTRAP_FILE" 2>/dev/null)
+
+  if [ -z "$cs_nas" ]; then
+    error "Missing required field: storage.cluster_state.nas in bootstrap.yml"
+    info  "  The lab requires NAS-backed pooled storage for stateful services."
+    info  "  Edit bootstrap.yml and add:"
+    info  ""
+    info  "    storage:"
+    info  "      cluster_state:"
+    info  "        nas: \"<name-of-nas_servers-entry>\""
+    info  "        dataset_root: \"nomad\"   # creates <pool>/nomad/<svc>"
+    info  ""
+    info  "  See bootstrap.yml.example for the full schema."
+    return 1
+  fi
+
+  # Cross-check: the named NAS must exist in the nas_servers list with
+  # both an api_key (for terraform-driven dataset/share/snapshot creation)
+  # and a pool (used to construct dataset paths).
+  local nas_count idx=0 found="" pool="" addr="" api_key=""
+  nas_count=$(yq '.nas_servers | length // 0' "$BOOTSTRAP_FILE" 2>/dev/null || echo 0)
+  while [ "$idx" -lt "$nas_count" ]; do
+    local name
+    name=$(yq -r ".nas_servers[$idx].name // \"\"" "$BOOTSTRAP_FILE" 2>/dev/null)
+    if [ "$name" = "$cs_nas" ]; then
+      found="$name"
+      addr=$(yq -r ".nas_servers[$idx].address // \"\"" "$BOOTSTRAP_FILE" 2>/dev/null)
+      api_key=$(yq -r ".nas_servers[$idx].api_key // \"\"" "$BOOTSTRAP_FILE" 2>/dev/null)
+      pool=$(yq -r ".nas_servers[$idx].pool // \"\"" "$BOOTSTRAP_FILE" 2>/dev/null)
+      break
+    fi
+    idx=$((idx + 1))
+  done
+
+  if [ -z "$found" ]; then
+    error "storage.cluster_state.nas=\"$cs_nas\" — no matching entry in nas_servers"
+    info  "  bootstrap.yml has nas_servers entries:"
+    yq -r '.nas_servers[] | "    - \(.name) (\(.type) @ \(.address))"' "$BOOTSTRAP_FILE" 2>/dev/null
+    return 1
+  fi
+
+  local missing=()
+  [ -z "$addr" ]    && missing+=("address")
+  [ -z "$api_key" ] && missing+=("api_key")
+  [ -z "$pool" ]    && missing+=("pool")
+  if [ ${#missing[@]} -gt 0 ]; then
+    error "nas_servers entry \"$cs_nas\" is missing required fields: ${missing[*]}"
+    info  "  Edit bootstrap.yml so that entry has all of: name, type, address, api_key, pool"
+    return 1
+  fi
+
+  info "  NAS \"$cs_nas\" — $addr (pool=$pool, dataset_root=$cs_root)"
+
+  # Preflight: hit /system/info to confirm reachability + api_key validity.
+  # Short timeout — if the NAS is down we want a fast failure, not a hang.
+  local sys_info http_code
+  sys_info=$(curl -sk --connect-timeout 5 --max-time 15 \
+    -H "Authorization: Bearer $api_key" \
+    -o /tmp/nas-preflight.json -w '%{http_code}' \
+    "https://$addr/api/v2.0/system/info" 2>/dev/null)
+  if [ "$sys_info" != "200" ]; then
+    error "NAS preflight failed: GET https://$addr/api/v2.0/system/info returned http=$sys_info"
+    info  "  Common causes: NAS unreachable, wrong address, invalid api_key,"
+    info  "  expired api_key, or NAS web UI not running."
+    rm -f /tmp/nas-preflight.json
+    return 1
+  fi
+  local version
+  version=$(jq -r '.version // "unknown"' /tmp/nas-preflight.json 2>/dev/null)
+  info "  Connected to TrueNAS $version"
+  rm -f /tmp/nas-preflight.json
+
+  # Verify the named pool exists. Cheaper to fail here than to spend 10
+  # minutes deploying and have nas-shares.tf hit a 404 on every dataset.
+  local pool_http
+  pool_http=$(curl -sk --connect-timeout 5 --max-time 15 \
+    -H "Authorization: Bearer $api_key" \
+    -o /dev/null -w '%{http_code}' \
+    "https://$addr/api/v2.0/pool/dataset/id/$pool" 2>/dev/null)
+  if [ "$pool_http" = "404" ]; then
+    error "Pool \"$pool\" does not exist on $addr"
+    info  "  Verify the pool name in TrueNAS → Storage → Pools, and update"
+    info  "  the pool field of the nas_servers[\"$cs_nas\"] entry in bootstrap.yml."
+    return 1
+  elif [ "$pool_http" != "200" ]; then
+    warn "  Pool lookup returned http=$pool_http (continuing — may be a permissions issue)"
+  else
+    info "  Pool \"$pool\" exists"
+  fi
+
+  return 0
+}
+
 # Discover available storage pools from Proxmox and prompt the user to
 # select which pools to use for templates, VMs, and LXC containers.
 #
@@ -1171,6 +1277,10 @@ EOF
   fi
 
   readBootstrapConfig || return 1
+  # Validate NAS reachability + pool existence before doing anything
+  # destructive. A bad NAS config caught here saves 10+ min of failed
+  # deploys downstream.
+  validateNASStorage || return 1
   discoverCluster || return 1
   verifyClusterInternet || return 1
   discoverStorage || return 1
