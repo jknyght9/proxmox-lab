@@ -108,7 +108,7 @@ resource "null_resource" "netbox_inventory" {
       # --- Foundation ---
       echo '[+] Creating site, cluster, roles...'
 
-      # Site name = dns_postfix verbatim (e.g. "iotvf.lab"); slug is the
+      # Site name = dns_postfix verbatim (e.g. "mylab.lan"); slug is the
       # Netbox-safe form (lowercase, dots → hyphens) since Netbox slugs
       # disallow dots and must be lowercase.
       SITE_NAME="${var.dns_postfix}"

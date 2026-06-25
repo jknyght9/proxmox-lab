@@ -2,7 +2,7 @@
 
 ## Problem
 
-After a full cold reboot of all 3 Nomad VMs (validated on iotvf.lab 2026-05-18), all 3 Vault HA instances come back **sealed**. The cluster has no leader until a human manually unseals each instance with the key from `crypto/vault-credentials.json`.
+After a full cold reboot of all 3 Nomad VMs, all 3 Vault HA instances come back **sealed**. The cluster has no leader until a human manually unseals each instance with the key from `crypto/vault-credentials.json`.
 
 This is the third cold-boot finding from the reboot test. The other two are committed (b52597d): gluster mount race fix + Pi-hole DNS switch.
 

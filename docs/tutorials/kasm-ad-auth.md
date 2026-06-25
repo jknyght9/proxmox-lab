@@ -57,7 +57,7 @@ Enter the following:
 |-------|-------|
 | Name | `Samba AD` |
 | URL | `ldap://<nomad01-ip>:389` |
-| Search Base | `DC=<domain>,DC=<tld>` (e.g., `DC=jdclabs,DC=lan`) |
+| Search Base | `DC=<domain>,DC=<tld>` (e.g., `DC=mylab,DC=lan`) |
 | Search Filter | `(sAMAccountName=%(user)s)` |
 | Group Search Filter | `(objectClass=group)` |
 | Group Member Attribute | `member` |

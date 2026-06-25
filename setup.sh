@@ -145,7 +145,7 @@ function refreshLayer2Configs() {
 
 # Resolve nomad01's IP from bootstrap-generated tfvars (or compute from
 # bootstrap.yml network.cidr as fallback). Replaces sed-grepping the
-# vm-nomad module defaults, which were jdclabs-specific and have been
+# vm-nomad module defaults, which were lab-specific and have been
 # removed.
 function getNomad01IP() {
   local ip=""
@@ -1031,12 +1031,11 @@ EOF
   fi
 
   doing "Unsealing Vault (TLS)..."
-  # 12 attempts × ~5s = ~60s budget. iotvf.lab's Vault alloc takes
-  # longer to settle after the TLS redeploy than jdclabs', and 5
-  # attempts (25s) was bailing out before the listener was ready
-  # to accept the unseal POST. Polling seal-status proves whether
-  # we actually unsealed regardless of POST status, so a generous
-  # budget is cheap.
+  # 12 attempts × ~5s = ~60s budget. Vault alloc can take longer to
+  # settle after the TLS redeploy on some networks, and 5 attempts
+  # (25s) was bailing out before the listener was ready to accept
+  # the unseal POST. Polling seal-status proves whether we actually
+  # unsealed regardless of POST status, so a generous budget is cheap.
   local unsealed=false
   local max_attempts=12
   for attempt in $(seq 1 $max_attempts); do

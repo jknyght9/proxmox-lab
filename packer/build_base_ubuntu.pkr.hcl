@@ -67,8 +67,8 @@ build {
 ssh_pwauth: true
 
 # Force HTTPS on archive/security mirrors before any package install.
-# Some lab networks (e.g. iotvf) block outbound HTTP/80 — apt would
-# otherwise time out and the qemu-guest-agent install below fails.
+# Some lab networks block outbound HTTP/80 — apt would otherwise time
+# out and the qemu-guest-agent install below fails.
 apt:
   primary:
     - arches: [default]

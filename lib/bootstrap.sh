@@ -930,7 +930,7 @@ function generateTfvarsFromBootstrap() {
 
   # Build Nomad VM configs (3 nodes by convention, IPs at BASE.14/15/16,
   # spread across cluster nodes in round-robin). The vm-nomad module has
-  # hardcoded jdclabs defaults — we override them here so every cluster
+  # hardcoded defaults — we override them here so every cluster
   # gets IPs in its own subnet.
   local NOMAD_CONFIGS_HCL=""
   local nomad_octet=14

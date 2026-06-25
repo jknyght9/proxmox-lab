@@ -7,7 +7,7 @@
 
 variable "profile_server" {
   type        = string
-  description = "File server for roaming profiles (e.g., truenas.jdclabs.lan or IP)"
+  description = "File server for roaming profiles (e.g., truenas.mylab.lan or IP)"
   default     = ""
 }
 

@@ -322,7 +322,7 @@ This ensures:
 - **TLS Certs**: Wildcard cert (`*.<domain>`) issued directly from Vault PKI at deploy time (no ACME — Vault 1.21.x has a nonce bug). Re-run option 4 to reissue (1-year TTL).
 - **Cert Location**: `/srv/gluster/nomad-data/traefik/tls/cert.pem` + `key.pem`, configured as default cert via `tls.yml` in the file provider
 - **No certResolver tags**: All Nomad jobs use `tls=true` only; the default wildcard cert handles everything
-- **Host Matching**: Routers accept both FQDN and short name: `Host(\`vault.jdclabs.lan\`) || Host(\`vault\`)`
+- **Host Matching**: Routers accept both FQDN and short name: `Host(\`vault.mylab.lan\`) || Host(\`vault\`)`
 
 ### Traefik High Availability (keepalived VIP)
 Optional HA configuration for Traefik using keepalived VRRP:

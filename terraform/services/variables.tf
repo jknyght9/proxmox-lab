@@ -24,7 +24,7 @@ variable "nomad_address" {
 
 variable "dns_postfix" {
   type        = string
-  description = "Domain suffix for all services (e.g., jdclabs.lan)"
+  description = "Domain suffix for all services (e.g., mylab.lan)"
 }
 
 variable "nomad_node_ips" {

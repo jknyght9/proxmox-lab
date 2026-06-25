@@ -22,7 +22,7 @@ The lab has 3 Nomad servers (`nomad01-03`) with shared GlusterFS, so the substra
 ```
                 ┌─────────────────────────────────────┐
                 │       Traefik (HA via VIP)          │
-                │     vault.iotvf.lab → :8200         │
+                │     vault.mylab.lan → :8200         │
                 └───────────────┬─────────────────────┘
                                 │ load-balances
        ┌────────────────────────┼────────────────────────┐
@@ -40,7 +40,7 @@ The lab has 3 Nomad servers (`nomad01-03`) with shared GlusterFS, so the substra
 - 3-node Raft cluster, one Vault per Nomad node (`type = "system"` or 3-count `service`).
 - Storage moves from `file` on GlusterFS to `raft` on each VM's local `/var/lib/vault` (or a per-node subdir under GlusterFS — both work, local disk is simpler).
 - Shamir 1-of-3 (one key, threshold 1) keeps the existing operational model — operator unseals each node once after a cold start.
-- Nomad's `vault {}` stanza points at `https://vault.iotvf.lab:8200` (Traefik-fronted) so any single Vault going away doesn't matter.
+- Nomad's `vault {}` stanza points at `https://vault.mylab.lan:8200` (Traefik-fronted) so any single Vault going away doesn't matter.
 - Backup uses `vault operator raft snapshot` (consistent, atomic) instead of tar-of-file-storage.
 
 ## Tradeoffs and decisions
