@@ -27,3 +27,11 @@ terraform/vm-nomad/rendered/
 **/*.pkrvars.hcl
 **/*.tfvars
 **/*.tfstate*
+
+# Lab-extensions overlay — lab-specific content dropped in by a private
+# overlay repo. The public proxmox-lab module provides the capability
+# (variable-driven); the overlay provides the values. See README for the
+# pattern. Files matching these globs must never be committed publicly.
+terraform/services/lab-*.tf
+terraform/services/lab-*.auto.tfvars
+terraform/services/lab-*.auto.tfvars.json
