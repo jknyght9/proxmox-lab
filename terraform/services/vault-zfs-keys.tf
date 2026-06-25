@@ -38,4 +38,8 @@ resource "vault_kv_secret_v2" "zfs_encryption_keys" {
     key_hex = random_bytes.zfs_encryption_keys[each.value].hex
     purpose = "ZFS native encryption key — ${each.value}"
   })
+  # prevent_destroy: matches the random_bytes guard. Without both, an
+  # accidental destroy + state loss orphans encrypted ZFS datasets — the
+  # blocks remain on disk but the wrapping key is unrecoverable.
+  lifecycle { prevent_destroy = true }
 }

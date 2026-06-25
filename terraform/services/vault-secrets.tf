@@ -181,6 +181,7 @@ resource "vault_kv_secret_v2" "authentik" {
     admin_email       = "admin@${var.dns_postfix}"
     api_token         = random_password.authentik_api_token[0].result
   })
+  lifecycle { prevent_destroy = true }
 }
 
 resource "vault_kv_secret_v2" "netbox" {
@@ -194,6 +195,7 @@ resource "vault_kv_secret_v2" "netbox" {
     admin_email       = "admin@${var.dns_postfix}"
     api_token         = random_password.netbox_api_token[0].result
   })
+  lifecycle { prevent_destroy = true }
 }
 
 # Placeholder for Netbox OIDC — populated by authentik_apps after Authentik is running.
@@ -246,6 +248,7 @@ resource "vault_kv_secret_v2" "samba_ad" {
   data_json = jsonencode({
     admin_password = random_password.samba_admin[0].result
   })
+  lifecycle { prevent_destroy = true }
 }
 
 # --- Cluster Configuration ---

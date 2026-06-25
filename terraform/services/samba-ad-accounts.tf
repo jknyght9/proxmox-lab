@@ -64,6 +64,7 @@ resource "vault_kv_secret_v2" "samba_ad_accounts" {
     kasm_bind_password      = random_password.kasm_bind[0].result
     kasm_bind_dn            = "CN=kasm-bind,CN=Users,${local.ad_base_dn}"
   })
+  lifecycle { prevent_destroy = true }
 }
 
 # --- Create OUs and Service Accounts via samba-tool ---
