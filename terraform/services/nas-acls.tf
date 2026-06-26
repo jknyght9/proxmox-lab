@@ -92,8 +92,12 @@ resource "null_resource" "nas_acls" {
 
       echo "[+] Applying ACLs on $NAS_NAME ($NAS_ADDR)"
 
+      # AD workgroup for auto-prefixing group names (e.g. IOTVF\Lab-Admins)
+      # in NFSv4 dataset ACLs and share_acl entries. Empty = no prefixing.
+      WORKGROUP='${var.ad_domain}'
+
       ACLS_LIST=$(mktemp)
-      echo "$ACLS_JSON" | jq -c '.[]' > "$ACLS_LIST"
+      printf '%s' "$ACLS_JSON" | jq -c '.[]' > "$ACLS_LIST"
 
       while read -r acl; do
         SHARE_NAME=$(echo "$acl" | jq -r '.share')
@@ -103,10 +107,15 @@ resource "null_resource" "nas_acls" {
         # --- Share-level ACL ---
         SHARE_ACL=$(echo "$acl" | jq -c '.share_acl // []')
         if [ "$SHARE_ACL" != "[]" ]; then
-          SHARE_ACL_PAYLOAD=$(echo "$SHARE_ACL" | jq --arg name "$SHARE_NAME" '{
+          # Auto-prefix AD group names with WORKGROUP\ when:
+          #   - WORKGROUP is set, AND
+          #   - name doesn't already contain \ or @, AND
+          #   - name isn't a known special (CREATOR OWNER, everyone@, etc.)
+          # Caller can still pass a fully-qualified name and skip prefixing.
+          SHARE_ACL_PAYLOAD=$(echo "$SHARE_ACL" | jq --arg name "$SHARE_NAME" --arg wg "$WORKGROUP" '{
             share_name: $name,
             share_acl: [.[] | {
-              ae_who_str: .who,
+              ae_who_str: (if ($wg != "" and (.who | test("[\\\\@]") | not) and (.who != "CREATOR OWNER")) then "\($wg)\\\(.who | ascii_downcase)" else .who end),
               ae_perm: .perm,
               ae_type: (.type // "ALLOWED")
             }]
@@ -123,16 +132,24 @@ resource "null_resource" "nas_acls" {
         # --- Dataset NFSv4 ACL ---
         DATASET_ACL=$(echo "$acl" | jq -c '.dataset_acl // []')
         if [ "$DATASET_ACL" != "[]" ]; then
-          DATASET_ACL_PAYLOAD=$(echo "$DATASET_ACL" | jq --arg path "$SHARE_PATH" '{
+          # NFS4ACE schema in TrueNAS 25.x:
+          #  - `who` (not `name`) holds the user/group identifier
+          #  - field is only allowed for USER/GROUP tags; not even null on
+          #    owner@/group@/everyone@ entries
+          DATASET_ACL_PAYLOAD=$(echo "$DATASET_ACL" | jq --arg path "$SHARE_PATH" --arg wg "$WORKGROUP" '{
             path: $path,
-            dacl: [.[] | {
-              tag: .tag,
-              name: (if (.name // "") != "" then .name else null end),
-              id: null,
-              type: (.type // "ALLOW"),
-              perms: { BASIC: (.perms // "FULL_CONTROL") },
-              flags: { BASIC: (.flags // "INHERIT") }
-            }],
+            dacl: [.[] | (
+              {
+                tag: .tag,
+                id: null,
+                type: (.type // "ALLOW"),
+                perms: { BASIC: (.perms // "FULL_CONTROL") },
+                flags: { BASIC: (.flags // "INHERIT") }
+              }
+              + (if (.tag == "USER" or .tag == "GROUP") then
+                  { who: (if ($wg != "" and (.name | test("[\\\\@]") | not) and (.name != "CREATOR OWNER")) then "\($wg)\\\(.name | ascii_downcase)" else .name end) }
+                else {} end)
+            )],
             options: {stripacl: false, recursive: false, traverse: false},
             acltype: "NFS4"
           }')

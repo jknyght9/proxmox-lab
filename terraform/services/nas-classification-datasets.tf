@@ -19,7 +19,7 @@ variable "nas_datasets" {
     name           = string                      # full dataset path, e.g. pool_data/confidential
     comment        = optional(string, "")        # human-readable description
     encryption_key = optional(string)            # name in var.zfs_encryption_keys (this dataset becomes an encryption root)
-    share_type     = optional(string, "GENERIC") # SMB | GENERIC | NFS
+    share_type     = optional(string, "SMB") # SMB | GENERIC | NFS — SMB sets acltype=NFSV4, aclmode=RESTRICTED
   }))
   default = []
 }

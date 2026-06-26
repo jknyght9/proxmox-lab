@@ -56,9 +56,7 @@ resource "null_resource" "ad_groups" {
       if ! docker exec $CONTAINER samba-tool group show '${name}' >/dev/null 2>&1; then
         echo '    creating: ${name}'
         docker exec $CONTAINER samba-tool group add '${name}' \
-          --description='${description}' \
-          --groupscope=Global \
-          --grouptype=Security
+          --description='${description}'
       else
         echo '    exists:   ${name}'
       fi
