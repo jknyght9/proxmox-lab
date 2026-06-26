@@ -27,7 +27,7 @@ variable "nas_shares" {
     abe          = optional(bool, true)       # access-based enumeration
     audit        = optional(bool, false)      # SMB audit logging (required for CONFIDENTIAL+ per policy)
     hosts_allow  = optional(list(string), []) # IPs/hostnames that may connect (empty = any)
-    aux_smb_conf = optional(string, "")       # raw Samba aux params (vfs_worm, etc.)
+    grace_period = optional(number, 0)        # TIME_LOCKED_SHARE only — seconds before file locks read-only (WORM)
     purpose      = optional(string, "DEFAULT_SHARE")
   }))
   default = []
@@ -70,14 +70,25 @@ resource "null_resource" "nas_smb_shares" {
 
       auth() { curl -sk -H "Authorization: Bearer $API_KEY" "$@"; }
 
-      SHARES_JSON='${jsonencode(each.value)}'
+      # base64-pipe avoids Terraform's heredoc interpreting escape sequences
+      # (e.g., \n in jsonencode output gets turned into real newlines, which
+      # then break the inner jq parse). base64 has no control chars.
+      SHARES_JSON=$(echo '${base64encode(jsonencode(each.value))}' | base64 -d)
 
       echo "[+] Provisioning SMB shares on $NAS_NAME ($NAS_ADDR)"
 
       # Fetch existing shares once, look up by name in the loop
       EXISTING=$(auth "$API/sharing/smb")
 
-      echo "$SHARES_JSON" | jq -c '.[]' | while read -r share; do
+      # Write share list to a temp file and read via redirect — avoids the
+      # pipe-subshell pattern (where set -e + exit 1 inside the loop die
+      # in the subshell and the parent script reports success). nomad01's
+      # /bin/sh is dash, which also lacks process substitution.
+      SHARES_LIST=$(mktemp)
+      echo "$SHARES_JSON" | jq -c '.[]' > "$SHARES_LIST"
+      echo "    [i] $(wc -l < "$SHARES_LIST") shares to process"
+
+      while read -r share; do
         NAME=$(echo "$share" | jq -r '.name')
         SHARE_PATH=$(echo "$share" | jq -r '.path')
         COMMENT=$(echo "$share" | jq -r '.comment // ""')
@@ -88,35 +99,53 @@ resource "null_resource" "nas_smb_shares" {
         ABE=$(echo "$share" | jq -r '.abe // true')
         AUDIT=$(echo "$share" | jq -r '.audit // false')
         HOSTS_ALLOW=$(echo "$share" | jq -c '.hosts_allow // []')
-        AUX_SMB_CONF=$(echo "$share" | jq -r '.aux_smb_conf // ""')
+        GRACE_PERIOD=$(echo "$share" | jq -r '.grace_period // 0')
         PURPOSE=$(echo "$share" | jq -r '.purpose // "DEFAULT_SHARE"')
+
+        # TrueNAS rejects audit.enable=true with both lists empty AND the
+        # list entries must be SMB-recognized groups (not Unix users).
+        # builtin_users is the local Samba group every authenticated SMB
+        # session is a member of, so watch_list=["builtin_users"]
+        # effectively audits everyone.
+        AUDIT_WATCH='[]'
+        if [ "$AUDIT" = "true" ]; then
+          AUDIT_WATCH='["builtin_users"]'
+        fi
+
+        # TrueNAS 25.x: hostsallow, grace_period, and aapl_name_mangling
+        # live nested under "options". Top-level only: name, path, comment,
+        # purpose, enabled, readonly, browsable, access_based_share_enumeration,
+        # audit. Other fields (ro, guestok, home) appear to be implicit from
+        # purpose preset and don't have to be sent.
+        OPTIONS_JSON=$(jq -n \
+          --argjson hosts_allow "$HOSTS_ALLOW" \
+          --argjson grace_period "$GRACE_PERIOD" '
+          {hostsallow: $hosts_allow, hostsdeny: []}
+          + (if $grace_period > 0 then {grace_period: $grace_period} else {} end)
+          ')
 
         PAYLOAD=$(jq -n \
           --arg name "$NAME" \
           --arg path "$SHARE_PATH" \
           --arg comment "$COMMENT" \
           --argjson enabled "$ENABLED" \
-          --argjson ro "$RO" \
-          --argjson guestok "$GUESTOK" \
+          --argjson readonly "$RO" \
           --argjson browsable "$BROWSABLE" \
           --argjson abe "$ABE" \
           --argjson audit_enable "$AUDIT" \
-          --argjson hosts_allow "$HOSTS_ALLOW" \
-          --arg aux "$AUX_SMB_CONF" \
-          --arg purpose "$PURPOSE" '{
+          --argjson audit_watch "$AUDIT_WATCH" \
+          --arg purpose "$PURPOSE" \
+          --argjson options "$OPTIONS_JSON" '{
             name: $name,
             path: $path,
             comment: $comment,
             purpose: $purpose,
             enabled: $enabled,
-            ro: $ro,
-            guestok: $guestok,
+            readonly: $readonly,
             browsable: $browsable,
-            abe: $abe,
-            home: false,
-            hostsallow: $hosts_allow,
-            auxsmbconf: $aux,
-            audit: { enable: $audit_enable, watch_list: [], ignore_list: [] }
+            access_based_share_enumeration: $abe,
+            audit: { enable: $audit_enable, watch_list: $audit_watch, ignore_list: [] },
+            options: $options
           }')
 
         SHARE_ID=$(echo "$EXISTING" | jq -r --arg n "$NAME" '.[] | select(.name == $n) | .id // empty')
@@ -131,11 +160,18 @@ resource "null_resource" "nas_smb_shares" {
             "$API/sharing/smb" -d "$PAYLOAD")
         fi
 
-        if echo "$RESP" | jq -e '.error // .errno' >/dev/null 2>&1; then
-          echo "[!] share configure failed for '$NAME': $(echo "$RESP" | jq -c .)"
+        # TrueNAS success returns the full share object (always has .id).
+        # Failures come in many shapes (nested per-field, top-level error,
+        # plain string). Check for the success signal instead of trying to
+        # enumerate every error shape.
+        RESULT_ID=$(echo "$RESP" | jq -r '.id // empty' 2>/dev/null)
+        if [ -z "$RESULT_ID" ]; then
+          echo "[!] share configure failed for $NAME: $(echo "$RESP" | head -c 500)"
           exit 1
         fi
-      done
+        echo "        -> id=$RESULT_ID"
+      done < "$SHARES_LIST"
+      rm -f "$SHARES_LIST"
 
       echo "[+] $NAS_NAME SMB shares done"
       EOT
