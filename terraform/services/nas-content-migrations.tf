@@ -89,29 +89,43 @@ MIGRATION_SCRIPT_EOF
           echo "    (leftover /tmp/$f present from prior run — will be overwritten)"
       done
 
-      # Schedule cron for ~90s in the future so it fires on the next minute boundary
-      MIN=$(date -d '+90 seconds' +%-M)
-      HOUR=$(date -d '+90 seconds' +%-H)
-      DOM=$(date -d '+90 seconds' +%-d)
-      MON=$(date -d '+90 seconds' +%-m)
-      echo "[+] scheduling cron for $HOUR:$MIN on $MON-$DOM"
-
-      CRON_PAYLOAD=$(jq -n --arg cmd "bash /tmp/nas-migrate.sh" \
-        --arg min "$MIN" --arg hr "$HOUR" --arg dom "$DOM" --arg mon "$MON" '{
-          command: $cmd,
-          user: "root",
-          enabled: true,
-          stdout: true,
-          stderr: true,
-          schedule: {minute: $min, hour: $hr, dom: $dom, month: $mon, dow: "*"}
-        }')
-      CRON_RESP=$(auth -X POST "$API/cronjob" -H "Content-Type: application/json" -d "$CRON_PAYLOAD")
+      # Schedule cron every minute — timezone-agnostic (the nas01 cron
+      # daemon uses local time; computing the exact next-minute on
+      # nomad01 risks a timezone mismatch). The script has a flock
+      # guard + .done/.failed early-exit so overlapping fires are safe,
+      # and we delete the cron as soon as the log appears.
+      echo "[+] scheduling cron (every minute, deleted on first fire)"
+      CRON_RESP=$(auth -X POST "$API/cronjob" -H "Content-Type: application/json" -d '{
+        "command": "bash /tmp/nas-migrate.sh",
+        "user": "root",
+        "enabled": true,
+        "stdout": true,
+        "stderr": true,
+        "schedule": {"minute": "*", "hour": "*", "dom": "*", "month": "*", "dow": "*"}
+      }')
       CRON_ID=$(echo "$CRON_RESP" | jq -r '.id // empty')
       if [ -z "$CRON_ID" ]; then
         echo "[!] cron create failed: $CRON_RESP"
         exit 1
       fi
       echo "    cron id=$CRON_ID"
+
+      # Wait for the script to actually start (log file appears) — up to 120s
+      echo "[+] waiting for script start..."
+      for i in $(seq 1 24); do
+        if auth -X POST "$API/filesystem/stat" -H "Content-Type: application/json" \
+            -d '"/tmp/nas-migrate.log"' | jq -e '.type == "FILE"' >/dev/null 2>&1; then
+          echo "    script started"
+          break
+        fi
+        sleep 5
+      done
+
+      # Delete the cron immediately so it doesn't re-fire while the
+      # script is running. The flock guard would prevent overlap anyway,
+      # but cleaner to remove the trigger.
+      echo "[+] deleting cron $CRON_ID (script is now running)"
+      auth -X DELETE "$API/cronjob/id/$CRON_ID" >/dev/null 2>&1 || true
 
       # Poll for completion (max ~4h)
       echo "[+] waiting for migration..."
@@ -137,9 +151,8 @@ MIGRATION_SCRIPT_EOF
       auth -X POST "$API/filesystem/get" -H "Content-Type: application/json" \
         -d '"/tmp/nas-migrate.log"' 2>&1 | head -200 || true
 
-      # Always remove the cron job (it would re-fire next year otherwise)
-      echo "[+] cleanup: removing cron $CRON_ID"
-      auth -X DELETE "$API/cronjob/id/$CRON_ID" >/dev/null 2>&1 || true
+      # Cron was already deleted right after the script started; nothing
+      # to clean up here.
 
       case "$STATUS" in
         done)

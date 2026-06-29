@@ -13,6 +13,18 @@
 # /tmp/nas-migrate.done is created; on any failure, /tmp/nas-migrate.failed.
 # =============================================================================
 set +e # process all migrations; track failure status, don't stop on first
+
+# Lock guard — prevent multiple cron instances overlapping. Cron is
+# scheduled every minute (timezone-agnostic) and the Terraform driver
+# deletes it once this script starts; flock provides a safety net for
+# the gap between fires.
+exec 9>/tmp/nas-migrate.lock
+flock -n 9 || exit 0
+
+# Early-exit if already done; manual cleanup required to re-run.
+[ -f /tmp/nas-migrate.done ] && exit 0
+[ -f /tmp/nas-migrate.failed ] && exit 0
+
 exec > /tmp/nas-migrate.log 2>&1
 echo "[START] $(date)"
 
