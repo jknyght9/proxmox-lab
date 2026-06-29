@@ -91,18 +91,29 @@ MIGRATION_SCRIPT_EOF
 
       # Schedule cron every minute — timezone-agnostic (the nas01 cron
       # daemon uses local time; computing the exact next-minute on
-      # nomad01 risks a timezone mismatch). The script has a flock
-      # guard + .done/.failed early-exit so overlapping fires are safe,
-      # and we delete the cron as soon as the log appears.
+      # nomad01 risks a timezone mismatch). The cron's command first
+      # rm's any leftover sentinels (.done/.failed/.log/.lock) from
+      # prior runs and touches a fresh .cleared marker, then runs the
+      # script. The script has a flock guard + .done/.failed early-exit
+      # so overlapping fires are safe, and we delete the cron as soon
+      # as the .cleared marker appears with a fresh mtime.
+      #
+      # We must NOT detect "script started" via the .log file alone —
+      # the script's first action is `exec > /tmp/nas-migrate.log`,
+      # but a stale .log from a prior run would also satisfy that check
+      # and cause us to delete the cron before it ever fires.
+      NOW_EPOCH=$(date +%s)
       echo "[+] scheduling cron (every minute, deleted on first fire)"
-      CRON_RESP=$(auth -X POST "$API/cronjob" -H "Content-Type: application/json" -d '{
-        "command": "bash /tmp/nas-migrate.sh",
-        "user": "root",
-        "enabled": true,
-        "stdout": true,
-        "stderr": true,
-        "schedule": {"minute": "*", "hour": "*", "dom": "*", "month": "*", "dow": "*"}
-      }')
+      CRON_CMD='rm -f /tmp/nas-migrate.failed /tmp/nas-migrate.done /tmp/nas-migrate.log /tmp/nas-migrate.lock /tmp/nas-migrate.cleared && touch /tmp/nas-migrate.cleared && bash /tmp/nas-migrate.sh'
+      CRON_RESP=$(auth -X POST "$API/cronjob" -H "Content-Type: application/json" \
+        -d "$(jq -n --arg cmd "$CRON_CMD" '{
+          command: $cmd,
+          user: "root",
+          enabled: true,
+          stdout: true,
+          stderr: true,
+          schedule: {minute: "*", hour: "*", dom: "*", month: "*", dow: "*"}
+        }')")
       CRON_ID=$(echo "$CRON_RESP" | jq -r '.id // empty')
       if [ -z "$CRON_ID" ]; then
         echo "[!] cron create failed: $CRON_RESP"
@@ -110,12 +121,14 @@ MIGRATION_SCRIPT_EOF
       fi
       echo "    cron id=$CRON_ID"
 
-      # Wait for the script to actually start (log file appears) — up to 120s
-      echo "[+] waiting for script start..."
+      # Wait for a FRESH .cleared marker (mtime > NOW_EPOCH) — proves
+      # the cron actually fired this minute, not a stale marker.
+      echo "[+] waiting for fresh .cleared marker..."
       for i in $(seq 1 24); do
-        if auth -X POST "$API/filesystem/stat" -H "Content-Type: application/json" \
-            -d '"/tmp/nas-migrate.log"' | jq -e '.type == "FILE"' >/dev/null 2>&1; then
-          echo "    script started"
+        MTIME=$(auth -X POST "$API/filesystem/stat" -H "Content-Type: application/json" \
+          -d '"/tmp/nas-migrate.cleared"' | jq -r '.mtime // 0' | cut -d. -f1)
+        if [ "$MTIME" -gt "$NOW_EPOCH" ]; then
+          echo "    script started (cleared at $MTIME, scheduled at $NOW_EPOCH)"
           break
         fi
         sleep 5

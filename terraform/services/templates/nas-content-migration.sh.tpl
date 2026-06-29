@@ -30,6 +30,15 @@ echo "[START] $(date)"
 
 OVERALL_RC=0
 
+# aclmode=RESTRICTED on the destination datasets blocks chmod and chown
+# operations even from root — the NFSv4 ACL is the authority. Skip
+# preserving source perms/owner/group; the destination inherits the
+# dataset's NFSv4 ACL automatically and files end up owned by root.
+# Times preserved (-t). Per-user ownership on userprofiles is lost
+# during migration; if needed, restore via samba-tool / chown in a
+# post-migration step with aclmode temporarily PASSTHROUGH.
+RSYNC_FLAGS="-rlt --no-perms --no-owner --no-group --checksum"
+
 do_migrate() {
   local NAME=$1 SRC=$2 DST=$3 VERIFY=$4
   echo
@@ -43,7 +52,7 @@ do_migrate() {
   fi
 
   mkdir -p "$DST"
-  if ! rsync -av --checksum "$SRC" "$DST"; then
+  if ! rsync $RSYNC_FLAGS "$SRC" "$DST"; then
     echo "[!] $NAME rsync failed"
     OVERALL_RC=1
     return 1
