@@ -57,7 +57,7 @@ job "traefik" {
       # Nomad re-fetches when ~1/3 lease remains and signals USR1.
       template {
         data = <<EOH
-{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=720h" }}
+{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=2160h" }}
 {{ .Data.certificate }}
 {{ .Data.issuing_ca }}
 {{ end }}
@@ -70,7 +70,7 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=720h" }}
+{{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=2160h" }}
 {{ .Data.private_key }}
 {{ end }}
 EOH
