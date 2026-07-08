@@ -50,6 +50,11 @@ LDAP_HOST="{{ .Data.data.nomad01_ip }}"
 export LDAPTLS_REQCERT=allow
 LDAP_BIND_DN="CN=domain-join-svc,CN=Users,$BASE_DN"
 
+# NetBIOS/workgroup name = first label of the realm, uppercased
+# (e.g. iotvf.lab -> IOTVF). Used to qualify principals in NFSv4 ACLs as
+# WORKGROUP\name, matching the nas-acls.tf / nas-profile-share.tf format.
+WORKGROUP=$(echo "$AD_REALM_LOWER" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')
+
 echo "[+] Querying Samba AD for user accounts (LDAPS $LDAP_HOST)"
 USERS=$(ldapsearch -LLL -H "ldaps://$LDAP_HOST" -x \
   -D "$LDAP_BIND_DN" -w "$DOMAIN_JOIN_PW" \
@@ -96,7 +101,11 @@ CREATED=0
 EXISTED=0
 FAILED=0
 
-echo "$USERS" | while read -r USER; do
+# Iterate with a for-loop (not `echo | while`): a pipe runs the loop body
+# in a subshell, so CREATED/EXISTED/FAILED increments would be lost and the
+# summary below would always print 0/0/0. sAMAccountName cannot contain
+# spaces, so word-splitting $USERS is safe.
+for USER in $USERS; do
   [ -z "$USER" ] && continue
   USER_PATH="$MOUNT_PATH/$USER"
 
@@ -120,13 +129,18 @@ echo "$USERS" | while read -r USER; do
   fi
 
   # Per-user ACL: owner gets FULL_CONTROL, Domain Admins fallback, others none.
-  ACL=$(jq -n --arg p "$USER_PATH" --arg u "$USER" '{
+  # NFS4ACE uses `who` (qualified WORKGROUP\name, lowercased), not `name`.
+  ACL=$(jq -n --arg p "$USER_PATH" --arg u "$USER" --arg wg "$WORKGROUP" '
+    def qualify($n):
+      if ($wg != "" and ($n | test("[\\\\@]") | not) and ($n != "CREATOR OWNER"))
+      then "\($wg)\\\($n | ascii_downcase)" else $n end;
+    {
     path: $p,
     dacl: [
-      {tag:"USER",  id:null, name:$u,              type:"ALLOW",
+      {tag:"USER",  id:null, who: qualify($u),              type:"ALLOW",
         perms:{BASIC:"FULL_CONTROL"},
         flags:{DIRECTORY_INHERIT:true, FILE_INHERIT:true}},
-      {tag:"GROUP", id:null, name:"Domain Admins", type:"ALLOW",
+      {tag:"GROUP", id:null, who: qualify("Domain Admins"), type:"ALLOW",
         perms:{BASIC:"FULL_CONTROL"},
         flags:{DIRECTORY_INHERIT:true, FILE_INHERIT:true}}
     ],
@@ -137,8 +151,9 @@ echo "$USERS" | while read -r USER; do
   SETACL_JOB=$(auth -X POST -H "Content-Type: application/json" \
     "$API/filesystem/setacl" -d "$ACL")
 
-  # setacl can return either a job id (async) or an error object
-  if [[ "$SETACL_JOB" =~ ^[0-9]+$ ]]; then
+  # setacl can return either a job id (async) or an error object.
+  # busybox ash (alpine) has no [[ =~ ]] — use a POSIX numeric test.
+  if printf '%s' "$SETACL_JOB" | grep -qE '^[0-9]+$'; then
     : # job submitted — assume success (poll skipped for batch perf)
     CREATED=$((CREATED + 1))
     echo "  [+] $USER_PATH (ACL job $SETACL_JOB)"

@@ -52,6 +52,7 @@ resource "null_resource" "nas_profile_share" {
       API_KEY="${each.value.api_key}"
       DATASET="${each.value.profile_dataset}"
       AD_GROUP="${each.value.profile_ad_group}"
+      WORKGROUP="${var.ad_domain}"
       SHARE_NAME="${var.profile_share}"
       MOUNT_PATH="/mnt/$DATASET"
       API="https://$NAS_ADDR/api/v2.0"
@@ -75,6 +76,28 @@ resource "null_resource" "nas_profile_share" {
             '{name:$n, share_type:"SMB"}')")
         if echo "$CREATE" | jq -e '.error // .errno' >/dev/null 2>&1; then
           echo "[!] dataset create failed: $(echo "$CREATE" | jq -c .)"
+          exit 1
+        fi
+      fi
+
+      # --- Step 1b: Ensure NFSv4 ACL type (idempotent) ---------------------
+      # The base ACL in Step 3 is NFSv4. If the dataset pre-existed as a
+      # non-SMB (POSIX acltype) dataset, classification-datasets skipped it
+      # (its EXISTS check leaves existing datasets untouched), so it can
+      # still be POSIX here — and setacl then rejects the NFS4 payload with
+      # EINVAL against the POSIXACE schema. Force NFSV4 + RESTRICTED aclmode
+      # (the TrueNAS SMB default). No-op when already NFSV4.
+      CUR_ACLTYPE=$(auth "$API/pool/dataset/id/$ENCODED" \
+        | jq -r '.acltype | (.value // .parsed // .rawvalue) // "UNKNOWN"' \
+        | tr '[:lower:]' '[:upper:]')
+      echo "    dataset acltype=$CUR_ACLTYPE"
+      if [ "$CUR_ACLTYPE" != "NFSV4" ]; then
+        echo "    [+] converting acltype $CUR_ACLTYPE -> NFSV4 (aclmode=RESTRICTED)"
+        UPD=$(auth -X PUT -H "Content-Type: application/json" \
+          "$API/pool/dataset/id/$ENCODED" \
+          -d '{"acltype":"NFSV4","aclmode":"RESTRICTED"}')
+        if echo "$UPD" | jq -e '.error // .errno' >/dev/null 2>&1; then
+          echo "[!] acltype update failed: $(echo "$UPD" | jq -c .)"
           exit 1
         fi
       fi
@@ -114,28 +137,40 @@ resource "null_resource" "nas_profile_share" {
       # --- Step 3: Set base NFSv4 ACL on the dataset -----------------------
       # Pattern (Windows roaming-profile classic):
       #   owner@/group@         FULL_CONTROL  inherit (defaults for root/wheel)
-      #   <AD_GROUP>            TRAVERSE+READ_ATTRIBUTES (parent only, no inherit)
+      #   <AD_GROUP>            EXECUTE+READ_ATTRIBUTES (parent only, no inherit)
+      #                         (EXECUTE = "traverse directory" in NFSv4;
+      #                         TRAVERSE is not a valid NFS4ACE advanced perm)
       #                         → users can navigate to their own folder but
       #                         not list peers (ABE handles visibility).
       #   CREATOR OWNER         FULL_CONTROL  inherit-only, dirs+files
       #                         → per-user folders created underneath
       #                         auto-inherit "owner = full control".
       #   Domain Admins         FULL_CONTROL  inherit dirs+files (admin recourse)
+      # TrueNAS NFS4ACE uses `who` (not `name`) for named principals, and the
+      # field is only permitted on USER/GROUP tags — never on the well-known
+      # owner@/group@/everyone@ entries. AD principals are qualified as
+      # WORKGROUP\name (lowercased) unless already qualified. Matches the
+      # proven format in nas-acls.tf.
       ACL_PAYLOAD=$(jq -n \
         --arg path "$MOUNT_PATH" \
         --arg group "$AD_GROUP" \
-        '{
+        --arg wg "$WORKGROUP" \
+        '
+        def qualify($n):
+          if ($wg != "" and ($n | test("[\\\\@]") | not) and ($n != "CREATOR OWNER"))
+          then "\($wg)\\\($n | ascii_downcase)" else $n end;
+        {
           path: $path,
           dacl: [
-            {tag:"owner@",     id:null, type:"ALLOW", perms:{BASIC:"FULL_CONTROL"}, flags:{BASIC:"INHERIT"}},
-            {tag:"group@",     id:null, type:"ALLOW", perms:{BASIC:"FULL_CONTROL"}, flags:{BASIC:"INHERIT"}},
-            {tag:"GROUP",      id:null, name:$group,         type:"ALLOW",
-              perms:{TRAVERSE:true, READ_DATA:true, READ_ATTRIBUTES:true, READ_ACL:true},
+            {tag:"owner@",    id:null, type:"ALLOW", perms:{BASIC:"FULL_CONTROL"}, flags:{BASIC:"INHERIT"}},
+            {tag:"group@",    id:null, type:"ALLOW", perms:{BASIC:"FULL_CONTROL"}, flags:{BASIC:"INHERIT"}},
+            {tag:"GROUP",     id:null, who: qualify($group),          type:"ALLOW",
+              perms:{EXECUTE:true, READ_DATA:true, READ_ATTRIBUTES:true, READ_ACL:true},
               flags:{BASIC:"NOINHERIT"}},
-            {tag:"GROUP",      id:null, name:"Domain Admins", type:"ALLOW",
+            {tag:"GROUP",     id:null, who: qualify("Domain Admins"), type:"ALLOW",
               perms:{BASIC:"FULL_CONTROL"},
               flags:{DIRECTORY_INHERIT:true, FILE_INHERIT:true}},
-            {tag:"everyone@",  id:null, type:"ALLOW",
+            {tag:"everyone@", id:null, type:"ALLOW",
               perms:{READ_DATA:true, EXECUTE:true, READ_ATTRIBUTES:true, READ_ACL:true},
               flags:{BASIC:"NOINHERIT"}}
           ],
@@ -147,8 +182,11 @@ resource "null_resource" "nas_profile_share" {
       ACL_JOB=$(auth -X POST -H "Content-Type: application/json" \
         "$API/filesystem/setacl" -d "$ACL_PAYLOAD")
 
-      # setacl returns a job id on SCALE 25.x — poll for completion
-      if [[ "$ACL_JOB" =~ ^[0-9]+$ ]]; then
+      # setacl returns a job id on SCALE 25.x — poll for completion.
+      # remote-exec runs this under /bin/sh (dash), so use a POSIX numeric
+      # test (grep -qE), not the bash-only [[ =~ ]] which silently fell
+      # through to the else branch and skipped the completion poll.
+      if printf '%s' "$ACL_JOB" | grep -qE '^[0-9]+$'; then
         for i in $(seq 1 30); do
           STATE=$(auth "$API/core/get_jobs?id=$ACL_JOB" | jq -r '.[0].state // "UNKNOWN"')
           case "$STATE" in
