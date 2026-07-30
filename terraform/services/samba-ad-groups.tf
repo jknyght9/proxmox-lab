@@ -15,12 +15,25 @@ variable "ad_groups" {
   default     = {}
 }
 
+locals {
+  # Overlay-defined groups plus the reconciler's opt-in profile group, which
+  # must exist for profile-reconciler's memberOf filter to resolve. Added only
+  # when at least one NAS opts into profiles (local.profile_nases, defined in
+  # nas-profile-share.tf).
+  ad_groups_effective = merge(
+    var.ad_groups,
+    length(local.profile_nases) > 0 ? {
+      (var.profile_group) = "Members receive a roaming-profile folder (managed by profile-reconciler)"
+    } : {}
+  )
+}
+
 resource "null_resource" "ad_groups" {
-  count      = var.deploy_samba_ad && length(var.ad_groups) > 0 ? 1 : 0
+  count      = var.deploy_samba_ad && length(local.ad_groups_effective) > 0 ? 1 : 0
   depends_on = [null_resource.ad_service_accounts]
 
   triggers = {
-    groups_hash = sha256(jsonencode(var.ad_groups))
+    groups_hash = sha256(jsonencode(local.ad_groups_effective))
   }
 
   connection {
@@ -52,7 +65,7 @@ resource "null_resource" "ad_groups" {
 
       echo '[+] Creating AD groups (idempotent)...'
 
-      %{for name, description in var.ad_groups~}
+      %{for name, description in local.ad_groups_effective~}
       if ! docker exec $CONTAINER samba-tool group show '${name}' >/dev/null 2>&1; then
         echo '    creating: ${name}'
         docker exec $CONTAINER samba-tool group add '${name}' \
@@ -62,7 +75,7 @@ resource "null_resource" "ad_groups" {
       fi
       %{endfor~}
 
-      echo '[+] AD groups configured (${length(var.ad_groups)} total)'
+      echo '[+] AD groups configured (${length(local.ad_groups_effective)} total)'
       EOT
     ]
   }

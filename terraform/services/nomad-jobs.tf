@@ -197,11 +197,13 @@ resource "nomad_job" "profile_reconciler" {
     vault_jwt_auth_backend_role.profile_reconciler,
     null_resource.nas_profile_share,
     null_resource.nomad_vault_config,
+    null_resource.ad_groups,
   ]
 
   jobspec = templatefile("${path.module}/templates/profile-reconciler.nomad.hcl.tpl", {
     cron_schedule = var.profile_reconciler_cron
     time_zone     = var.profile_reconciler_timezone
+    profile_group = var.profile_group
     profile_nases = [for nas in var.nas_servers : {
       name             = nas.name
       address          = nas.address

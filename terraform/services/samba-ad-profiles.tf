@@ -17,6 +17,12 @@ variable "profile_share" {
   default     = "profiles"
 }
 
+variable "profile_group" {
+  type        = string
+  description = "AD group whose members receive a roaming-profile folder. Created automatically when any NAS has provides_profiles=true; membership is managed by you (LAM/samba-tool). profile-reconciler only provisions folders for members of this group."
+  default     = "Profile Users"
+}
+
 variable "profile_drive_letter" {
   type        = string
   description = "Drive letter to map for roaming profiles"

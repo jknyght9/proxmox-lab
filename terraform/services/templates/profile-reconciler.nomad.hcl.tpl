@@ -55,21 +55,34 @@ LDAP_BIND_DN="CN=domain-join-svc,CN=Users,$BASE_DN"
 # WORKGROUP\name, matching the nas-acls.tf / nas-profile-share.tf format.
 WORKGROUP=$(echo "$AD_REALM_LOWER" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')
 
-echo "[+] Querying Samba AD for user accounts (LDAPS $LDAP_HOST)"
-USERS=$(ldapsearch -LLL -H "ldaps://$LDAP_HOST" -x \
+# Only provision profiles for members of the opt-in profile group — keeps
+# service/built-in accounts (Administrator, *-sync, *-bind, domain-join-svc)
+# out. Membership is managed in LAM/samba-tool; the group is auto-created by
+# samba-ad-groups.tf. Direct membership only (no nested-group chain).
+echo "[+] Querying Samba AD for members of '${profile_group}' (LDAPS $LDAP_HOST)"
+# Capture ldapsearch output and its exit status separately so we can tell a
+# genuine bind/query failure (rc != 0 -> abort) apart from a valid empty group
+# (rc == 0, no members -> nothing to do). An empty opt-in group is the normal
+# initial state, not an error.
+LDAP_RAW=$(ldapsearch -LLL -H "ldaps://$LDAP_HOST" -x \
   -D "$LDAP_BIND_DN" -w "$DOMAIN_JOIN_PW" \
   -b "CN=Users,$BASE_DN" \
-  "(&(objectClass=user)(!(objectClass=computer))(!(sAMAccountName=krbtgt))(!(sAMAccountName=Guest)))" \
-  sAMAccountName 2>/dev/null \
-  | awk '/^sAMAccountName: /{print $2}' | sort -u)
-
-if [ -z "$USERS" ]; then
-  echo "[!] LDAPS bind failed or no users found — aborting"
+  "(&(objectClass=user)(!(objectClass=computer))(memberOf=CN=${profile_group},CN=Users,$BASE_DN))" \
+  sAMAccountName 2>/dev/null)
+LS_RC=$?
+if [ $LS_RC -ne 0 ]; then
+  echo "[!] LDAPS bind/query failed (rc=$LS_RC) — aborting"
   exit 1
 fi
 
+USERS=$(printf '%s\n' "$LDAP_RAW" | awk '/^sAMAccountName: /{print $2}' | sort -u)
+if [ -z "$USERS" ]; then
+  echo "[+] '${profile_group}' has no members — nothing to do"
+  exit 0
+fi
+
 USER_COUNT=$(echo "$USERS" | wc -l)
-echo "[+] Found $USER_COUNT user(s) in AD"
+echo "[+] Found $USER_COUNT member(s) of '${profile_group}'"
 
 # --- Per-NAS reconciliation ---
 # Each block is rendered statically by terraform templatefile at apply time;
@@ -91,11 +104,13 @@ auth() { curl -sk -H "Authorization: Bearer $NAS_API_KEY" "$@"; }
 
 # Verify share is reachable / dataset exists before doing per-user work
 DS_ENC=$(printf '%s' "$DATASET" | sed 's|/|%2F|g')
-DS_CODE=$(auth -o /dev/null -w '%%%%{http_code}' "$API/pool/dataset/id/$DS_ENC")
+DS_CODE=$(auth -o /dev/null -w '%%%{http_code}' "$API/pool/dataset/id/$DS_ENC")
+# NB: each nas block is unrolled by templatefile at the top level (no
+# enclosing shell loop), so `continue` is invalid here — gate the per-user
+# work in an else branch instead.
 if [ "$DS_CODE" != "200" ]; then
   echo "[!] dataset $DATASET missing on ${nas.name} (HTTP $DS_CODE) — skipping; run terraform apply"
-  continue 2>/dev/null || true
-fi
+else
 
 CREATED=0
 EXISTED=0
@@ -110,7 +125,7 @@ for USER in $USERS; do
   USER_PATH="$MOUNT_PATH/$USER"
 
   STAT_CODE=$(auth -X POST -H "Content-Type: application/json" \
-    -o /dev/null -w '%%%%{http_code}' \
+    -o /dev/null -w '%%%{http_code}' \
     "$API/filesystem/stat" -d "$(jq -n --arg p "$USER_PATH" '{path:$p}')")
 
   if [ "$STAT_CODE" = "200" ]; then
@@ -167,6 +182,7 @@ for USER in $USERS; do
 done
 
 echo "[=] ${nas.name}: created=$CREATED existing=$EXISTED failed=$FAILED"
+fi
 %{ endfor ~}
 
 echo ""
