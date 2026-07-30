@@ -48,9 +48,13 @@ resource "null_resource" "authentik_ad_sync" {
         USER_MAPPINGS=$(curl -sk -H "Authorization: Bearer $TOKEN" \
           "$API/propertymappings/source/ldap/" \
           | jq -c '[.results[] | select(.managed | test("ms-|default-")) | .pk]')
+        # Groups get ONLY the name mapping. The broader "default-" match also
+        # pulled in default-dn-path ("DN to User Path"), which injects a `path`
+        # kwarg the Group model rejects -> every group failed with
+        # "Group() got unexpected keyword arguments: 'path'" and 0 groups synced.
         GROUP_MAPPINGS=$(curl -sk -H "Authorization: Bearer $TOKEN" \
           "$API/propertymappings/source/ldap/" \
-          | jq -c '[.results[] | select(.managed | test("default-")) | .pk]')
+          | jq -c '[.results[] | select(.managed == "goauthentik.io/sources/ldap/default-name") | .pk]')
 
         echo '[+] Creating Samba AD LDAP source...'
         curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
