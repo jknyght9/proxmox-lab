@@ -211,6 +211,20 @@ resource "null_resource" "authentik_apps" {
       create_or_get "core/applications" "slug" "kasm" \
         "{\"name\":\"Kasm Workspaces\",\"slug\":\"kasm\",\"group\":\"User\",\"meta_launch_url\":\"https://kasm.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/kasm-workspaces.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
+      # --- Microsoft 365 launcher tiles (no provider — auth is UTSA Entra, not
+      #     authentik; these are just bookmarks on the user dashboard) ---
+      echo '[+] Microsoft Teams...'
+      create_or_get "core/applications" "slug" "teams" \
+        "{\"name\":\"Microsoft Teams\",\"slug\":\"teams\",\"group\":\"User\",\"meta_launch_url\":\"https://teams.microsoft.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-teams.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      echo '[+] Outlook Web...'
+      create_or_get "core/applications" "slug" "outlook" \
+        "{\"name\":\"Outlook Web\",\"slug\":\"outlook\",\"group\":\"User\",\"meta_launch_url\":\"https://outlook.office.com/mail/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-outlook.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      echo '[+] Microsoft 365 portal...'
+      create_or_get "core/applications" "slug" "m365" \
+        "{\"name\":\"Microsoft 365\",\"slug\":\"m365\",\"group\":\"User\",\"meta_launch_url\":\"https://www.microsoft365.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-365.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
       # --- Wire proxy providers into the embedded outpost ---
       echo '[+] Updating embedded outpost with proxy providers...'
       OUTPOST_PK=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/outposts/instances/" \
