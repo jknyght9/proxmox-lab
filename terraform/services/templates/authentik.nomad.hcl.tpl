@@ -141,7 +141,10 @@ AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
 AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
 AUTHENTIK_LISTEN__HTTPS=0.0.0.0:9443
-AUTHENTIK_STORAGE__MEDIA__FILE__PATH=/data/media
+# NB: do NOT set AUTHENTIK_STORAGE__MEDIA__FILE__PATH — it overrides the *base*
+# data dir (default /data), and the file backend appends media/public/ itself.
+# Leave it unset so uploaded/branding media resolves to /data/media/public/
+# (served at /files/media/public/<f>?token=... since 2025.12; /media/ is gone).
 # Trust internal CA for HTTPS requests — file lives in the alloc-local
 # /local/certs dir, populated by the template stanza above. Nomad's
 # docker driver mounts /local/ into the container automatically.
@@ -226,7 +229,7 @@ AUTHENTIK_POSTGRESQL__PORT=5432
 AUTHENTIK_POSTGRESQL__USER=authentik
 AUTHENTIK_POSTGRESQL__NAME=authentik
 AUTHENTIK_ERROR_REPORTING__ENABLED=false
-AUTHENTIK_STORAGE__MEDIA__FILE__PATH=/data/media
+# NB: AUTHENTIK_STORAGE__MEDIA__FILE__PATH intentionally unset (see server task).
 # Trust internal CA for HTTPS requests
 REQUESTS_CA_BUNDLE=/local/certs/root_ca.crt
 SSL_CERT_FILE=/local/certs/root_ca.crt
