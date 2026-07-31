@@ -122,11 +122,6 @@ resource "null_resource" "authentik_apps" {
       # App icon base URL (homarr-labs/dashboard-icons)
       ICON="https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main"
 
-      # --- Admin Group ---
-      echo '[+] Infrastructure Admins group...'
-      create_or_get "core/groups" "name" "Infrastructure Admins" \
-        '{"name":"Infrastructure Admins","is_superuser":false}' > /dev/null
-
       # --- Proxy Providers + Applications ---
       echo '[+] Proxy providers + applications...'
 
@@ -224,6 +219,12 @@ resource "null_resource" "authentik_apps" {
       echo '[+] Microsoft 365 portal...'
       create_or_get "core/applications" "slug" "m365" \
         "{\"name\":\"Microsoft 365\",\"slug\":\"m365\",\"group\":\"User\",\"meta_launch_url\":\"https://www.microsoft365.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-365.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      # SharePoint: login-routed launcher (lands on the user's tenant SharePoint
+      # home). For a direct tenant link, swap to https://<tenant>.sharepoint.com
+      echo '[+] SharePoint...'
+      create_or_get "core/applications" "slug" "sharepoint" \
+        "{\"name\":\"SharePoint\",\"slug\":\"sharepoint\",\"group\":\"User\",\"meta_launch_url\":\"https://www.microsoft365.com/launch/sharepoint\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-sharepoint.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # --- Wire proxy providers into the embedded outpost ---
       echo '[+] Updating embedded outpost with proxy providers...'
