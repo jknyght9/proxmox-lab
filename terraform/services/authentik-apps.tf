@@ -199,32 +199,32 @@ resource "null_resource" "authentik_apps" {
       # --- Documentation (launch URL only — no auth, public access) ---
       echo '[+] Documentation...'
       create_or_get "core/applications" "slug" "docs" \
-        "{\"name\":\"Documentation\",\"slug\":\"docs\",\"group\":\"User\",\"meta_launch_url\":\"https://docs.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"https://raw.githubusercontent.com/squidfunk/mkdocs-material/master/material/templates/.icons/logo.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Documentation\",\"slug\":\"docs\",\"group\":\"Lab\",\"meta_launch_url\":\"https://docs.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"https://raw.githubusercontent.com/squidfunk/mkdocs-material/master/material/templates/.icons/logo.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # --- Kasm (launch URL only — authenticates directly via LDAP to Samba AD) ---
       echo '[+] Kasm Workspaces...'
       create_or_get "core/applications" "slug" "kasm" \
-        "{\"name\":\"Kasm Workspaces\",\"slug\":\"kasm\",\"group\":\"User\",\"meta_launch_url\":\"https://kasm.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/kasm-workspaces.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Kasm Workspaces\",\"slug\":\"kasm\",\"group\":\"Lab\",\"meta_launch_url\":\"https://kasm.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/kasm-workspaces.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # --- Microsoft 365 launcher tiles (no provider — auth is UTSA Entra, not
       #     authentik; these are just bookmarks on the user dashboard) ---
       echo '[+] Microsoft Teams...'
       create_or_get "core/applications" "slug" "teams" \
-        "{\"name\":\"Microsoft Teams\",\"slug\":\"teams\",\"group\":\"User\",\"meta_launch_url\":\"https://teams.microsoft.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-teams.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Microsoft Teams\",\"slug\":\"teams\",\"group\":\"M365\",\"meta_launch_url\":\"https://teams.microsoft.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-teams.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       echo '[+] Outlook Web...'
       create_or_get "core/applications" "slug" "outlook" \
-        "{\"name\":\"Outlook Web\",\"slug\":\"outlook\",\"group\":\"User\",\"meta_launch_url\":\"https://outlook.office.com/mail/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-outlook.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Outlook Web\",\"slug\":\"outlook\",\"group\":\"M365\",\"meta_launch_url\":\"https://outlook.office.com/mail/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-outlook.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       echo '[+] Microsoft 365 portal...'
       create_or_get "core/applications" "slug" "m365" \
-        "{\"name\":\"Microsoft 365\",\"slug\":\"m365\",\"group\":\"User\",\"meta_launch_url\":\"https://www.microsoft365.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-365.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Microsoft 365\",\"slug\":\"m365\",\"group\":\"M365\",\"meta_launch_url\":\"https://www.microsoft365.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-365.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # SharePoint: login-routed launcher (lands on the user's tenant SharePoint
       # home). For a direct tenant link, swap to https://<tenant>.sharepoint.com
       echo '[+] SharePoint...'
       create_or_get "core/applications" "slug" "sharepoint" \
-        "{\"name\":\"SharePoint\",\"slug\":\"sharepoint\",\"group\":\"User\",\"meta_launch_url\":\"https://www.microsoft365.com/launch/sharepoint\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-sharepoint.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"SharePoint\",\"slug\":\"sharepoint\",\"group\":\"M365\",\"meta_launch_url\":\"https://www.microsoft365.com/launch/sharepoint\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/microsoft-sharepoint.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # --- Wire proxy providers into the embedded outpost ---
       echo '[+] Updating embedded outpost with proxy providers...'
