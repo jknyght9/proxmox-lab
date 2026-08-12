@@ -1,6 +1,21 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working
+with code in this repository.
+
+**Lab context lives OUTSIDE this repo** at `~/iotvf-lab/` (private, not
+public). That directory holds the topology, credential paths, service
+inventory, and auto-memory shared across all four related repos (this
+one, `~/lab-system-templates/`, `~/deploy-windows-desktop/`, `~/kasm/`).
+Read `~/iotvf-lab/CLAUDE.md` before making decisions that depend on
+lab-specific values. Example values in THIS file (`mylab.lan`, IPs like
+`10.1.50.x`) are placeholders — actual values are in Vault, in
+gitignored `terraform.tfvars`, or in `~/iotvf-lab/CLAUDE.md`.
+
+**Auto-memory for this repo is symlinked** to `~/iotvf-lab/memory/`.
+
+**Recent extraction (2026-08-12)**: the `kasm/` subdirectory was moved
+out to its own repo at `~/kasm/`. Do not recreate it here.
 
 ## Project Overview
 
