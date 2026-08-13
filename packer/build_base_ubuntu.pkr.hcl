@@ -79,9 +79,54 @@ apt:
 
 packages:
   - qemu-guest-agent
+
+# Grow the root partition + filesystem to fill the disk on every boot.
+# Distro-agnostic (ext4/xfs/btrfs) and idempotent (no-ops when already at
+# max), so a `qm disk resize` of ANY clone (nomad/docker/kasm/research)
+# takes effect after a reboot — or on demand via `systemctl start
+# grow-rootfs`. growpart + the fs-grow tools already ship in the Ubuntu /
+# Debian / Fedora cloud images, so nothing is installed here (keeps this
+# shared vendor snippet distro-neutral).
+write_files:
+  - path: /usr/local/sbin/grow-rootfs.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      ROOT_SRC=$(findmnt -no SOURCE /)
+      FSTYPE=$(findmnt -no FSTYPE /)
+      DEV=$(basename "$ROOT_SRC")
+      DISK=$(lsblk -no PKNAME "$ROOT_SRC" 2>/dev/null || true)
+      PARTNUM=$(cat "/sys/class/block/$DEV/partition" 2>/dev/null || true)
+      # Grow the partition to fill the disk (nonzero when already full = fine).
+      if command -v growpart >/dev/null && [ -n "$DISK" ] && [ -n "$PARTNUM" ]; then
+        growpart "/dev/$DISK" "$PARTNUM" || true
+      fi
+      # Grow the filesystem to fill the partition (type-aware; all idempotent).
+      case "$FSTYPE" in
+        ext2|ext3|ext4) resize2fs "$ROOT_SRC" ;;
+        xfs)            xfs_growfs / ;;
+        btrfs)          btrfs filesystem resize max / ;;
+        *) echo "grow-rootfs: unsupported fstype '$FSTYPE'" >&2 ;;
+      esac
+  - path: /etc/systemd/system/grow-rootfs.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Grow root filesystem to fill the disk
+      After=local-fs.target
+      ConditionPathExists=/usr/local/sbin/grow-rootfs.sh
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/grow-rootfs.sh
+      [Install]
+      WantedBy=multi-user.target
+
 runcmd:
   - systemctl enable qemu-guest-agent
   - systemctl start qemu-guest-agent
+  - systemctl daemon-reload
+  - systemctl enable --now grow-rootfs.service
 CLOUD_INIT
 
       echo "[+] Cloud-init vendor snippet uploaded"

@@ -103,7 +103,10 @@ variable "base_fedora_vmid" {
 }
 variable "fedora_image_url" {
   type    = string
-  default = "https://download.fedoraproject.org/pub/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"
+  # Fedora 42 was rotated out of the main releases tree to the archive mirror
+  # (current stable is now F44). Pinned at 42 intentionally; repointed to the
+  # archive host so the URL resolves. Bumping the release is a separate decision.
+  default = "https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2"
 }
 variable "base_debian_vmid" {
   type    = number
