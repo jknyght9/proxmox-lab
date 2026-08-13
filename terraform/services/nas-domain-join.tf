@@ -256,7 +256,13 @@ resource "null_resource" "nas_domain_join" {
         JOB_ID=$(curl -sk -X PUT -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
           "$API/directoryservices" -d "$JOIN_PAYLOAD" 2>/dev/null)
 
-        if [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then
+        # POSIX-safe numeric check — nomad01's ssh remote-exec runs under
+        # /bin/sh (dash), which does not support bash's [[ ... =~ ... ]].
+        case "$JOB_ID" in
+          ''|*[!0-9]*) JOB_IS_NUM=false ;;
+          *) JOB_IS_NUM=true ;;
+        esac
+        if [ "$JOB_IS_NUM" = "true" ]; then
           # Poll job status
           WAITED=0
           while [ $WAITED -lt 180 ]; do
