@@ -83,8 +83,59 @@ UniFi can do content filtering / ad-blocking too. Options:
 4. (If chosen) Layer 2: deploy `unifi-dns` app (Nomad or compose) with Authentik OIDC + Traefik.
 5. Retire nebula-sync + Pi-hole DNS-record path per the disposition decision; gate `pihole_nebula_sync` in `dns-records.tf`.
 
-## Open decisions (see the branch discussion)
-- Layer-1 mechanism: Terraform static-dns push (1a) vs unifi-dns import (1b)?
-- Deploy the `unifi-dns` app? If yes, Nomad (2a) or compose host (2b)?
-- Pi-hole disposition: full retire / split / decide later?
-- Dedicated UniFi API key for unifi-dns, or reuse `secret/unifi`?
+## Decisions (2026-08-31)
+- **Records→UniFi:** via the **`unifi-dns` app's built-in Pi-hole import** (1b) — run
+  once from the UI after the app is up, to seed UniFi static-dns from the current
+  (restored) Pi-hole records.
+- **App deployment:** **Nomad job** (2a) — Traefik route, Vault WIF, Postgres on
+  gluster, Authentik OIDC. Requires translating upstream compose → Nomad jobspec.
+- **Pi-hole disposition:** **decide later** — keep the (now hardened) Pi-hole nodes
+  running; revisit retire/split after UniFi resolution is validated.
+- **UniFi API key:** reuse `secret/unifi` initially (dedicated key can come later).
+
+## Upstream topology (resolved from docker-compose.yml)
+
+| Service | Image | Port | Notes |
+|---------|-------|------|-------|
+| db | `postgres:18-alpine` (published) | 5432 (→5433 host) | user/db `unifidns`, `POSTGRES_PASSWORD`; vol `/var/lib/postgresql` |
+| backend | **build `./backend`** (FastAPI) | 8000 | `DATABASE_URL`, `UNIFI_*`, `SESSION_SECRET`, `OIDC_*`, `CORS_ORIGINS`; depends_on db healthy |
+| frontend | **build `./frontend`** (nginx SPA) | 80 (→8080 host) | serves SPA, **reverse-proxies `/api/` → `backend:8000`**; depends_on backend |
+
+Frontend is the only ingress; backend is internal. Under Nomad **host networking**
+all tasks share the netns, so the frontend nginx upstream is overridden from
+`backend:8000` → `127.0.0.1:8000` (mounted `default.conf`, same trick as netbox's
+unit config). Backend env `UNIFI_API_KEY` reuses Vault `secret/unifi`; app secrets
+(`SESSION_SECRET`, OIDC client) live in new `secret/unifi-dns`.
+
+## ⚠️ Image gate (hard prerequisite for the Nomad path)
+
+`backend` and `frontend` are **built from source** — there are **no published images**,
+and Nomad's docker driver **pulls, it cannot build**. So before the job can run, the two
+images must be published to a registry the Nomad nodes can pull. Options:
+- **GHCR via CI (recommended)** — add a GitHub Actions workflow to the `unifi-dns` repo
+  that builds+pushes `ghcr.io/jknyght9/unifi-dns-backend` and `-frontend` on tag/release.
+  Clean, versioned, reproducible; the jobspec pins a tag.
+- **Local build+push to a lab registry** — `docker build` both, push to an in-lab registry
+  (would need to stand one up) or Docker Hub. Faster to bootstrap, less clean.
+
+The jobspec `terraform/services/templates/unifi-dns.nomad.hcl.tpl` parameterizes both
+images via `${unifi_dns_backend_image}` / `${unifi_dns_frontend_image}` so it's ready
+once the registry path is chosen.
+
+## Build order (implied by the above)
+0. **Publish images** (image gate above) — pick GHCR-CI vs lab-registry; set the two image vars.
+1. Vault: `secret/unifi-dns` (`postgres_password`, `session_secret`, `oidc_client_id/secret`,
+   `oidc_issuer`) + policy + WIF role `unifi-dns`; reuse `secret/unifi` for `api_key`.
+2. Nomad job `unifi-dns.nomad.hcl.tpl` (✅ v1 scaffold committed): PG18 + backend + frontend;
+   gluster PG volume + wait-for-gluster; nginx upstream override; Traefik `unifi-dns.<postfix>`.
+   Confirm node pin + host ports (8090/8000/5434) against the live cluster at deploy.
+3. Authentik: OIDC provider + application for unifi-dns
+   (redirect `https://unifi-dns.<postfix>/api/auth/callback`).
+4. DNS record `unifi-dns.<postfix>` → Traefik VIP; wire into `nomad-jobs.tf` + `variables.tf`.
+5. Deploy; from the UI run **Pi-hole import** (source = dns-01) → verify records land in UniFi.
+6. Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.
+
+## Open items
+- Does the backend image auto-run `alembic upgrade head` on start? (repo has `alembic/`).
+  If not, add a prestart migration task. Verify from `backend/Dockerfile` entrypoint.
+- Node/port allocation on the live cluster (avoid PG 5433 collision with netbox on nomad03).
