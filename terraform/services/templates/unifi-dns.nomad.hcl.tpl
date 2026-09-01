@@ -130,11 +130,13 @@ EOH
 {{ with secret "secret/data/unifi-dns" }}
 DATABASE_URL=postgresql://unifidns:{{ .Data.data.postgres_password }}@127.0.0.1:5434/unifidns
 SESSION_SECRET={{ .Data.data.session_secret }}
-OIDC_ISSUER={{ .Data.data.oidc_issuer }}
+{{ end }}
+{{ with secret "secret/data/unifi-dns-oidc" }}
+OIDC_ISSUER={{ .Data.data.oidc_endpoint }}
 OIDC_CLIENT_ID={{ .Data.data.oidc_client_id }}
 OIDC_CLIENT_SECRET={{ .Data.data.oidc_client_secret }}
-OIDC_REDIRECT_URL=https://unifi-dns.${dns_postfix}/api/auth/callback
 {{ end }}
+OIDC_REDIRECT_URL=https://unifi-dns.${dns_postfix}/api/auth/callback
 {{ with secret "secret/data/unifi" }}
 UNIFI_API_KEY={{ .Data.data.api_key }}
 {{ end }}

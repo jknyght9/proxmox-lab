@@ -15,10 +15,11 @@ resource "null_resource" "authentik_apps" {
   depends_on = [nomad_job.authentik]
 
   triggers = {
-    dns_postfix   = var.dns_postfix
-    deploy_uptime = var.deploy_uptime_kuma
-    deploy_lam    = var.deploy_lam
-    deploy_netbox = var.deploy_netbox
+    dns_postfix      = var.dns_postfix
+    deploy_uptime    = var.deploy_uptime_kuma
+    deploy_lam       = var.deploy_lam
+    deploy_netbox    = var.deploy_netbox
+    deploy_unifi_dns = var.deploy_unifi_dns
   }
 
   connection {
@@ -193,6 +194,29 @@ resource "null_resource" "authentik_apps" {
         echo "    OIDC credentials stored at secret/netbox-oidc"
       else
         echo "    [!] Netbox OIDC client_secret not found — SSO will fail until secret/netbox-oidc is populated"
+      fi
+      %{endif}
+
+      %{if var.deploy_unifi_dns}
+      echo '[+] unifi-dns OIDC provider...'
+      # unifi-dns uses native OIDC (authlib code flow) — create OAuth2 provider.
+      # Callback path is /api/auth/callback (backend/app/auth.py).
+      UNIFIDNS_PK=$(create_or_get "providers/oauth2" "name" "unifi-dns OIDC" \
+        "{\"name\":\"unifi-dns OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"unifi-dns\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://unifi-dns.${var.dns_postfix}/api/auth/callback\"}]}")
+      create_or_get "core/applications" "slug" "unifi-dns" \
+        "{\"name\":\"UniFi DNS\",\"slug\":\"unifi-dns\",\"provider\":$UNIFIDNS_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://unifi-dns.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/unifi.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      # Store OIDC credentials in the placeholder Vault path (not managed by Terraform).
+      # OIDC_ISSUER for the app = oidc_endpoint; authlib appends /.well-known/openid-configuration.
+      UNIFIDNS_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+        "$API/providers/oauth2/" | jq -r --arg name "unifi-dns OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
+      if [ -n "$UNIFIDNS_OIDC_SECRET" ]; then
+        curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
+          "${var.vault_address}/v1/secret/data/unifi-dns-oidc" \
+          -d "{\"data\":{\"oidc_client_id\":\"unifi-dns\",\"oidc_client_secret\":\"$UNIFIDNS_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/unifi-dns/\"}}" > /dev/null
+        echo "    OIDC credentials stored at secret/unifi-dns-oidc"
+      else
+        echo "    [!] unifi-dns OIDC client_secret not found — SSO will fail until secret/unifi-dns-oidc is populated"
       fi
       %{endif}
 

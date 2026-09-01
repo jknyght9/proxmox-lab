@@ -141,6 +141,26 @@ resource "vault_jwt_auth_backend_role" "netbox_sync" {
   bound_claims   = { nomad_job_id = "netbox-sync" }
 }
 
+resource "vault_jwt_auth_backend_role" "unifi_dns" {
+  count                   = var.deploy_unifi_dns ? 1 : 0
+  backend                 = vault_jwt_auth_backend.nomad.path
+  role_name               = "unifi-dns"
+  role_type               = "jwt"
+  bound_audiences         = ["vault.io"]
+  user_claim              = "/nomad_job_id"
+  user_claim_json_pointer = true
+  claim_mappings = {
+    nomad_namespace = "nomad_namespace"
+    nomad_job_id    = "nomad_job_id"
+    nomad_task      = "nomad_task"
+  }
+  token_type     = "service"
+  token_policies = ["unifi-dns"]
+  token_period   = 3600
+  token_ttl      = 3600
+  bound_claims   = { nomad_job_id = "unifi-dns" }
+}
+
 resource "vault_jwt_auth_backend_role" "tailscale" {
   count                   = var.deploy_tailscale ? 1 : 0
   backend                 = vault_jwt_auth_backend.nomad.path

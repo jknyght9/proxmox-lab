@@ -172,6 +172,37 @@ resource "nomad_job" "netbox_sync" {
   detach = false
 }
 
+# unifi-dns — UniFi local-DNS management app (Postgres + FastAPI + nginx SPA).
+# Backend/frontend images must be published to GHCR first (they build from
+# source; Nomad only pulls). See docs/unifi-dns-integration.md.
+resource "nomad_job" "unifi_dns" {
+  count = var.deploy_unifi_dns ? 1 : 0
+  depends_on = [
+    vault_policy.unifi_dns,
+    vault_jwt_auth_backend_role.unifi_dns,
+    vault_kv_secret_v2.unifi_dns,
+    vault_kv_secret_v2.unifi_dns_oidc,
+    vault_kv_secret_v2.unifi,
+    null_resource.nomad_vault_config,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/unifi-dns.nomad.hcl.tpl", {
+    dns_postfix              = var.dns_postfix
+    unifi_address            = var.unifi_address
+    unifi_site               = var.unifi_site
+    unifi_dns_backend_image  = var.unifi_dns_backend_image
+    unifi_dns_frontend_image = var.unifi_dns_frontend_image
+  })
+  detach = false
+
+  # First run pulls postgres:18 + the two GHCR images and runs alembic
+  # migrations on backend start. Default 5m create timeout is too tight.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
 resource "nomad_job" "tailscale" {
   count = var.deploy_tailscale ? 1 : 0
   depends_on = [

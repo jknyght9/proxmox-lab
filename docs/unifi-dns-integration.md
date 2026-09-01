@@ -147,8 +147,26 @@ default `:latest`) — pin a version tag once released.
 Backend Dockerfile confirms **`alembic upgrade head` runs on container start** (CMD), so no
 separate migration task is needed. Frontend has **no `VITE_*` build args** (same-origin `/api`).
 
-## Open items
-- Push `ci/ghcr-publish` in the unifi-dns repo; run the workflow; make packages public.
-- Vault `secret/unifi-dns` + policy + WIF role `unifi-dns`; Authentik OIDC provider/app.
-- Wire `nomad-jobs.tf` (templatefile + `deploy_unifi_dns` gate) + DNS record.
-- Confirm node pin + host ports (8090/8000/5434) on the live cluster (PG 5433 = netbox/nomad03).
+## Deploy-side wiring — DONE (terraform validate clean)
+
+All gated on `var.deploy_unifi_dns` (default false):
+- **Vault secrets** (`vault-secrets.tf`): `random_password.unifi_dns_postgres` (prevent_destroy)
+  + `unifi_dns_session`; `vault_kv_secret_v2.unifi_dns` (postgres_password, session_secret) +
+  `unifi_dns_oidc` placeholder (ignore_changes). API key reused from `secret/unifi`.
+- **Policy** `nomad/vault-policies/unifi-dns.hcl` + `vault_policy.unifi_dns`; **WIF role**
+  `vault_jwt_auth_backend_role.unifi_dns` (bound to job_id `unifi-dns`).
+- **Authentik** (`authentik-apps.tf`): OAuth2 provider "unifi-dns OIDC" + app `unifi-dns`
+  (confidential, redirect `…/api/auth/callback`), client_secret → `secret/unifi-dns-oidc`.
+- **Nomad job** (`nomad-jobs.tf`): `nomad_job.unifi_dns` (templatefile, 20m timeout).
+- **DNS**: `unifi-dns.<postfix>` → Traefik VIP added to `dns-records.tf`.
+- **Jobspec**: backend reads app secrets from `secret/unifi-dns`, OIDC from
+  `secret/unifi-dns-oidc` (issuer = `oidc_endpoint`), api_key from `secret/unifi`.
+
+## Remaining to go live
+1. **Images**: push `ci/ghcr-publish` in the unifi-dns repo → run workflow → **make both GHCR
+   packages public** (or give Nomad a pull token). Pin a tag in the image vars if not `:latest`.
+2. **Enable + apply**: set `deploy_unifi_dns = true` in `terraform/services/terraform.tfvars`,
+   `terraform apply`. Confirm node pin (`nomad01`) + host ports (8090/8000/5434) don't collide.
+3. **Seed records**: from the UI (`https://unifi-dns.<postfix>`, SSO via Authentik) run the
+   **Pi-hole import** (source = dns-01) → verify records land in UniFi static-dns.
+4. Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.

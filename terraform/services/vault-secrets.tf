@@ -130,6 +130,24 @@ resource "random_password" "netbox_api_token" {
   lifecycle { prevent_destroy = true }
 }
 
+resource "random_password" "unifi_dns_postgres" {
+  count   = var.deploy_unifi_dns ? 1 : 0
+  length  = 24
+  special = false
+  keepers = { service = "unifi-dns" }
+  lifecycle { prevent_destroy = true }
+}
+
+# Session cookie signing key (upstream suggests `openssl rand -hex 32`).
+# Not stateful — rotating it just invalidates active sessions — so no
+# prevent_destroy, but keepers hold it stable across normal applies.
+resource "random_password" "unifi_dns_session" {
+  count   = var.deploy_unifi_dns ? 1 : 0
+  length  = 64
+  special = false
+  keepers = { service = "unifi-dns" }
+}
+
 # --- Write Secrets to Vault KV ---
 
 resource "vault_kv_secret_v2" "pihole" {
@@ -223,6 +241,35 @@ resource "vault_kv_secret_v2" "unifi" {
     api_key = var.unifi_api_key
     site    = var.unifi_site
   })
+}
+
+# unifi-dns app secrets (Postgres + session key). The UniFi API key is read
+# from secret/unifi (above); OIDC creds land in secret/unifi-dns-oidc below.
+resource "vault_kv_secret_v2" "unifi_dns" {
+  count = var.deploy_unifi_dns ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "unifi-dns"
+  data_json = jsonencode({
+    postgres_password = random_password.unifi_dns_postgres[0].result
+    session_secret    = random_password.unifi_dns_session[0].result
+  })
+  lifecycle { prevent_destroy = true }
+}
+
+# Placeholder for unifi-dns OIDC — populated by authentik_apps after Authentik
+# is running. Must exist before the app starts so the Vault template doesn't block.
+resource "vault_kv_secret_v2" "unifi_dns_oidc" {
+  count = var.deploy_unifi_dns ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "unifi-dns-oidc"
+  data_json = jsonencode({
+    oidc_client_id     = ""
+    oidc_client_secret = ""
+    oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
 }
 
 # Removed: vault_kv_secret_v2.backup. The explicit backup job was retired
