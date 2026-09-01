@@ -202,6 +202,32 @@ variable "unifi_api_key" {
   default     = ""
 }
 
+# =============================================================================
+# unifi-dns app (feature/unifi-dns) — images published to GHCR by the
+# publish-images.yml workflow in github.com/jknyght9/unifi-dns. Nomad pulls
+# these (it cannot build from source). Pin a version tag once released; the
+# GHCR packages must be public (or Nomad given a pull token). See
+# docs/unifi-dns-integration.md.
+# =============================================================================
+
+variable "deploy_unifi_dns" {
+  type        = bool
+  description = "Deploy the unifi-dns management app as a Nomad job"
+  default     = false
+}
+
+variable "unifi_dns_backend_image" {
+  type        = string
+  description = "GHCR image ref for the unifi-dns backend (FastAPI)"
+  default     = "ghcr.io/jknyght9/unifi-dns-backend:latest"
+}
+
+variable "unifi_dns_frontend_image" {
+  type        = string
+  description = "GHCR image ref for the unifi-dns frontend (nginx SPA)"
+  default     = "ghcr.io/jknyght9/unifi-dns-frontend:latest"
+}
+
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
 # backup Nomad job was retired in Phase 2/3 of the storage migration;
 # ZFS snapshots on the cluster_state NAS handle the backup role now

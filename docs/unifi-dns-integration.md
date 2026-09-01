@@ -135,7 +135,20 @@ once the registry path is chosen.
 5. Deploy; from the UI run **Pi-hole import** (source = dns-01) → verify records land in UniFi.
 6. Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.
 
+## Image gate — resolved path (2026-08-31)
+
+GHCR via CI. Workflow `publish-images.yml` added to the `unifi-dns` repo (branch
+`ci/ghcr-publish`, not yet pushed) builds+pushes `ghcr.io/jknyght9/unifi-dns-{backend,
+frontend}` on push-to-main / `v*` tags / manual dispatch. **After first run, make both
+GHCR packages public** (or give Nomad a `read:packages` pull token). Our jobspec image
+refs are declared in `variables.tf` (`unifi_dns_backend_image` / `unifi_dns_frontend_image`,
+default `:latest`) — pin a version tag once released.
+
+Backend Dockerfile confirms **`alembic upgrade head` runs on container start** (CMD), so no
+separate migration task is needed. Frontend has **no `VITE_*` build args** (same-origin `/api`).
+
 ## Open items
-- Does the backend image auto-run `alembic upgrade head` on start? (repo has `alembic/`).
-  If not, add a prestart migration task. Verify from `backend/Dockerfile` entrypoint.
-- Node/port allocation on the live cluster (avoid PG 5433 collision with netbox on nomad03).
+- Push `ci/ghcr-publish` in the unifi-dns repo; run the workflow; make packages public.
+- Vault `secret/unifi-dns` + policy + WIF role `unifi-dns`; Authentik OIDC provider/app.
+- Wire `nomad-jobs.tf` (templatefile + `deploy_unifi_dns` gate) + DNS record.
+- Confirm node pin + host ports (8090/8000/5434) on the live cluster (PG 5433 = netbox/nomad03).
