@@ -11,6 +11,14 @@ job "netbox-sync" {
   group "sync" {
     count = 1
 
+    # Pin to nomad01 so the UniFi API egress comes from a single, known host
+    # (10.10.0.14) — lets the UDM firewall allow one /32 instead of the subnet.
+    # unifi-dns is pinned to nomad01 for the same reason.
+    constraint {
+      attribute = "$${attr.unique.hostname}"
+      value     = "nomad01"
+    }
+
     vault {
       role        = "netbox-sync"
       change_mode = "restart"
