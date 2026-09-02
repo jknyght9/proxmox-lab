@@ -43,31 +43,15 @@ job "unifi-dns" {
 
     network {
       mode = "host"
-      port "http"     { static = 8090 } # frontend (Traefik target)
+      port "http"     { static = 8095 } # frontend (Traefik target)
       port "backend"  { static = 8000 } # internal API (not exposed)
       port "postgres" { static = 5434 } # unique vs other PG instances
     }
 
-    # Postgres data on the gluster replicated volume.
-    # Guarded by the wait-for-gluster prestart task below (per CLAUDE.md).
-    # (Alternative: register a CSI/NFS volume like netbox uses — deferred.)
-
-    # --- prestart: fail fast if the gluster mount/sentinel is missing ---
-    task "wait-for-gluster" {
-      driver = "raw_exec"
-      lifecycle {
-        hook    = "prestart"
-        sidecar = false
-      }
-      config {
-        command = "/bin/sh"
-        args = ["-c", "mountpoint -q /srv/gluster/nomad-data && test -f /srv/gluster/nomad-data/.mount-sentinel"]
-      }
-      resources {
-        cpu    = 20
-        memory = 16
-      }
-    }
+    # Postgres data on a node-local path (job is pinned to nomad01). unifi-dns's
+    # DB holds audit/changeset/session state, NOT the authoritative DNS records
+    # (those live in UniFi), so node-local is acceptable and avoids the
+    # decommissioned gluster volume. CSI/NFS (like netbox) is a future upgrade.
 
     # --- Postgres 18 ---
     task "postgres" {
@@ -78,7 +62,7 @@ job "unifi-dns" {
       config {
         image        = "postgres:18-alpine"
         network_mode = "host"
-        volumes      = ["/srv/gluster/nomad-data/unifi-dns/postgres:/var/lib/postgresql"]
+        volumes      = ["/opt/unifi-dns/postgres:/var/lib/postgresql"]
       }
 
       template {
@@ -128,7 +112,7 @@ EOH
       template {
         data = <<EOH
 {{ with secret "secret/data/unifi-dns" }}
-DATABASE_URL=postgresql://unifidns:{{ .Data.data.postgres_password }}@127.0.0.1:5434/unifidns
+DATABASE_URL=postgresql+asyncpg://unifidns:{{ .Data.data.postgres_password }}@127.0.0.1:5434/unifidns
 SESSION_SECRET={{ .Data.data.session_secret }}
 {{ end }}
 {{ with secret "secret/data/unifi-dns-oidc" }}
@@ -143,7 +127,7 @@ UNIFI_API_KEY={{ .Data.data.api_key }}
 UNIFI_HOST=https://${unifi_address}
 UNIFI_SITE=${unifi_site}
 UNIFI_VERIFY_TLS=false
-CORS_ORIGINS=https://unifi-dns.${dns_postfix}
+CORS_ORIGINS='["https://unifi-dns.${dns_postfix}"]'
 # Trust internal CA (Python httpx/requests)
 REQUESTS_CA_BUNDLE=/local/certs/root_ca.crt
 SSL_CERT_FILE=/local/certs/root_ca.crt
@@ -169,11 +153,11 @@ EOH
       }
 
       # Override the upstream's `backend:8000` (compose DNS) with 127.0.0.1:8000
-      # since all tasks share the host netns. Listen on 8090 for Traefik.
+      # since all tasks share the host netns. Listen on 8095 for Traefik.
       template {
         data = <<NGINX
 server {
-    listen 8090;
+    listen 8095;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -204,7 +188,7 @@ NGINX
           "traefik.http.routers.unifi-dns.rule=Host(`unifi-dns.${dns_postfix}`) || Host(`unifi-dns`)",
           "traefik.http.routers.unifi-dns.entrypoints=websecure",
           "traefik.http.routers.unifi-dns.tls=true",
-          "traefik.http.services.unifi-dns.loadbalancer.server.port=8090",
+          "traefik.http.services.unifi-dns.loadbalancer.server.port=8095",
         ]
 
         check {
