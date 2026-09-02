@@ -97,6 +97,7 @@ EOH
       config {
         image        = "${unifi_dns_backend_image}"
         network_mode = "host"
+        force_pull   = true # :latest tag — pull rebuilt image on each placement
       }
 
       # Internal root CA so OIDC discovery against auth.<postfix> validates TLS.
@@ -150,6 +151,7 @@ EOH
         image        = "${unifi_dns_frontend_image}"
         network_mode = "host"
         volumes      = ["local/default.conf:/etc/nginx/conf.d/default.conf:ro"]
+        force_pull   = true # :latest tag — pull rebuilt image on each placement
       }
 
       # Override the upstream's `backend:8000` (compose DNS) with 127.0.0.1:8000
