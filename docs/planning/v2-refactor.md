@@ -76,9 +76,10 @@ The refactor was executed as several **phased** arcs (commit subjects tagged "Ph
 
 ## Outstanding before merge
 
-- **Root `WORKTREE.*.md`** working-note files are tracked and effectively cruft — remove or
-  gitignore before the PR.
-- Prune merged local branches (`feature/uptime-kuma-refresh` is already on `main`, etc.).
+- Prune merged local branches — ~10 `feature/*` and `fix/*` branches are already merged into
+  `refactor/v2` (`git branch --merged refactor/v2`) and can be deleted after the merge.
+- (Note: the root `WORKTREE.*.md` working notes existed on `main` but were already removed in
+  the refactor — the merge to `main` clears them.)
 - Confirm `bootstrap.yml.example` no longer advertises stale guidance (e.g. Synology
   `api_key` note) picked up during the storage migration.
 - Update this doc's status line and the README when `main` is cut over.
