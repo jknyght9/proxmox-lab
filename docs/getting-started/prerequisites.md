@@ -266,5 +266,6 @@ If you have a firewall between your workstation and Proxmox, ensure these ports 
 
 Once you've verified all prerequisites:
 
-1. [:octicons-arrow-right-24: Complete the pre-flight checklist](checklist.md)
-2. [:octicons-arrow-right-24: Follow the quick start guide](quick-start.md)
+1. [:octicons-arrow-right-24: Bootstrap Configuration](bootstrap.md)
+2. [:octicons-arrow-right-24: Local / Site Overlay](local-overlay.md)
+3. [:octicons-arrow-right-24: First Deployment](first-deploy.md)

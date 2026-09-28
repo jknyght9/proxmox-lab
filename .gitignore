@@ -3,6 +3,8 @@
 # Claude Code local settings (but keep CLAUDE.md for project instructions)
 .claude/*
 !.claude/CLAUDE.md
+# Operator-local overlay pointer (site-specific; keep the .example template)
+CLAUDE.local.md
 .DS_Store
 .env
 .terraform

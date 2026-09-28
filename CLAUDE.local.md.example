@@ -1,0 +1,25 @@
+# CLAUDE.local.md — operator-local overlay pointer
+
+Copy this file to `CLAUDE.local.md` (which is **gitignored**) and fill in your
+site details. Claude Code auto-reads `CLAUDE.local.md`; it never ships with the
+repo, so it's the right place for site-specific pointers.
+
+This repo (`proxmox-lab`) is **site-agnostic**. Everything specific to YOUR
+deployment lives in a separate **overlay directory** outside the repo. See
+`docs/getting-started/local-overlay.md` for the full structure.
+
+---
+
+**Overlay directory:** `~/<your-site>-lab/`   <!-- e.g. ~/acme-lab/ -->
+
+That directory holds your `bootstrap.yml`, Terraform tfvars overlay,
+`crypto/`, `cluster-info.json`, cross-session `memory/`, `project-updates/`,
+and a site `CLAUDE.md` describing your topology, IPs, hostnames, and
+credential paths.
+
+**Before any decision that depends on site-specific values**, read
+`~/<your-site>-lab/CLAUDE.md`.
+
+**Auto-memory** for this repo lives at `~/<your-site>-lab/memory/`.
+
+<!-- Optional: list sibling repos and any local history notes here. -->

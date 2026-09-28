@@ -155,7 +155,7 @@ graph LR
     GFS --- SAMBA1
 ```
 
-For detailed diagrams of individual components, see [Network Topology](network-topology.md) and [Service Relationships](service-relationships.md).
+For more detail, see [Networking](networking.md) and [Secrets Management](secrets.md).
 
 ## Component Summary
 
@@ -340,6 +340,5 @@ The 3-node Nomad cluster provides resilience at multiple layers:
 
 ## Next Steps
 
-- [:octicons-arrow-right-24: Network Topology](network-topology.md) -- Detailed network architecture
-- [:octicons-arrow-right-24: Service Relationships](service-relationships.md) -- How services interact
-- [:octicons-arrow-right-24: Certificate Chain](certificate-chain.md) -- TLS certificate hierarchy
+- [:octicons-arrow-right-24: Networking](networking.md) -- Network architecture
+- [:octicons-arrow-right-24: Secrets Management](secrets.md) -- Vault PKI &amp; secrets

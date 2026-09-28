@@ -2,7 +2,7 @@
 # NAS Content Migrations — one-shot data migration between dataset paths
 #
 # Renders a per-NAS migration script (rsync + sha256 verification), uploads
-# it to nas01:/tmp/nas-migrate.sh via the TrueNAS REST API, schedules a
+# it to the NAS at /tmp/nas-migrate.sh via the TrueNAS REST API, schedules a
 # one-shot cron job to run it, polls for the success/failure sentinel,
 # and fetches the log.
 #
@@ -89,7 +89,7 @@ MIGRATION_SCRIPT_EOF
           echo "    (leftover /tmp/$f present from prior run — will be overwritten)"
       done
 
-      # Schedule cron every minute — timezone-agnostic (the nas01 cron
+      # Schedule cron every minute — timezone-agnostic (the NAS cron
       # daemon uses local time; computing the exact next-minute on
       # nomad01 risks a timezone mismatch). The cron's command first
       # rm's any leftover sentinels (.done/.failed/.log/.lock) from

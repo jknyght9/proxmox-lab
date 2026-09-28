@@ -51,7 +51,7 @@ export LDAPTLS_REQCERT=allow
 LDAP_BIND_DN="CN=domain-join-svc,CN=Users,$BASE_DN"
 
 # NetBIOS/workgroup name = first label of the realm, uppercased
-# (e.g. iotvf.lab -> IOTVF). Used to qualify principals in NFSv4 ACLs as
+# (e.g. example.lab -> EXAMPLE). Used to qualify principals in NFSv4 ACLs as
 # WORKGROUP\name, matching the nas-acls.tf / nas-profile-share.tf format.
 WORKGROUP=$(echo "$AD_REALM_LOWER" | cut -d. -f1 | tr '[:lower:]' '[:upper:]')
 

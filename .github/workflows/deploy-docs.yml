@@ -3,8 +3,13 @@ name: Deploy MkDocs to GitHub Pages
 on:
   push:
     branches:
-      - main # or 'master' if you use that
-      - initial
+      - main
+
+# mkdocs gh-deploy pushes the built site to the gh-pages branch, which needs
+# write access to repo contents. Without this the default GITHUB_TOKEN is
+# read-only and the deploy fails with a 403 on push.
+permissions:
+  contents: write
 
 jobs:
   deploy:

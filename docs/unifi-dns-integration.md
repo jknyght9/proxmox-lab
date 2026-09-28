@@ -7,8 +7,8 @@ tool (github.com/jknyght9/unifi-dns).
 
 ## Why
 
-The 2026-08-31 outage (`auth.iotvf.lab` and all `*.iotvf.lab` → NXDOMAIN) was
-caused by dns-01's LXC rootfs filling to 100% (a 2 GB unrotated `pihole.log`),
+A DNS outage (all internal `*.<domain>` names → NXDOMAIN) can be
+caused by a Pi-hole node's LXC rootfs filling to 100% (e.g. an unrotated `pihole.log`),
 which silently prevented `pihole-FTL` from persisting `pihole.toml`. The local
 A-records (`dns.hosts`) and upstream were wiped, and the "HA" replica had never
 received the records because **nebula-sync** was failing every 5 minutes. Net:
@@ -58,7 +58,7 @@ this alone removes the outage class. Mechanism options:
 ### Layer 2 — `unifi-dns` app  *(management/governance, optional/additive)*
 Deploy the tool for the UI, audit, changesets, and drift detection over those
 records. Deployment options:
-- **(2a) Nomad job** — fits lab IaC: Traefik route (`unifi-dns.iotvf.lab`), Vault WIF
+- **(2a) Nomad job** — fits lab IaC: Traefik route (`unifi-dns.<domain>`), Vault WIF
   for secrets, Postgres on gluster, Authentik OIDC. Requires translating upstream
   compose → Nomad jobspec (FastAPI + React + Postgres tasks).
 - **(2b) Standalone docker-compose host** (small VM/LXC) — matches upstream exactly,

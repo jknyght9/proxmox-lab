@@ -51,6 +51,7 @@ nav:
   - Getting Started:
       - Prerequisites: getting-started/prerequisites.md
       - Bootstrap Configuration: getting-started/bootstrap.md
+      - Local / Site Overlay: getting-started/local-overlay.md
       - First Deployment: getting-started/first-deploy.md
   - Architecture:
       - Overview: architecture/overview.md
@@ -76,5 +77,9 @@ nav:
       - Rollback and Purge: operations/rollback-purge.md
       - Troubleshooting: operations/troubleshooting.md
       - Dependency Manifest: operations/dependencies.md
+  - Planning:
+      - v2 Refactor: planning/v2-refactor.md
+      - Vault HA: planning/vault-ha.md
+      - UniFi DNS Integration: unifi-dns-integration.md
   - Developer Guide:
       - Adding Services: developer/adding-services.md

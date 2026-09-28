@@ -3,19 +3,20 @@
 This file provides guidance to Claude Code (claude.ai/code) when working
 with code in this repository.
 
-**Lab context lives OUTSIDE this repo** at `~/iotvf-lab/` (private, not
-public). That directory holds the topology, credential paths, service
-inventory, and auto-memory shared across all four related repos (this
-one, `~/lab-system-templates/`, `~/deploy-windows-desktop/`, `~/kasm/`).
-Read `~/iotvf-lab/CLAUDE.md` before making decisions that depend on
-lab-specific values. Example values in THIS file (`mylab.lan`, IPs like
-`10.1.50.x`) are placeholders — actual values are in Vault, in
-gitignored `terraform.tfvars`, or in `~/iotvf-lab/CLAUDE.md`.
+**This repository is site-agnostic — it deploys to any Proxmox environment.**
+It must contain **NO site-specific values**: real domains, IP addresses,
+hostnames, credentials, or credential paths. All local/site configuration
+lives in a **separate overlay directory OUTSIDE this repo** — see
+[`docs/getting-started/local-overlay.md`](../docs/getting-started/local-overlay.md)
+for the required structure. Never commit site-specific values into tracked
+files; they belong in the overlay, in gitignored config (`bootstrap.yml`,
+`terraform.tfvars`, `crypto/`, `cluster-info.json`), or in Vault. Example
+values in THIS file (`mylab.lan`, IPs like `10.1.50.x`) are placeholders.
 
-**Auto-memory for this repo is symlinked** to `~/iotvf-lab/memory/`.
-
-**Recent extraction (2026-08-12)**: the `kasm/` subdirectory was moved
-out to its own repo at `~/kasm/`. Do not recreate it here.
+**Operator-local context:** your overlay's location and site details live in
+`CLAUDE.local.md` (gitignored, per-operator — copy it from
+`CLAUDE.local.md.example`). Read that file, and the overlay's own `CLAUDE.md`,
+before making any decision that depends on site-specific values.
 
 ## Project Overview
 

@@ -17,9 +17,9 @@ It is an **IaC-first rewrite**: work that used to live in `lib/*.sh` bash moved 
 | Merge state | ✅ **Merged 2026-09-28** — `main` @ `1620c06`, tagged **`v2.0.0`**, `release/v2` cut (mirrors `release/v1`/`v1.0.0`) |
 
 > Point-in-time source-control status (unpushed commits, stashes, deployed-vs-repo
-> gaps on the lab admin host) is tracked lab-side in
-> `iotvf-lab/project-updates/2026-09-25-refactor-v2-status.md`, not here — that state
-> changes as the branch is pushed/merged.
+> gaps on the admin host) is tracked in your **site overlay's `project-updates/`**
+> (see `docs/getting-started/local-overlay.md`), not here — that state changes as
+> the branch is pushed/merged.
 
 ## What changed (major workstreams)
 
