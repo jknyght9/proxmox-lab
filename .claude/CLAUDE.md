@@ -18,6 +18,20 @@ values in THIS file (`mylab.lan`, IPs like `10.1.50.x`) are placeholders.
 `CLAUDE.local.md.example`). Read that file, and the overlay's own `CLAUDE.md`,
 before making any decision that depends on site-specific values.
 
+**Where to SAVE site-specific information (write rule):** when you discover, are
+given, or generate anything site-specific — real IPs, hostnames, domains,
+credential paths, topology, or per-site decisions — **record it OUTSIDE this
+repo**, never in a tracked file:
+- a short pointer/summary in **`CLAUDE.local.md`** (gitignored), and
+- the substance in the **overlay directory** — its `CLAUDE.md` (topology/context),
+  `memory/` (cross-session facts), or `project-updates/` (dated work logs).
+- real values for config go in the overlay's gitignored `bootstrap.yml` /
+  `*.tfvars`, or in **Vault** — not in the repo.
+
+If a tracked file must reference a site value, add a **variable or placeholder**
+here and keep the real value in the overlay. Auto-memory for this repo also lives
+in the overlay (path recorded in `CLAUDE.local.md`), not in the repo tree.
+
 ## Project Overview
 
 Proxmox Lab is an Infrastructure-as-Code project for building a self-hosted home lab on Proxmox VE (>=7.x). It uses **Packer** for golden image creation and **Terraform** for infrastructure provisioning. The stack includes HashiCorp Nomad for container orchestration, Pi-hole for DNS, and Vault PKI for internal certificate authority.
