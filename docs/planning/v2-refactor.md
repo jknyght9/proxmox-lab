@@ -14,7 +14,7 @@ It is an **IaC-first rewrite**: work that used to live in `lib/*.sh` bash moved 
 | Commits ahead of `main` | **252** (2026-04-10 → 2026-09-02) |
 | Diff vs `main` | 209 files, **+17,634 / −22,195** (net **−4,561** lines) |
 | `lib/` (bash) change | +2,395 / **−8,427** (~6k lines of bash removed) |
-| Merge state | **Not yet merged to `main`** (`main` @ `5fbb9c8`, `release/v1` == main) |
+| Merge state | ✅ **Merged 2026-09-28** — `main` @ `1620c06`, tagged **`v2.0.0`**, `release/v2` cut (mirrors `release/v1`/`v1.0.0`) |
 
 > Point-in-time source-control status (unpushed commits, stashes, deployed-vs-repo
 > gaps on the lab admin host) is tracked lab-side in
@@ -58,28 +58,29 @@ The refactor was executed as several **phased** arcs (commit subjects tagged "Ph
      apt sources → **HTTPS** (fixes deploys on networks blocking port 80); Layer 2 split
      around the DNS LXC deploy to break a circular dependency.
 
-## Path to `main`
+## How it was merged (2026-09-28)
 
-1. **Push** `refactor/v2` to origin (keep the branch backed up off the admin host).
-2. **Validate** both Terraform roots before the PR:
-   ```bash
-   docker run --rm -v "$(pwd):/repo" -w /repo/terraform          hashicorp/terraform:1.14 validate
-   docker run --rm -v "$(pwd):/repo" -w /repo/terraform/services hashicorp/terraform:1.14 validate
-   ```
-   (The compose `terraform` service only mounts `/terraform`; validating
-   `terraform/services` needs the whole-repo mount above because policy files are
-   referenced via `../../nomad/`.)
-3. **Open the PR:** `https://github.com/jknyght9/proxmox-lab/compare/main...refactor/v2`
-   (or `gh pr create` once `gh auth login` is done). 252 commits is a large single PR —
-   decide whether to review-and-merge or **fast-forward `main` to `refactor/v2`** at a cut
-   point and tag it (e.g. `v2.0.0`) since `release/v1` already pins the v1 line.
+`main` was **fast-forwarded** to `refactor/v2` (main was 0 behind, so linear history — no
+merge commit), then tagged and branched to mirror the v1 release convention
+(`release/v1` + `v1.0.0`):
 
-## Outstanding before merge
+```bash
+# both Terraform roots validated first (whole-repo docker mount so ../../nomad resolves):
+docker run --rm --entrypoint /bin/sh -v "$(pwd):/repo" -w /repo/terraform          hashicorp/terraform:1.14 -c 'terraform init -backend=false >/dev/null 2>&1 && terraform validate'
+docker run --rm --entrypoint /bin/sh -v "$(pwd):/repo" -w /repo/terraform/services hashicorp/terraform:1.14 -c 'terraform init -backend=false >/dev/null 2>&1 && terraform validate'
+# → both "Success! The configuration is valid."
+
+git push origin refactor/v2:main            # ff main → 1620c06
+git push origin refactor/v2:release/v2      # cut release/v2
+git tag -a v2.0.0 refactor/v2 -m "…" && git push origin v2.0.0
+```
+
+`release/v1` + `v1.0.0` remain pinned, so v1 is preserved.
+
+## Outstanding (post-merge cleanup)
 
 - Prune merged local branches — ~10 `feature/*` and `fix/*` branches are already merged into
-  `refactor/v2` (`git branch --merged refactor/v2`) and can be deleted after the merge.
-- (Note: the root `WORKTREE.*.md` working notes existed on `main` but were already removed in
-  the refactor — the merge to `main` clears them.)
+  `main` (`git branch --merged main`) and can be deleted.
 - Confirm `bootstrap.yml.example` no longer advertises stale guidance (e.g. Synology
   `api_key` note) picked up during the storage migration.
-- Update this doc's status line and the README when `main` is cut over.
+- Update the README to point at v2 as the current line.
