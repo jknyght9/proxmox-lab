@@ -52,7 +52,7 @@ committed by accident:
 Symlink (edits flow both ways — recommended) or copy:
 
 ```bash
-SITE=~/iotvf-lab   # your overlay
+SITE=~/<site>-lab   # your overlay
 
 ln -sf "$SITE/bootstrap.yml"              ~/proxmox-lab/bootstrap.yml
 ln -sf "$SITE/terraform/terraform.tfvars" ~/proxmox-lab/terraform/terraform.tfvars
