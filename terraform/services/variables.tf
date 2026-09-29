@@ -228,6 +228,23 @@ variable "unifi_dns_frontend_image" {
   default     = "ghcr.io/jknyght9/unifi-dns-frontend:latest"
 }
 
+# =============================================================================
+# Pulse monitoring — reads secret/pulse (minted by the infra layer). See
+# terraform/pulse-monitoring.tf and docs/services/pulse.md.
+# =============================================================================
+
+variable "deploy_pulse" {
+  type        = bool
+  description = "Deploy the Pulse monitoring app as a Nomad job"
+  default     = false
+}
+
+variable "pulse_image" {
+  type        = string
+  description = "Pulse container image ref"
+  default     = "rcourtman/pulse:v6.4.1"
+}
+
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
 # backup Nomad job was retired in Phase 2/3 of the storage migration;
 # ZFS snapshots on the cluster_state NAS handle the backup role now

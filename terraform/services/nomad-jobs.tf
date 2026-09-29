@@ -175,6 +175,29 @@ resource "nomad_job" "netbox_sync" {
 # unifi-dns — UniFi local-DNS management app (Postgres + FastAPI + nginx SPA).
 # Backend/frontend images must be published to GHCR first (they build from
 # source; Nomad only pulls). See docs/unifi-dns-integration.md.
+resource "nomad_job" "pulse" {
+  count = var.deploy_pulse ? 1 : 0
+  depends_on = [
+    vault_policy.pulse,
+    vault_jwt_auth_backend_role.pulse,
+    null_resource.nomad_vault_config,
+  ]
+
+  # Reads secret/pulse (read-only PVE token + admin password) via WIF; that
+  # secret is written by the infra layer (terraform/pulse-monitoring.tf), so
+  # apply the infra layer with deploy_pulse=true first.
+  jobspec = templatefile("${path.module}/templates/pulse.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+    pulse_image = var.pulse_image
+  })
+  detach = false
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+  }
+}
+
 resource "nomad_job" "unifi_dns" {
   count = var.deploy_unifi_dns ? 1 : 0
   depends_on = [
