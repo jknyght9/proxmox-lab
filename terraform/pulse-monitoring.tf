@@ -40,12 +40,13 @@ resource "proxmox_virtual_environment_acl" "pulse_auditor" {
   propagate = true
 }
 
-# Session-signing key for the Pulse web app (kept stable across applies).
-resource "random_password" "pulse_session" {
-  count   = var.deploy_pulse ? 1 : 0
-  length  = 64
-  special = false
-  keepers = { service = "pulse" }
+# Pulse local admin password (PULSE_AUTH_PASS), kept stable across applies.
+resource "random_password" "pulse_admin" {
+  count            = var.deploy_pulse ? 1 : 0
+  length           = 24
+  special          = true
+  override_special = "!@#%^&*"
+  keepers          = { service = "pulse" }
 }
 
 # Publish to Vault for the services-layer Pulse job (WIF-read at secret/pulse).
@@ -54,8 +55,11 @@ resource "vault_kv_secret_v2" "pulse" {
   mount = "secret"
   name  = "pulse"
   data_json = jsonencode({
+    # pve_token_* is what the operator pastes into Pulse's UI
+    # (Settings -> Infrastructure) to add the Proxmox node(s) read-only.
     pve_token_id   = proxmox_virtual_environment_user_token.pulse_monitor[0].id
     pve_token      = proxmox_virtual_environment_user_token.pulse_monitor[0].value
-    session_secret = random_password.pulse_session[0].result
+    # admin_password backs PULSE_AUTH_PASS for the Pulse web login.
+    admin_password = random_password.pulse_admin[0].result
   })
 }
