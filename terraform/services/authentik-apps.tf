@@ -20,6 +20,7 @@ resource "null_resource" "authentik_apps" {
     deploy_lam       = var.deploy_lam
     deploy_netbox    = var.deploy_netbox
     deploy_unifi_dns = var.deploy_unifi_dns
+    deploy_pulse     = var.deploy_pulse
   }
 
   connection {
@@ -217,6 +218,28 @@ resource "null_resource" "authentik_apps" {
         echo "    OIDC credentials stored at secret/unifi-dns-oidc"
       else
         echo "    [!] unifi-dns OIDC client_secret not found — SSO will fail until secret/unifi-dns-oidc is populated"
+      fi
+      %{endif}
+
+      %{if var.deploy_pulse}
+      echo '[+] Pulse OIDC provider...'
+      # Pulse uses native OIDC (legacy single-provider via OIDC_* env vars).
+      # Callback path is /api/oidc/callback (auto-detected from PULSE_PUBLIC_URL).
+      PULSE_PK=$(create_or_get "providers/oauth2" "name" "pulse OIDC" \
+        "{\"name\":\"pulse OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"pulse\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://pulse.${var.dns_postfix}/api/oidc/callback\"}]}")
+      create_or_get "core/applications" "slug" "pulse" \
+        "{\"name\":\"Pulse\",\"slug\":\"pulse\",\"provider\":$PULSE_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://pulse.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      # OIDC_ISSUER for Pulse = oidc_endpoint; Pulse appends /.well-known/openid-configuration.
+      PULSE_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+        "$API/providers/oauth2/" | jq -r --arg name "pulse OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
+      if [ -n "$PULSE_OIDC_SECRET" ]; then
+        curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
+          "${var.vault_address}/v1/secret/data/pulse-oidc" \
+          -d "{\"data\":{\"oidc_client_id\":\"pulse\",\"oidc_client_secret\":\"$PULSE_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/pulse/\"}}" > /dev/null
+        echo "    OIDC credentials stored at secret/pulse-oidc"
+      else
+        echo "    [!] pulse OIDC client_secret not found — SSO will fail until secret/pulse-oidc is populated"
       fi
       %{endif}
 

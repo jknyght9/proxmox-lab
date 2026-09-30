@@ -272,6 +272,24 @@ resource "vault_kv_secret_v2" "unifi_dns_oidc" {
   }
 }
 
+# Placeholder for Pulse's Authentik OIDC client credentials. Created empty here
+# so the pulse job's template can read it; authentik-apps.tf populates the real
+# client_secret after it creates the Authentik provider/app. ignore_changes so
+# that population isn't reverted on the next apply.
+resource "vault_kv_secret_v2" "pulse_oidc" {
+  count = var.deploy_pulse ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "pulse-oidc"
+  data_json = jsonencode({
+    oidc_client_id     = ""
+    oidc_client_secret = ""
+    oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
 # Removed: vault_kv_secret_v2.backup. The explicit backup job was retired
 # in Phase 2/3; ZFS snapshots on the cluster_state NAS handle the backup
 # role now. See plans/serene-brewing-cray.md.

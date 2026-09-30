@@ -52,16 +52,43 @@ job "pulse" {
         volumes = ["/opt/pulse/data:/data"]
       }
 
+      # Root CA cert pulled from Vault PKI at render time so Pulse (Go) can
+      # validate the OIDC issuer's HTTPS (auth.${dns_postfix}, served with the
+      # internal PKI cert). Go's crypto/x509 honors SSL_CERT_FILE (set below).
+      template {
+        data        = <<EOH
+{{ with secret "pki/cert/ca" }}{{ .Data.certificate }}{{ end }}
+EOH
+        destination = "local/certs/root_ca.crt"
+        perms       = "0644"
+        change_mode = "noop"
+      }
+
       template {
         data = <<EOH
 TZ=UTC
 PULSE_DEPLOYMENT_METHOD=nomad
 PULSE_DATA_DIR=/data
 PULSE_PUBLIC_URL=https://pulse.${dns_postfix}
+# Local admin kept as break-glass. Set PULSE_AUTH_HIDE_LOCAL_LOGIN=true to force
+# SSO-only once OIDC is verified.
 PULSE_AUTH_USER=admin
 {{ with secret "secret/data/pulse" }}
 PULSE_AUTH_PASS={{ .Data.data.admin_password }}
 {{ end }}
+# --- Authentik OIDC (native single-provider). secret/pulse-oidc is populated by
+# authentik-apps.tf after the provider/app is created; until then oidc_endpoint
+# is empty and the OIDC_* vars are omitted so Pulse starts on local auth only.
+# The vault{} change_mode=restart re-renders + restarts Pulse when it's filled.
+{{ with secret "secret/data/pulse-oidc" }}{{ if .Data.data.oidc_endpoint }}
+OIDC_ISSUER_URL={{ .Data.data.oidc_endpoint }}
+OIDC_CLIENT_ID={{ .Data.data.oidc_client_id }}
+OIDC_CLIENT_SECRET={{ .Data.data.oidc_client_secret }}
+{{ end }}{{ end }}
+# Trust the internal CA for the OIDC issuer's HTTPS. NOTE: this scopes Pulse's
+# outbound TLS trust to the internal CA, so its GitHub update check may stop
+# validating — acceptable tradeoff; revisit with a combined bundle if needed.
+SSL_CERT_FILE=/local/certs/root_ca.crt
 EOH
         destination = "secrets/pulse.env"
         env         = true

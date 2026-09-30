@@ -180,6 +180,7 @@ resource "nomad_job" "pulse" {
   depends_on = [
     vault_policy.pulse,
     vault_jwt_auth_backend_role.pulse,
+    vault_kv_secret_v2.pulse_oidc,
     null_resource.nomad_vault_config,
   ]
 
