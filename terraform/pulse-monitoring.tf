@@ -57,8 +57,15 @@ resource "vault_kv_secret_v2" "pulse" {
   data_json = jsonencode({
     # pve_token_* is what the operator pastes into Pulse's UI
     # (Settings -> Infrastructure) to add the Proxmox node(s) read-only.
-    pve_token_id   = proxmox_virtual_environment_user_token.pulse_monitor[0].id
-    pve_token      = proxmox_virtual_environment_user_token.pulse_monitor[0].value
+    #   pve_token_id     -> Pulse "Token ID"     field: pulse@pve!monitor
+    #   pve_token_secret -> Pulse "Token Value"  field: the bare UUID only
+    # bpg's .value is the FULL "pulse@pve!monitor=<uuid>" string, which is
+    # easy to paste whole into the Value field by mistake (=> auth fails), so
+    # we also expose just the secret half. pve_token keeps the full string for
+    # anyone building an Authorization: PVEAPIToken=<full> header.
+    pve_token_id     = proxmox_virtual_environment_user_token.pulse_monitor[0].id
+    pve_token        = proxmox_virtual_environment_user_token.pulse_monitor[0].value
+    pve_token_secret = element(split("=", proxmox_virtual_environment_user_token.pulse_monitor[0].value), 1)
     # admin_password backs PULSE_AUTH_PASS for the Pulse web login.
     admin_password = random_password.pulse_admin[0].result
   })

@@ -57,7 +57,12 @@ Then, either way:
 1. Browse to `https://pulse.<postfix>`, log in as `admin` with the password from
    `vault kv get secret/pulse` (`admin_password`).
 2. **Add the Proxmox node** — Settings → Infrastructure → add your cluster using
-   the read-only token from `secret/pulse` (`pve_token_id` + `pve_token`). One
+   the read-only token from `secret/pulse`: **Token ID** = `pve_token_id`
+   (`pulse@pve!monitor`), **Token Value** = `pve_token_secret` (the bare UUID —
+   *not* `pve_token`, which is the full `id=uuid` string). Disable SSL
+   verification (the API serves an internal-CA cert). Point the host at a
+   Proxmox IP reachable from the Nomad network (e.g. the services-subnet IP,
+   `https://<pve-ip>:8006`). One
    token covers the whole cluster.
 
 > `deploy_pulse` is preserved across Layer 2 regeneration (`refreshLayer2Configs`
