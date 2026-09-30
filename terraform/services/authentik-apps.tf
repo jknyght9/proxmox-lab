@@ -225,10 +225,14 @@ resource "null_resource" "authentik_apps" {
       echo '[+] Pulse OIDC provider...'
       # Pulse uses native OIDC (legacy single-provider via OIDC_* env vars).
       # Callback path is /api/oidc/callback (auto-detected from PULSE_PUBLIC_URL).
+      # Pulse (behind Traefik, which terminates TLS) builds its OIDC redirect from
+      # the request scheme (http) and a per-provider UUID path
+      # (/api/oidc/<uuid>/callback), so we match with a regex that accepts http|https
+      # and any callback path rather than a strict URL.
       PULSE_PK=$(create_or_get "providers/oauth2" "name" "pulse OIDC" \
-        "{\"name\":\"pulse OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"pulse\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://pulse.${var.dns_postfix}/api/oidc/callback\"}]}")
+        "{\"name\":\"pulse OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"pulse\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"regex\",\"url\":\"https?://pulse.${var.dns_postfix}/api/oidc/.*callback\"}]}")
       create_or_get "core/applications" "slug" "pulse" \
-        "{\"name\":\"Pulse\",\"slug\":\"pulse\",\"provider\":$PULSE_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://pulse.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Pulse\",\"slug\":\"pulse\",\"provider\":$PULSE_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://pulse.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/pulse.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
       # OIDC_ISSUER for Pulse = oidc_endpoint; Pulse appends /.well-known/openid-configuration.
       PULSE_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
