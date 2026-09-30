@@ -1320,6 +1320,7 @@ function showMenu() {
     echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
     echo "  d15) TrueNAS — purge existing AD join (reads nas_servers from bootstrap.yml)"
     echo "  d16) Reconcile profile folders (force the periodic job to run now)"
+    echo "  d17) Deploy unifi-dns (UniFi local-DNS management app — Layer 2; needs GHCR images published)"
   fi
   echo
 }
@@ -1379,6 +1380,7 @@ while true; do
     d14|D14) if [ "$DEV_MODE" = true ]; then downloadRootCA;                                                  else error "Invalid option"; fi;;
     d15|D15) if [ "$DEV_MODE" = true ]; then truenasLeaveAD;                                                  else error "Invalid option"; fi;;
     d16|D16) if [ "$DEV_MODE" = true ]; then reconcileProfileFolders;                                         else error "Invalid option"; fi;;
+    d17|D17) if [ "$DEV_MODE" = true ]; then enableService "unifi_dns";                                        else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

@@ -165,8 +165,11 @@ All gated on `var.deploy_unifi_dns` (default false):
 ## Remaining to go live
 1. **Images**: push `ci/ghcr-publish` in the unifi-dns repo → run workflow → **make both GHCR
    packages public** (or give Nomad a pull token). Pin a tag in the image vars if not `:latest`.
-2. **Enable + apply**: set `deploy_unifi_dns = true` in `terraform/services/terraform.tfvars`,
-   `terraform apply`. Confirm node pin (`nomad01`) + host ports (8090/8000/5434) don't collide.
+2. **Enable + apply**: `./setup.sh --dev` → **d17) Deploy unifi-dns** (runs `enableService
+   "unifi_dns"` — sets `deploy_unifi_dns = true` in `terraform/services/terraform.tfvars`,
+   refreshes Layer 2 config, and applies). Or set the flag manually and
+   `docker compose run --rm terraform-services apply -auto-approve`. Confirm the node pin
+   (`nomad01`) + host ports don't collide.
 3. **Seed records**: from the UI (`https://unifi-dns.<postfix>`, SSO via Authentik) run the
    **Pi-hole import** (source = dns-01) → verify records land in UniFi static-dns.
 4. Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.
