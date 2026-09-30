@@ -22,17 +22,46 @@ Deployed as a single Nomad container behind Traefik, gated on `deploy_pulse`
 
 ## Enabling
 
-1. Set in your **overlay** tfvars (not the repo):
-   ```hcl
-   deploy_pulse = true          # both terraform/ and terraform/services/
-   ```
-2. Apply the infrastructure layer (mints the token → `secret/pulse`), then the
-   services layer (deploys the job).
-3. Browse to `https://pulse.<postfix>`, log in as `admin` with the password from
+Pulse is unique in spanning **both** Terraform layers: Layer 1 mints the
+read-only PVE token into `secret/pulse`, Layer 2 deploys the job that reads it.
+
+**Recommended — the menu handles both layers:**
+
+```bash
+./setup.sh --dev      # then choose  d17) Deploy Pulse monitoring
+```
+
+`d17` persists `deploy_pulse = true` in the Layer 1 tfvars, applies **only** the
+five Pulse resources (targeted — it never plans a change against a VM) to mint
+the token, then runs the Layer 2 apply via `enableService "pulse"`.
+
+**Manual equivalent**, if you prefer to drive the layers yourself — set
+`deploy_pulse = true` in the two generated tfvars files (`terraform/terraform.tfvars`
+and `terraform/services/terraform.tfvars`; these are real gitignored files in the
+repo tree, **not** the overlay), then:
+
+```bash
+# Layer 1 — mint the token (targeted; no VM changes)
+docker compose run --rm terraform apply -auto-approve \
+  -target=proxmox_virtual_environment_user.pulse \
+  -target=proxmox_virtual_environment_user_token.pulse_monitor \
+  -target=proxmox_virtual_environment_acl.pulse_auditor \
+  -target=random_password.pulse_admin \
+  -target=vault_kv_secret_v2.pulse
+# Layer 2 — deploy the job
+docker compose run --rm terraform-services apply -auto-approve
+```
+
+Then, either way:
+
+1. Browse to `https://pulse.<postfix>`, log in as `admin` with the password from
    `vault kv get secret/pulse` (`admin_password`).
-4. **Add the Proxmox node** — Settings → Infrastructure → add your cluster using
+2. **Add the Proxmox node** — Settings → Infrastructure → add your cluster using
    the read-only token from `secret/pulse` (`pve_token_id` + `pve_token`). One
    token covers the whole cluster.
+
+> `deploy_pulse` is preserved across Layer 2 regeneration (`refreshLayer2Configs`
+> → `initVault.sh`), so it survives later deploys instead of resetting to `false`.
 
 > Pulse configures monitored nodes through its UI, so step 4 is a one-time manual
 > action. (A fully-headless import via `PULSE_INIT_CONFIG_DATA` exists but needs a
