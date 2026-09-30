@@ -242,7 +242,7 @@ variable "deploy_pulse" {
 variable "pulse_image" {
   type        = string
   description = "Pulse container image ref"
-  default     = "rcourtman/pulse:v6.4.1"
+  default     = "rcourtman/pulse:v6.4.5"
 }
 
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
