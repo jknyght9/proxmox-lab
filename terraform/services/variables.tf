@@ -366,7 +366,7 @@ variable "nas_servers" {
 variable "nas_storage" {
   type = object({
     cluster_state = object({
-      nas          = string           # name of entry in var.nas_servers
+      nas          = string # name of entry in var.nas_servers
       dataset_root = optional(string, "nomad")
       allow_hosts  = optional(string, "") # blank = use network_cidr
     })
@@ -385,5 +385,16 @@ variable "nas_storage" {
   default = {
     cluster_state = { nas = "" }
     snapshots     = {}
+  }
+}
+
+variable "dns_backends" {
+  type        = list(string)
+  description = "Which DNS backends receive the lab's local records: any of \"pihole\", \"unifi\". Pi-hole is written via pihole-FTL over SSH; UniFi via the static-dns API (run from nomad01). Use both to write records to each."
+  default     = ["pihole"]
+
+  validation {
+    condition     = length(var.dns_backends) > 0 && alltrue([for b in var.dns_backends : contains(["pihole", "unifi"], b)])
+    error_message = "dns_backends must be a non-empty subset of [\"pihole\", \"unifi\"]."
   }
 }
