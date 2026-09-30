@@ -773,8 +773,25 @@ function deployPulse() {
   fi
   success "Pulse token stored in Vault at secret/pulse"
 
-  # --- Layer 2: deploy the Pulse Nomad job (reads secret/pulse via WIF) ---
-  enableService "pulse" || return 1
+  # --- Layer 2: deploy ONLY the Pulse job (targeted; no full-apply churn) ---
+  # Set the flag in place. Deliberately NOT via enableService/refreshLayer2Configs:
+  # regenerating the whole Layer 2 tfvars can surface unrelated drift (e.g. CSI
+  # volume re-registration for authentik/netbox), and a full apply would then act
+  # on it. Enabling Pulse must touch only Pulse's own resources.
+  if grep -q "^deploy_pulse" "$l2_tfvars"; then
+    sed -i.bak "s/^deploy_pulse.*/deploy_pulse = true/" "$l2_tfvars"; rm -f "$l2_tfvars.bak"
+  else
+    echo "deploy_pulse = true" >> "$l2_tfvars"
+  fi
+
+  doing "Deploying Pulse Nomad job (Layer 2, targeted)..."
+  if ! tf-services apply -auto-approve \
+      -target=vault_policy.pulse \
+      -target=vault_jwt_auth_backend_role.pulse \
+      -target=nomad_job.pulse; then
+    error "Layer 2 Pulse deploy failed."
+    return 1
+  fi
 
   success "Pulse deployed. Browse https://pulse.<your-domain> and log in as 'admin'."
   info    "Admin password:  docker compose run --rm terraform-services vault kv get secret/pulse   (field: admin_password)"

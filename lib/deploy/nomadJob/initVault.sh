@@ -193,6 +193,11 @@ function writeServicesTfvars() {
   PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
   PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
   PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
+  # deploy_csi gates the CSI/NFS storage layer (csi_controller/node + every
+  # nomad_csi_volume_registration). GlusterFS is decommissioned, so CSI is the
+  # only storage backend — default "true" so a regen never silently drops it to
+  # the variable default (false) and plans a teardown of all stateful volumes.
+  PREV_DEPLOY_CSI=$(_preserve_bool       "deploy_csi"         "true")
   PREV_DEPLOY_UNIFI_DNS=$(_preserve_bool "deploy_unifi_dns"   "false")
   PREV_DEPLOY_PULSE=$(_preserve_bool     "deploy_pulse"       "false")
   PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
@@ -259,6 +264,7 @@ deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
 deploy_netbox      = ${PREV_DEPLOY_NETBOX}
 deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
 deploy_backup      = ${PREV_DEPLOY_BACKUP}
+deploy_csi         = ${PREV_DEPLOY_CSI}
 deploy_unifi_dns   = ${PREV_DEPLOY_UNIFI_DNS}
 deploy_pulse       = ${PREV_DEPLOY_PULSE}
 
