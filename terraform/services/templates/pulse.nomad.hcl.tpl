@@ -5,11 +5,11 @@
 # The token + web-login password come from Vault (secret/pulse), which the
 # infra layer (terraform/pulse-monitoring.tf) populates.
 #
-# NOTE: Pulse configures its monitored nodes via the WEB UI, not env vars.
-# After first deploy: log in (admin / secret/pulse:admin_password) at
-# https://pulse.<postfix>, then Settings -> Infrastructure -> add the Proxmox
-# node using the read-only token from `vault kv get secret/pulse` (pve_token_id
-# + pve_token). One PVEAuditor token covers the whole cluster.
+# SSO (Authentik OIDC) and the Proxmox cluster are auto-configured post-deploy
+# via the Pulse API by null_resource.pulse_config (pulse-config.tf) — no manual
+# UI step. TrueNAS + the Nomad VMs are monitored via the Pulse agent (minted
+# agent tokens), which is Phase 2. Local admin (secret/pulse:admin_password)
+# remains as break-glass login.
 #
 # Confirm the node pin + host port 7655 don't collide at deploy time.
 # =============================================================================
@@ -76,18 +76,12 @@ PULSE_AUTH_USER=admin
 {{ with secret "secret/data/pulse" }}
 PULSE_AUTH_PASS={{ .Data.data.admin_password }}
 {{ end }}
-# --- Authentik OIDC (native single-provider). secret/pulse-oidc is populated by
-# authentik-apps.tf after the provider/app is created; until then oidc_endpoint
-# is empty and the OIDC_* vars are omitted so Pulse starts on local auth only.
-# The vault{} change_mode=restart re-renders + restarts Pulse when it's filled.
-{{ with secret "secret/data/pulse-oidc" }}{{ if .Data.data.oidc_endpoint }}
-OIDC_ISSUER_URL={{ .Data.data.oidc_endpoint }}
-OIDC_CLIENT_ID={{ .Data.data.oidc_client_id }}
-OIDC_CLIENT_SECRET={{ .Data.data.oidc_client_secret }}
-{{ end }}{{ end }}
-# Trust the internal CA for the OIDC issuer's HTTPS. NOTE: this scopes Pulse's
-# outbound TLS trust to the internal CA, so its GitHub update check may stop
-# validating — acceptable tradeoff; revisit with a combined bundle if needed.
+# NOTE: OIDC/SSO is NOT configured via env vars — Pulse 6.4.5 ignores the
+# OIDC_* env (legacy single-provider) and has no env field for the CA bundle it
+# needs to trust auth.${dns_postfix}'s internal cert. SSO is configured through
+# the Pulse API instead (null_resource.pulse_config in pulse-config.tf), which
+# sets caBundle to the root_ca.crt rendered below. SSL_CERT_FILE still points
+# Pulse's own outbound TLS at the internal CA.
 SSL_CERT_FILE=/local/certs/root_ca.crt
 EOH
         destination = "secrets/pulse.env"

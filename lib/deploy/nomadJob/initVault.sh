@@ -203,6 +203,9 @@ function writeServicesTfvars() {
   PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
   PREV_CFG_NETBOX=$(_preserve_bool       "configure_netbox"    "false")
   PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
+  # Services-net Proxmox API endpoint Pulse uses to auto-add the cluster
+  # (e.g. https://10.10.0.101:8006). Operator-set; preserved across regen.
+  PREV_PULSE_PVE_HOST=$(_preserve_str    "pulse_pve_host"      "")
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
@@ -267,6 +270,9 @@ deploy_backup      = ${PREV_DEPLOY_BACKUP}
 deploy_csi         = ${PREV_DEPLOY_CSI}
 deploy_unifi_dns   = ${PREV_DEPLOY_UNIFI_DNS}
 deploy_pulse       = ${PREV_DEPLOY_PULSE}
+
+# Services-net Proxmox endpoint Pulse auto-adds (empty = skip PVE auto-add)
+pulse_pve_host = "${PREV_PULSE_PVE_HOST}"
 
 # Two-phase configure toggles
 configure_authentik = ${PREV_CFG_AUTH}

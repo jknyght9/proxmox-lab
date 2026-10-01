@@ -245,6 +245,17 @@ variable "pulse_image" {
   default     = "rcourtman/pulse:v6.4.5"
 }
 
+variable "pulse_pve_host" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    Pulse-reachable Proxmox API endpoint for auto-adding the cluster to Pulse,
+    e.g. "https://10.10.0.101:8006". MUST be a services-network IP that Pulse
+    (running on nomad01) can reach — NOT a mgmt-network IP. One cluster member
+    is enough; Pulse auto-discovers the rest. Empty = skip PVE auto-add.
+  EOT
+}
+
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
 # backup Nomad job was retired in Phase 2/3 of the storage migration;
 # ZFS snapshots on the cluster_state NAS handle the backup role now
@@ -383,7 +394,7 @@ variable "nas_servers" {
 variable "nas_storage" {
   type = object({
     cluster_state = object({
-      nas          = string           # name of entry in var.nas_servers
+      nas          = string # name of entry in var.nas_servers
       dataset_root = optional(string, "nomad")
       allow_hosts  = optional(string, "") # blank = use network_cidr
     })
