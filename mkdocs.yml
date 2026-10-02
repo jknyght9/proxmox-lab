@@ -66,6 +66,7 @@ nav:
       - Kasm Workspaces: services/kasm.md
       - Netbox: services/netbox.md
       - Uptime Kuma: services/uptime-kuma.md
+      - versitygw (S3 state): services/versitygw.md
   - Tutorials:
       - Import Root CA: tutorials/import-root-ca.md
       - Kasm AD Authentication: tutorials/kasm-ad-auth.md
