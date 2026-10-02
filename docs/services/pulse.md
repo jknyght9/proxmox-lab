@@ -72,6 +72,30 @@ Then, either way:
 > action. (A fully-headless import via `PULSE_INIT_CONFIG_DATA` exists but needs a
 > pre-built encrypted config blob.)
 
+## Agents (host + Docker metrics)
+
+The agentless core (PVE/PBS/TrueNAS-via-API) covers most things, but **host-level
+metrics and Docker-container inventory need the Pulse agent** installed on each host.
+The agent is a binary (no container image) installed as a systemd unit; **each host
+needs its own unique token** (a shared token makes only one host report).
+
+**Nomad VMs — automated.** `null_resource.pulse_agent` (`terraform/services/pulse-agents.tf`)
+runs on every `nomad_node_ips` host: it reuses a per-node token from Vault
+(`secret/pulse-agents/<node>`) or mints one via the Pulse API (`POST /api/security/tokens`,
+stored back in Vault), then runs the installer with `--enable-docker`. Idempotent — re-runs
+reuse the cached token, so no duplicates. It depends on `null_resource.pulse_config`.
+
+**TrueNAS — manual** (SCALE is a managed appliance, not Terraform-driven here):
+mint a token in Pulse (**Settings → Agents**, or the API), then on the NAS run:
+
+```sh
+curl -fsSL https://pulse.<dns_postfix>/install.sh | sh -s -- \
+  --url https://pulse.<dns_postfix> --token <token> --enable-docker
+```
+
+The installer handles TrueNAS's persistence (it survives reboots/updates). Use a
+**separate token** from the Nomad VMs.
+
 ## Relationship to Uptime Kuma
 
 Pulse (white-box infra metrics) is intended to **replace Uptime Kuma** for this
