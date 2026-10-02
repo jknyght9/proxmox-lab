@@ -161,6 +161,13 @@ FORGEJO__database__PASSWD={{ .Data.data.postgres_password }}
 # --- General ---
 FORGEJO__security__INSTALL_LOCK=true
 FORGEJO__service__DISABLE_REGISTRATION=true
+# DISABLE_REGISTRATION blocks LOCAL self-signup only. OAuth/OIDC users from Authentik
+# auto-provision via these (separate) keys instead of being stranded on the
+# link/register page; ACCOUNT_LINKING=auto reuses an existing account by verified email.
+FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION=true
+FORGEJO__oauth2_client__ACCOUNT_LINKING=auto
+FORGEJO__oauth2_client__USERNAME=preferred_username
+FORGEJO__oauth2_client__UPDATE_AVATAR=true
 FORGEJO__actions__ENABLED=true
 # Distinct cookie names (per brief) so a shared parent domain can't collide
 FORGEJO__session__COOKIE_NAME=forgejo_session
