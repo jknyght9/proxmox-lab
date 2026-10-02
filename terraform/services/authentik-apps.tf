@@ -253,12 +253,17 @@ resource "null_resource" "authentik_apps" {
       # /api/auth/oauth2/callback/custom (the "custom" provider slug). Kaneo
       # links accounts by verified email only — there is NO group→role mapping,
       # so workspace/project membership is granted manually in the Kaneo UI.
-      # No kaneo icon exists in homarr-labs/dashboard-icons (checked 2026-10-02),
-      # so meta_icon is omitted (Authentik shows a generated initial tile).
+      # Icon: homarr-labs/dashboard-icons has no kaneo icon, so we use the
+      # selfh.st icon set via jsDelivr (Authentik accepts meta_icon as a URL).
+      KANEO_ICON="https://cdn.jsdelivr.net/gh/selfhst/icons/svg/kaneo.svg"
       KANEO_PK=$(create_or_get "providers/oauth2" "name" "kaneo OIDC" \
         "{\"name\":\"kaneo OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"kaneo\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://tasks.${var.dns_postfix}/api/auth/oauth2/callback/custom\"}]}")
       create_or_get "core/applications" "slug" "kaneo" \
-        "{\"name\":\"Kaneo\",\"slug\":\"kaneo\",\"provider\":$KANEO_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://tasks.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"policy_engine_mode\":\"any\"}" > /dev/null
+        "{\"name\":\"Kaneo\",\"slug\":\"kaneo\",\"provider\":$KANEO_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://tasks.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$KANEO_ICON\",\"policy_engine_mode\":\"any\"}" > /dev/null
+      # create_or_get only creates when absent, so ensure the icon is set on an
+      # app that already exists (idempotent PATCH by slug).
+      curl -sk -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+        "$API/core/applications/kaneo/" -d "{\"meta_icon\":\"$KANEO_ICON\"}" > /dev/null
 
       # Store OIDC credentials in the placeholder Vault path (not managed by
       # Terraform). Filter by the provider name created above ("kaneo OIDC").
