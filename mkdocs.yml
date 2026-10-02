@@ -81,5 +81,6 @@ nav:
       - v2 Refactor: planning/v2-refactor.md
       - Vault HA: planning/vault-ha.md
       - UniFi DNS Integration: unifi-dns-integration.md
+      - Lab Management Tools (Kaneo/Forgejo/versitygw): planning/pm-code-repo.md
   - Developer Guide:
       - Adding Services: developer/adding-services.md
