@@ -19,6 +19,14 @@ mkdir -p "$$STATE_DIR"
 TMP="$$(mktemp -d)"
 trap 'rm -rf "$$TMP"' EXIT
 
+# Serialize against every other UniFi DNS writer (coordinated with lab-templates'
+# modules/dns-unifi). The UDM API has no transaction semantics, so concurrent
+# reconciles can race on a stale GET — one writer deleting a record another just
+# created. All writers take the same host lock on nomad01; -w 30 so a wedged
+# writer fails rather than queueing forever. Lock is held (fd 9) until exit.
+exec 9>/var/lock/unifi-dns-tf.lock
+flock -w 30 9 || { echo "[!] could not acquire /var/lock/unifi-dns-tf.lock within 30s" >&2; exit 1; }
+
 curl_api() {
   # $1=method  $2=path-suffix  $3=json-body(optional)
   local method="$$1" path="$$2" data="$${3:-}" code
