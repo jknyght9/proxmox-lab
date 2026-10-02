@@ -163,6 +163,12 @@ variable "deploy_forgejo" {
   default     = false
 }
 
+variable "deploy_kaneo" {
+  type        = bool
+  description = "Deploy Kaneo (project-management board) as a Layer-2 Nomad service"
+  default     = false
+}
+
 variable "deploy_csi" {
   type        = bool
   description = "Deploy the CSI plugin (csi-driver-nfs) that mounts NFS shares from the cluster_state NAS into Nomad jobs. Required before any service can be migrated off GlusterFS."

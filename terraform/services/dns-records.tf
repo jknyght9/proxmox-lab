@@ -42,6 +42,9 @@ locals {
     # Forgejo Git hosting (behind Traefik) — only when deployed
     var.deploy_forgejo ? ["${local.traefik_ip} git git.${var.dns_postfix}"] : [],
 
+    # Kaneo project-management board (behind Traefik) — only when deployed
+    var.deploy_kaneo ? ["${local.traefik_ip} tasks tasks.${var.dns_postfix}"] : [],
+
     # Kasm (direct IP, not behind Traefik)
     var.kasm_ip != "" ? ["${var.kasm_ip} kasm kasm.${var.dns_postfix}"] : [],
 

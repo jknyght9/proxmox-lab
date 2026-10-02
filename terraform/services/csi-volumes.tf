@@ -380,6 +380,37 @@ resource "nomad_csi_volume_registration" "forgejo_data" {
   }
 }
 
+# --- kaneo (Postgres) --------------------------------------------------------
+# Single stateful dataset: the Kaneo Postgres sidecar. The kaneo app container
+# itself holds no on-disk state worth persisting (all data lives in Postgres).
+resource "nomad_csi_volume_registration" "kaneo_pg" {
+  count = var.deploy_csi && var.deploy_kaneo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "kaneo-pg-data"
+  name        = "kaneo-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["kaneo-pg"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["kaneo-pg"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["kaneo-pg"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.

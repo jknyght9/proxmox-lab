@@ -39,6 +39,7 @@ locals {
     netbox-redis      = { recordsize = "128K", description = "Netbox Redis AOF" }
     forgejo-pg        = { recordsize = "16K", description = "Forgejo PostgreSQL data" }
     forgejo-data      = { recordsize = "128K", description = "Forgejo repos + LFS + attachments + actions artifacts" }
+    kaneo-pg          = { recordsize = "16K", description = "Kaneo PostgreSQL data" }
     # traefik intentionally omitted — Traefik mints its own TLS cert from
     # Vault PKI via a Nomad template stanza, no shared filesystem needed.
     # See terraform/services/templates/traefik.nomad.hcl.tpl.

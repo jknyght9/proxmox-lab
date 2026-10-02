@@ -161,6 +161,30 @@ resource "nomad_job" "forgejo" {
   }
 }
 
+resource "nomad_job" "kaneo" {
+  count = var.deploy_kaneo ? 1 : 0
+  depends_on = [
+    vault_policy.kaneo,
+    vault_jwt_auth_backend_role.kaneo,
+    vault_kv_secret_v2.kaneo,
+    null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.kaneo_pg,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/kaneo.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls postgres:16-alpine + the kaneo image and runs the initial
+  # DB migrations. Default 5m create timeout is too tight; match the job's own
+  # 15m progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
 resource "nomad_job" "docs" {
   depends_on = [
     null_resource.nomad_vault_config,

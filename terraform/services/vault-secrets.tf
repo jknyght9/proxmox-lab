@@ -147,6 +147,24 @@ resource "random_password" "forgejo_admin" {
   lifecycle { prevent_destroy = true }
 }
 
+resource "random_password" "kaneo_postgres" {
+  count   = var.deploy_kaneo ? 1 : 0
+  length  = 32
+  special = false
+  keepers = { service = "kaneo" }
+  lifecycle { prevent_destroy = true }
+}
+
+# Kaneo session/token signing secret (upstream suggests `openssl rand -hex 32`).
+# special=false keeps it alphanumeric (hex-ish) and shell/env safe.
+resource "random_password" "kaneo_auth_secret" {
+  count   = var.deploy_kaneo ? 1 : 0
+  length  = 32
+  special = false
+  keepers = { service = "kaneo" }
+  lifecycle { prevent_destroy = true }
+}
+
 resource "random_password" "unifi_dns_postgres" {
   count   = var.deploy_unifi_dns ? 1 : 0
   length  = 24
@@ -267,6 +285,35 @@ resource "vault_kv_secret_v2" "forgejo_oidc" {
   count = var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
   name  = "forgejo-oidc"
+  data_json = jsonencode({
+    oidc_client_id     = ""
+    oidc_client_secret = ""
+    oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
+resource "vault_kv_secret_v2" "kaneo" {
+  count = var.deploy_kaneo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "kaneo"
+  data_json = jsonencode({
+    postgres_password = random_password.kaneo_postgres[0].result
+    auth_secret       = random_password.kaneo_auth_secret[0].result
+  })
+  lifecycle { prevent_destroy = true }
+}
+
+# Placeholder for Kaneo OIDC — populated by authentik_apps after Authentik is
+# running. Must exist before Kaneo starts so the Vault policy/template don't
+# block. The CUSTOM_OAUTH_* env block in the job stays unrendered until
+# oidc_endpoint here is non-empty (see kaneo.nomad.hcl.tpl guard).
+resource "vault_kv_secret_v2" "kaneo_oidc" {
+  count = var.deploy_kaneo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "kaneo-oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
