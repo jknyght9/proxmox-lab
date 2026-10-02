@@ -162,6 +162,34 @@ All gated on `var.deploy_unifi_dns` (default false):
 - **Jobspec**: backend reads app secrets from `secret/unifi-dns`, OIDC from
   `secret/unifi-dns-oidc` (issuer = `oidc_endpoint`), api_key from `secret/unifi`.
 
+## Layer 1 — Terraform record writer (`dns_backends`)
+
+The `unifi-dns` app manages UniFi DNS interactively; the deploy also needs to push
+the lab's own service records into DNS reproducibly. `terraform/services/dns-records.tf`
+does this, and the target backend(s) are chosen by the `dns_backends` list var
+(default `["pihole"]`):
+
+```hcl
+dns_backends = ["pihole", "unifi"]   # write to both; or just one
+```
+
+- **pihole** — existing path: `pihole-FTL --config dns.hosts` over SSH (+ nebula-sync,
+  + AD conditional-forward). Gated on `contains(dns_backends, "pihole")`.
+- **unifi** — `null_resource.unifi_dns_records` renders the same `local.dns_records`
+  into UniFi A-records and reconciles them through the UniFi **static-dns** API
+  (`/proxy/network/v2/api/site/<site>/static-dns`, `X-API-KEY`). Because UniFi
+  management (`:443`) is firewalled to **nomad01**, the writer SSHes to nomad01 and
+  curls the controller from there (reusing `unifi_address`/`unifi_site`/`unifi_api_key`).
+
+**Scoped reconcile (safe alongside the app):** the writer creates records from
+`local.unifi_dns_records` and **only deletes records it previously created**, tracked
+in `/opt/unifi-dns-tf/managed.json` on nomad01. Records added via the app or by hand
+are absent from that state file and are never touched.
+
+`dns_backends` is list-valued, so `lib/deploy/nomadJob/initVault.sh` preserves it verbatim
+across every Layer-2 tfvars regeneration (a `_preserve_list` helper) — otherwise a regen
+would silently drop it to the default and stop writing to UniFi.
+
 ## Remaining to go live
 1. **Images**: push `ci/ghcr-publish` in the unifi-dns repo → run workflow → **make both GHCR
    packages public** (or give Nomad a pull token). Pin a tag in the image vars if not `:latest`.

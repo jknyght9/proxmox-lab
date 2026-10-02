@@ -48,12 +48,22 @@ locals {
     # Proxmox round-robin alias
     [for name, ip in var.proxmox_node_ips : "${ip} proxmox proxmox.${var.dns_postfix}"],
   )
+
+  # UniFi wants discrete A-records {key=fqdn, value=ip}. Derive them from the
+  # same dns_records source of truth: field[0]=ip, field[2]=fqdn. distinct()
+  # dedupes; round-robin names (e.g. proxmox) keep one entry per ip.
+  unifi_dns_records = distinct([
+    for rec in local.dns_records : {
+      key   = split(" ", rec)[2]
+      value = split(" ", rec)[0]
+    }
+  ])
 }
 
 # --- Pi-hole DNS A-Records ---
 
 resource "null_resource" "pihole_dns_records" {
-  count = var.deploy_dns_records ? 1 : 0
+  count = var.deploy_dns_records && contains(var.dns_backends, "pihole") ? 1 : 0
 
   triggers = {
     records_hash = sha256(jsonencode(local.dns_records))
@@ -82,7 +92,7 @@ resource "null_resource" "pihole_dns_records" {
 # --- Nebula-Sync (propagate to replica Pi-holes) ---
 
 resource "null_resource" "pihole_nebula_sync" {
-  count      = var.deploy_dns_records ? 1 : 0
+  count      = var.deploy_dns_records && contains(var.dns_backends, "pihole") ? 1 : 0
   depends_on = [null_resource.pihole_dns_records]
 
   triggers = {
@@ -107,7 +117,7 @@ resource "null_resource" "pihole_nebula_sync" {
 # --- AD DNS Forwarding (dnsmasq conditional forward) ---
 
 resource "null_resource" "ad_dns_forwarding" {
-  count = var.deploy_dns_records && var.ad_realm != "" ? 1 : 0
+  count = var.deploy_dns_records && contains(var.dns_backends, "pihole") && var.ad_realm != "" ? 1 : 0
 
   triggers = {
     ad_realm = lower(var.ad_realm)
@@ -150,3 +160,49 @@ resource "null_resource" "ad_dns_forwarding" {
 # setProxmoxDNSToLab / revertProxmoxDNSToBootstrap in setup.sh, with
 # menu options d12/d13. This way a half-broken deploy never leaves
 # Proxmox unable to resolve archive.ubuntu.com on the next bootstrap.
+
+# --- UniFi local-DNS records (static-dns API) ---
+# UniFi's management API (:443 on the controller) is firewalled to nomad01 only,
+# so this writer SSHes to nomad01 and curls the controller from there — the same
+# host the unifi-dns app and netbox-sync already use. The reconcile is SCOPED:
+# it only creates records from local.unifi_dns_records and only deletes records
+# it previously created (tracked in /opt/unifi-dns-tf/managed.json on nomad01),
+# so app- or hand-added UniFi records are never touched.
+#
+# The UniFi API key is passed to the remote script via the UNIFI_API_KEY env var
+# (not baked into the file on disk). Note: it can appear in TF_LOG=debug output.
+
+resource "null_resource" "unifi_dns_records" {
+  count = var.deploy_dns_records && contains(var.dns_backends, "unifi") && var.unifi_address != "" ? 1 : 0
+
+  triggers = {
+    records_hash = sha256(jsonencode(local.unifi_dns_records))
+    controller   = var.unifi_address
+    site         = var.unifi_site
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "file" {
+    content = templatefile("${path.module}/templates/unifi-dns-reconcile.sh.tpl", {
+      unifi_address = var.unifi_address
+      unifi_site    = var.unifi_site
+      desired_json  = jsonencode(local.unifi_dns_records)
+    })
+    destination = "/tmp/unifi-dns-reconcile.sh"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/unifi-dns-reconcile.sh",
+      "sudo mkdir -p /opt/unifi-dns-tf",
+      "UNIFI_API_KEY='${var.unifi_api_key}' sudo -E bash /tmp/unifi-dns-reconcile.sh",
+      "rm -f /tmp/unifi-dns-reconcile.sh",
+    ]
+  }
+}
