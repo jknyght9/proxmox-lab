@@ -39,6 +39,9 @@ locals {
     # unifi-dns management app (behind Traefik) — only when deployed
     var.deploy_unifi_dns ? ["${local.traefik_ip} unifi-dns unifi-dns.${var.dns_postfix}"] : [],
 
+    # Forgejo Git hosting (behind Traefik) — only when deployed
+    var.deploy_forgejo ? ["${local.traefik_ip} git git.${var.dns_postfix}"] : [],
+
     # Kasm (direct IP, not behind Traefik)
     var.kasm_ip != "" ? ["${var.kasm_ip} kasm kasm.${var.dns_postfix}"] : [],
 

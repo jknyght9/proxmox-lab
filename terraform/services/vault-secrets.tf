@@ -130,6 +130,23 @@ resource "random_password" "netbox_api_token" {
   lifecycle { prevent_destroy = true }
 }
 
+resource "random_password" "forgejo_postgres" {
+  count   = var.deploy_forgejo ? 1 : 0
+  length  = 24
+  special = false
+  keepers = { service = "forgejo" }
+  lifecycle { prevent_destroy = true }
+}
+
+resource "random_password" "forgejo_admin" {
+  count            = var.deploy_forgejo ? 1 : 0
+  length           = 20
+  special          = true
+  override_special = "!@#%^&*"
+  keepers          = { service = "forgejo" }
+  lifecycle { prevent_destroy = true }
+}
+
 resource "random_password" "unifi_dns_postgres" {
   count   = var.deploy_unifi_dns ? 1 : 0
   length  = 24
@@ -222,6 +239,34 @@ resource "vault_kv_secret_v2" "netbox_oidc" {
   count = var.deploy_netbox ? 1 : 0
   mount = vault_mount.secret.path
   name  = "netbox-oidc"
+  data_json = jsonencode({
+    oidc_client_id     = ""
+    oidc_client_secret = ""
+    oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
+resource "vault_kv_secret_v2" "forgejo" {
+  count = var.deploy_forgejo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "forgejo"
+  data_json = jsonencode({
+    postgres_password = random_password.forgejo_postgres[0].result
+    admin_password    = random_password.forgejo_admin[0].result
+  })
+  lifecycle { prevent_destroy = true }
+}
+
+# Placeholder for Forgejo OIDC — populated by authentik_apps after Authentik is
+# running. Must exist before Forgejo starts so the Vault policy/template don't
+# block. The Forgejo-side auth source is configured post-deploy (Phase 2b).
+resource "vault_kv_secret_v2" "forgejo_oidc" {
+  count = var.deploy_forgejo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "forgejo-oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""

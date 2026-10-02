@@ -323,6 +323,63 @@ resource "nomad_csi_volume_registration" "netbox_data" {
   }
 }
 
+# --- forgejo (Postgres + data) -----------------------------------------------
+resource "nomad_csi_volume_registration" "forgejo_pg" {
+  count = var.deploy_csi && var.deploy_forgejo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-pg-data"
+  name        = "forgejo-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-pg"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-pg"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-pg"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "forgejo_data" {
+  count = var.deploy_csi && var.deploy_forgejo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-data-data"
+  name        = "forgejo-data-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-data"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-data"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-data"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.

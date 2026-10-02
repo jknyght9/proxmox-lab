@@ -20,6 +20,7 @@ resource "null_resource" "authentik_apps" {
     deploy_lam       = var.deploy_lam
     deploy_netbox    = var.deploy_netbox
     deploy_unifi_dns = var.deploy_unifi_dns
+    deploy_forgejo   = var.deploy_forgejo
   }
 
   connection {
@@ -217,6 +218,31 @@ resource "null_resource" "authentik_apps" {
         echo "    OIDC credentials stored at secret/unifi-dns-oidc"
       else
         echo "    [!] unifi-dns OIDC client_secret not found — SSO will fail until secret/unifi-dns-oidc is populated"
+      fi
+      %{endif}
+
+      %{if var.deploy_forgejo}
+      echo '[+] Forgejo OIDC provider...'
+      # Forgejo uses native OIDC (OAuth2 "authentication source") — create an
+      # OAuth2 provider. Forgejo's client callback path is
+      # /user/oauth2/<AuthName>/callback; the auth source created post-deploy
+      # (Phase 2b) is named "authentik", hence the redirect below.
+      FORGEJO_PK=$(create_or_get "providers/oauth2" "name" "forgejo OIDC" \
+        "{\"name\":\"forgejo OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"forgejo\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://git.${var.dns_postfix}/user/oauth2/authentik/callback\"}]}")
+      create_or_get "core/applications" "slug" "forgejo" \
+        "{\"name\":\"Forgejo\",\"slug\":\"forgejo\",\"provider\":$FORGEJO_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://git.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/forgejo.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      # Store OIDC credentials in the placeholder Vault path (not managed by
+      # Terraform). Filter by the provider name created above ("forgejo OIDC").
+      FORGEJO_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+        "$API/providers/oauth2/" | jq -r --arg name "forgejo OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
+      if [ -n "$FORGEJO_OIDC_SECRET" ]; then
+        curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
+          "${var.vault_address}/v1/secret/data/forgejo-oidc" \
+          -d "{\"data\":{\"oidc_client_id\":\"forgejo\",\"oidc_client_secret\":\"$FORGEJO_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/forgejo/\"}}" > /dev/null
+        echo "    OIDC credentials stored at secret/forgejo-oidc"
+      else
+        echo "    [!] Forgejo OIDC client_secret not found — SSO will fail until secret/forgejo-oidc is populated"
       fi
       %{endif}
 

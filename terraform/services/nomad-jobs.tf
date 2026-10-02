@@ -136,6 +136,31 @@ resource "nomad_job" "netbox" {
   }
 }
 
+resource "nomad_job" "forgejo" {
+  count = var.deploy_forgejo ? 1 : 0
+  depends_on = [
+    vault_policy.forgejo,
+    vault_jwt_auth_backend_role.forgejo,
+    vault_kv_secret_v2.forgejo,
+    null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.forgejo_pg,
+    nomad_csi_volume_registration.forgejo_data,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/forgejo.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls postgres:17 + the forgejo image (~400MB) and runs the
+  # initial DB migrations. Default 5m create timeout is too tight; match the
+  # job's own 15m progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
 resource "nomad_job" "docs" {
   depends_on = [
     null_resource.nomad_vault_config,

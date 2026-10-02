@@ -121,6 +121,26 @@ resource "vault_jwt_auth_backend_role" "netbox" {
   bound_claims   = { nomad_job_id = "netbox" }
 }
 
+resource "vault_jwt_auth_backend_role" "forgejo" {
+  count                   = var.deploy_forgejo ? 1 : 0
+  backend                 = vault_jwt_auth_backend.nomad.path
+  role_name               = "forgejo"
+  role_type               = "jwt"
+  bound_audiences         = ["vault.io"]
+  user_claim              = "/nomad_job_id"
+  user_claim_json_pointer = true
+  claim_mappings = {
+    nomad_namespace = "nomad_namespace"
+    nomad_job_id    = "nomad_job_id"
+    nomad_task      = "nomad_task"
+  }
+  token_type     = "service"
+  token_policies = ["forgejo"]
+  token_period   = 3600
+  token_ttl      = 3600
+  bound_claims   = { nomad_job_id = "forgejo" }
+}
+
 resource "vault_jwt_auth_backend_role" "netbox_sync" {
   count                   = var.deploy_netbox && var.unifi_address != "" ? 1 : 0
   backend                 = vault_jwt_auth_backend.nomad.path

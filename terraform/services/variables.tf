@@ -157,6 +157,12 @@ variable "deploy_netbox" {
   default     = false
 }
 
+variable "deploy_forgejo" {
+  type        = bool
+  description = "Deploy Forgejo (Git hosting + Actions) as a Layer-2 Nomad service"
+  default     = false
+}
+
 variable "deploy_csi" {
   type        = bool
   description = "Deploy the CSI plugin (csi-driver-nfs) that mounts NFS shares from the cluster_state NAS into Nomad jobs. Required before any service can be migrated off GlusterFS."
