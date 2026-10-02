@@ -1,0 +1,2837 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Infrastructure-as-Code for Proxmox VE — automated deployment of a self-hosted home lab">
+      
+      
+        <meta name="author" content="Jacob Stauffer | CISSP">
+      
+      
+        <link rel="canonical" href="https://jknyght9.github.io/proxmox-lab/services/samba-ad/">
+      
+      
+        <link rel="prev" href="../pihole-dns/">
+      
+      
+        <link rel="next" href="../kasm/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Samba AD - Proxmox Lab</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#samba-ad" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Proxmox Lab" class="md-header__button md-logo" aria-label="Proxmox Lab" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Proxmox Lab
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Samba AD
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jknyght9/proxmox-lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jknyght9/proxmox-lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Proxmox Lab" class="md-nav__button md-logo" aria-label="Proxmox Lab" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Proxmox Lab
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jknyght9/proxmox-lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jknyght9/proxmox-lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prerequisites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/local-overlay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local / Site Overlay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-deploy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../traefik/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Traefik
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authentik/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentik
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pihole-dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pi-hole DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Samba AD
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Samba AD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#domain-controller-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain Controller Groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Domain Controller Groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc01-primary-domain-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DC01 -- Primary Domain Controller
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DC01 -- Primary Domain Controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ports-dc01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports (DC01)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dc02-replica-domain-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DC02 -- Replica Domain Controller
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DC02 -- Replica Domain Controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ports-dc02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports (DC02)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-node-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node Support
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-storage-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Storage Requirement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vault-secrets-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vault Secrets Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Vault Secrets Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secrets-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets Template
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-forwarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS Forwarding
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DNS Forwarding">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwarding-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwarding Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dns-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS Records
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-non-standard-dns-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Non-Standard DNS Ports?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health Checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#domain-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Tags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-the-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying the Deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kasm Workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../netbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Netbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../uptime-kuma/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Uptime Kuma
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/import-root-ca/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import Root CA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/kasm-ad-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kasm AD Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/nas-domain-join/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Domain Join
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/ha-configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HA Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/adding-ad-users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing AD Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/menu-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Menu Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/rollback-purge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rollback and Purge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/dependencies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependency Manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Planning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Planning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../planning/v2-refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v2 Refactor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../planning/vault-ha/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault HA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../unifi-dns-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UniFi DNS Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/adding-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#domain-controller-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain Controller Groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Domain Controller Groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dc01-primary-domain-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DC01 -- Primary Domain Controller
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DC01 -- Primary Domain Controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ports-dc01" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports (DC01)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dc02-replica-domain-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DC02 -- Replica Domain Controller
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DC02 -- Replica Domain Controller">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ports-dc02" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ports (DC02)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-node-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Node Support
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#local-storage-requirement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Storage Requirement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vault-secrets-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vault Secrets Integration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Vault Secrets Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#secrets-template" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets Template
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dns-forwarding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS Forwarding
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DNS Forwarding">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwarding-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwarding Rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dns-records" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DNS Records
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-non-standard-dns-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Non-Standard DNS Ports?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#health-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health Checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#domain-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#service-tags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Service Tags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verifying-the-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying the Deployment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next Steps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="samba-ad">Samba AD</h1>
+<p>Samba AD provides Active Directory Domain Services for the lab environment. It deploys two domain controllers — DC01 as the primary (provisioning a new domain) and DC02 as a replica — across separate Nomad nodes.</p>
+<h2 id="overview">Overview</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Nomad Job</strong></td>
+<td><code>samba-ad</code></td>
+</tr>
+<tr>
+<td><strong>Image</strong></td>
+<td><code>nowsci/samba-domain:latest</code></td>
+</tr>
+<tr>
+<td><strong>Type</strong></td>
+<td><code>service</code> (2 task groups)</td>
+</tr>
+<tr>
+<td><strong>DC01 Node</strong></td>
+<td>Pinned to <code>nomad01</code></td>
+</tr>
+<tr>
+<td><strong>DC02 Node</strong></td>
+<td>Pinned to <code>nomad02</code></td>
+</tr>
+<tr>
+<td><strong>Vault Role</strong></td>
+<td><code>samba-ad</code> (WIF)</td>
+</tr>
+<tr>
+<td><strong>Privileged</strong></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Storage</strong></td>
+<td><code>/srv/gluster/nomad-data/samba-dc01/</code>, <code>samba-dc02/</code></td>
+</tr>
+<tr>
+<td><strong>Ports</strong></td>
+<td>88 (Kerberos), 389 (LDAP), 636 (LDAPS), 445 (SMB)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="deployment">Deployment</h2>
+<p>Select option 4 from the setup menu:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>./setup.sh
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># 4) Samba AD + LDAP Account Manager</span>
+</code></pre></div>
+<p>This deploys:
+1. Samba AD domain controllers
+2. LDAP Account Manager (LAM) for web-based user management
+3. Service accounts (<code>domain-join-svc</code>, <code>authentik-sync</code>, <code>lam-admin</code>)
+4. DNS forwarding rules in Pi-hole for the AD realm</p>
+<p>The deployment script:</p>
+<ol>
+<li>Prompts for the AD realm (derived from <code>dns_postfix</code>, e.g., <code>AD.MYLAB.LAN</code>)</li>
+<li>Stores the admin password in Vault at <code>secret/data/samba-ad</code></li>
+<li>Configures Pi-hole DNS forwarding for the AD realm</li>
+<li>Submits the Nomad job with variable substitution</li>
+<li>Deploys DC01 first, then DC02 (if nomad02 exists)</li>
+</ol>
+<h3 id="prerequisites">Prerequisites</h3>
+<p>Before deploying Samba AD, the following must be in place:</p>
+<ol>
+<li><strong>Nomad cluster</strong> -- At least nomad01 operational (nomad02 for DC02)</li>
+<li><strong>Vault</strong> -- Running and initialized with the <code>samba-dc</code> role configured (menu option 8)</li>
+<li><strong>Vault secrets</strong> -- Admin password stored at <code>secret/data/samba-ad</code>:<ul>
+<li><code>admin_password</code> -- Domain administrator password</li>
+</ul>
+</li>
+<li><strong>Pi-hole DNS</strong> -- Running and configured for AD realm forwarding</li>
+<li><strong>Local storage</strong> -- <code>/opt/samba-dc01/</code> on nomad01 and <code>/opt/samba-dc02/</code> on nomad02</li>
+</ol>
+<h2 id="architecture">Architecture</h2>
+<pre class="mermaid"><code>graph TB
+    subgraph nomad01["nomad01"]
+        DC1[Samba DC01&lt;br/&gt;JOIN=false&lt;br/&gt;Primary DC]
+        DC1_DNS[DNS :5353]
+        DC1_KRB[Kerberos :88]
+        DC1_LDAP[LDAP :389]
+        DC1_SMB[SMB :445]
+    end
+
+    subgraph nomad02["nomad02"]
+        DC2[Samba DC02&lt;br/&gt;JOIN=true&lt;br/&gt;Replica DC]
+        DC2_DNS[DNS :5354]
+        DC2_KRB[Kerberos :88]
+        DC2_LDAP[LDAP :389]
+        DC2_SMB[SMB :445]
+    end
+
+    subgraph pihole["Pi-hole DNS"]
+        FWD[AD Realm Forwarding&lt;br/&gt;*.ad.mylab.lan]
+    end
+
+    subgraph vault["Vault"]
+        SECRETS[secret/data/samba-ad&lt;br/&gt;admin_password]
+    end
+
+    DC1 &lt;--&gt;|AD Replication| DC2
+    DC2 --&gt;|DNSFORWARDER| DC1
+
+    FWD --&gt;|port 5353| DC1
+    FWD --&gt;|port 5354| DC2
+
+    DC1 --&gt;|WIF JWT| vault
+    DC2 --&gt;|WIF JWT| vault</code></pre>
+<h2 id="domain-controller-groups">Domain Controller Groups</h2>
+<p>The Nomad job defines two separate groups -- <code>dc01</code> and <code>dc02</code> -- each pinned to a different Nomad node. This separation ensures the domain controllers run on different physical hosts for redundancy.</p>
+<h3 id="dc01-primary-domain-controller">DC01 -- Primary Domain Controller</h3>
+<p>DC01 provisions a new Active Directory domain. It runs with <code>JOIN=false</code>, meaning it creates the domain from scratch on first start.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node</td>
+<td><code>nomad01</code></td>
+</tr>
+<tr>
+<td>Role</td>
+<td>Primary (provisions domain)</td>
+</tr>
+<tr>
+<td><code>JOIN</code></td>
+<td><code>false</code></td>
+</tr>
+<tr>
+<td>DNS Port</td>
+<td>5353</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td><code>/opt/samba-dc01/samba</code> and <code>/opt/samba-dc01/krb5</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="ports-dc01">Ports (DC01)</h4>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Protocol</th>
+<th>Service</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5353</td>
+<td>TCP/UDP</td>
+<td>DNS (non-standard to avoid Pi-hole conflict on 53)</td>
+</tr>
+<tr>
+<td>88</td>
+<td>TCP/UDP</td>
+<td>Kerberos</td>
+</tr>
+<tr>
+<td>389</td>
+<td>TCP</td>
+<td>LDAP</td>
+</tr>
+<tr>
+<td>636</td>
+<td>TCP</td>
+<td>LDAP over TLS</td>
+</tr>
+<tr>
+<td>445</td>
+<td>TCP</td>
+<td>SMB</td>
+</tr>
+<tr>
+<td>3268</td>
+<td>TCP</td>
+<td>Global Catalog</td>
+</tr>
+<tr>
+<td>3269</td>
+<td>TCP</td>
+<td>Global Catalog over TLS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dc02-replica-domain-controller">DC02 -- Replica Domain Controller</h3>
+<p>DC02 joins the existing domain as a replica. It runs with <code>JOIN=true</code> and uses DC01 as its DNS forwarder.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node</td>
+<td><code>nomad02</code></td>
+</tr>
+<tr>
+<td>Role</td>
+<td>Replica (joins domain)</td>
+</tr>
+<tr>
+<td><code>JOIN</code></td>
+<td><code>true</code></td>
+</tr>
+<tr>
+<td><code>JOINSITE</code></td>
+<td><code>Default-First-Site-Name</code></td>
+</tr>
+<tr>
+<td><code>DNSFORWARDER</code></td>
+<td>nomad01 IP</td>
+</tr>
+<tr>
+<td>DNS Port</td>
+<td>5354</td>
+</tr>
+<tr>
+<td>Storage</td>
+<td><code>/opt/samba-dc02/samba</code> and <code>/opt/samba-dc02/krb5</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="ports-dc02">Ports (DC02)</h4>
+<p>DC02 uses the same ports as DC01 except for DNS:</p>
+<table>
+<thead>
+<tr>
+<th>Port</th>
+<th>Protocol</th>
+<th>Service</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5354</td>
+<td>TCP/UDP</td>
+<td>DNS (different from DC01 to allow Pi-hole forwarding to both)</td>
+</tr>
+<tr>
+<td>88</td>
+<td>TCP/UDP</td>
+<td>Kerberos</td>
+</tr>
+<tr>
+<td>389</td>
+<td>TCP</td>
+<td>LDAP</td>
+</tr>
+<tr>
+<td>636</td>
+<td>TCP</td>
+<td>LDAP over TLS</td>
+</tr>
+<tr>
+<td>445</td>
+<td>TCP</td>
+<td>SMB</td>
+</tr>
+<tr>
+<td>3268</td>
+<td>TCP</td>
+<td>Global Catalog</td>
+</tr>
+<tr>
+<td>3269</td>
+<td>TCP</td>
+<td>Global Catalog over TLS</td>
+</tr>
+</tbody>
+</table>
+<h3 id="single-node-support">Single-Node Support</h3>
+<p>If the Nomad cluster has only one or two nodes and <code>nomad02</code> does not exist, the deployment script automatically skips DC02. Only DC01 is deployed, providing a fully functional single-DC domain without replication.</p>
+<h2 id="local-storage-requirement">Local Storage Requirement</h2>
+<div class="admonition warning">
+<p class="admonition-title">POSIX ACL Requirement</p>
+<p>Samba AD requires POSIX ACL support on its data directory. GlusterFS FUSE mounts do <strong>not</strong> provide this, so Samba DCs use <strong>local storage</strong> instead of GlusterFS.</p>
+</div>
+<p>Each DC stores its data on the local filesystem of its Nomad node:</p>
+<table>
+<thead>
+<tr>
+<th>DC</th>
+<th>Samba Data</th>
+<th>Kerberos Config</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DC01</td>
+<td><code>/opt/samba-dc01/samba:/var/lib/samba</code></td>
+<td><code>/opt/samba-dc01/krb5:/etc/krb5</code></td>
+</tr>
+<tr>
+<td>DC02</td>
+<td><code>/opt/samba-dc02/samba:/var/lib/samba</code></td>
+<td><code>/opt/samba-dc02/krb5:/etc/krb5</code></td>
+</tr>
+</tbody>
+</table>
+<p>Because storage is local (not replicated via GlusterFS), each DC maintains its own copy of the AD database. Active Directory's built-in replication protocol keeps them synchronized.</p>
+<h2 id="vault-secrets-integration">Vault Secrets Integration</h2>
+<p>Samba AD uses Vault WIF to retrieve the domain administrator password at startup:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">vault</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="na">role</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="s2">"samba-dc"</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="na">change_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"noop"</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><strong><code>role = "samba-dc"</code></strong> -- Maps to the <code>samba-dc</code> Vault policy which grants read access to <code>secret/data/samba-ad</code>.</li>
+<li><strong><code>change_mode = "noop"</code></strong> -- Secrets changes do <strong>not</strong> restart the container. Active Directory is stateful and restarting a DC can cause replication issues. Password changes must be handled manually.</li>
+</ul>
+<h3 id="secrets-template">Secrets Template</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">template</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="na">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="dl">EOH</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="sh">{{ with secret "secret/data/samba-ad" }}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="sh">DOMAINPASS={{ .Data.data.admin_password }}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="sh">{{ end }}</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="sh">DOMAIN=&lt;ad_realm&gt;</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="sh">HOSTIP=&lt;node_ip&gt;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="sh">DNSFORWARDER=&lt;forwarder_ip&gt;</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="sh">JOIN=false</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="sh">INSECURELDAP=true</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="sh">NOCOMPLEXITY=true</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="dl">EOH</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span><span class="na">destination</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"secrets/samba.env"</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">  </span><span class="na">env</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="no">true</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>DC01 Value</th>
+<th>DC02 Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DOMAINPASS</code></td>
+<td>From Vault</td>
+<td>From Vault</td>
+</tr>
+<tr>
+<td><code>DOMAIN</code></td>
+<td>AD realm (e.g., <code>AD.MYLAB.LAN</code>)</td>
+<td>Same</td>
+</tr>
+<tr>
+<td><code>HOSTIP</code></td>
+<td>nomad01 IP</td>
+<td>nomad02 IP</td>
+</tr>
+<tr>
+<td><code>DNSFORWARDER</code></td>
+<td>Pi-hole IP</td>
+<td>nomad01 IP</td>
+</tr>
+<tr>
+<td><code>JOIN</code></td>
+<td><code>false</code></td>
+<td><code>true</code></td>
+</tr>
+<tr>
+<td><code>JOINSITE</code></td>
+<td>(not set)</td>
+<td><code>Default-First-Site-Name</code></td>
+</tr>
+<tr>
+<td><code>INSECURELDAP</code></td>
+<td><code>true</code></td>
+<td><code>true</code></td>
+</tr>
+<tr>
+<td><code>NOCOMPLEXITY</code></td>
+<td><code>true</code></td>
+<td><code>true</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="dns-forwarding">DNS Forwarding</h2>
+<p>Pi-hole is configured to forward queries for the AD realm to the Samba DCs. This allows clients using Pi-hole as their DNS server to resolve AD hostnames without additional configuration.</p>
+<h3 id="forwarding-rules">Forwarding Rules</h3>
+<table>
+<thead>
+<tr>
+<th>Query Pattern</th>
+<th>Forwarded To</th>
+<th>Port</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>*.ad.&lt;dns_postfix&gt;</code></td>
+<td>nomad01 (DC01)</td>
+<td>5353</td>
+</tr>
+<tr>
+<td><code>*.ad.&lt;dns_postfix&gt;</code></td>
+<td>nomad02 (DC02)</td>
+<td>5354</td>
+</tr>
+</tbody>
+</table>
+<p>The setup script configures this automatically in Pi-hole's dnsmasq configuration.</p>
+<h3 id="dns-records">DNS Records</h3>
+<p>The deployment also creates DNS records in Pi-hole:</p>
+<table>
+<thead>
+<tr>
+<th>Record</th>
+<th>Points To</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>samba-dc01.ad.&lt;dns_postfix&gt;</code></td>
+<td>nomad01 IP</td>
+</tr>
+<tr>
+<td><code>samba-dc02.ad.&lt;dns_postfix&gt;</code></td>
+<td>nomad02 IP</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-non-standard-dns-ports">Why Non-Standard DNS Ports?</h3>
+<p>Samba AD runs its own DNS server internally, but Pi-hole already occupies port 53 on the network. To resolve this:</p>
+<ul>
+<li>DC01 uses port <strong>5353</strong> for DNS</li>
+<li>DC02 uses port <strong>5354</strong> for DNS</li>
+<li>Pi-hole forwards AD realm queries to these non-standard ports</li>
+<li>Clients never need to know about the port mapping -- they query Pi-hole on port 53 as usual</li>
+</ul>
+<h2 id="health-checks">Health Checks</h2>
+<p>Each DC registers two services with Nomad, each with a TCP health check:</p>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Port</th>
+<th>Check Type</th>
+<th>Interval</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>samba-dc01</code> / <code>samba-dc02</code></td>
+<td>LDAP (389)</td>
+<td>TCP</td>
+<td>30s</td>
+</tr>
+<tr>
+<td><code>samba-dc01-kerberos</code> / <code>samba-dc02-kerberos</code></td>
+<td>Kerberos (88)</td>
+<td>TCP</td>
+<td>30s</td>
+</tr>
+</tbody>
+</table>
+<p>Both checks use a 5-second timeout. If LDAP or Kerberos becomes unreachable, Nomad marks the service as unhealthy.</p>
+<h2 id="domain-configuration">Domain Configuration</h2>
+<p>The AD realm and NetBIOS domain name are derived from the lab's <code>dns_postfix</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Example (dns_postfix = <code>mylab.lan</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AD Realm</td>
+<td><code>AD.MYLAB.LAN</code></td>
+</tr>
+<tr>
+<td>NetBIOS Domain</td>
+<td><code>AD</code></td>
+</tr>
+<tr>
+<td>Domain DN</td>
+<td><code>DC=ad,DC=mylab,DC=lan</code></td>
+</tr>
+<tr>
+<td>Admin User</td>
+<td><code>Administrator</code></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">NetBIOS Name Limit</p>
+<p>The NetBIOS domain name has a 15-character maximum. The deployment script uses the first component of the AD realm (e.g., <code>AD</code>), which stays well within this limit.</p>
+</div>
+<h2 id="service-tags">Service Tags</h2>
+<p>Each DC is tagged with metadata for service discovery:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># DC01</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="na">tags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="s2">"dc=primary"</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="s2">"realm=AD.MYLAB.LAN"</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">]</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># DC02</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="na">tags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="s2">"dc=replica"</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="s2">"realm=AD.MYLAB.LAN"</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">]</span>
+</code></pre></div>
+<h2 id="verifying-the-deployment">Verifying the Deployment</h2>
+<p>After deploying Samba AD, verify both DCs are running:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Check job status (both dc01 and dc02 groups)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>job<span class="w"> </span>status<span class="w"> </span>samba-dc
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Verify services are registered</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>service<span class="w"> </span>list
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Test LDAP connectivity to DC01</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>ldapsearch<span class="w"> </span>-x<span class="w"> </span>-H<span class="w"> </span>ldap://nomad01:389<span class="w"> </span>-b<span class="w"> </span><span class="s2">"dc=ad,dc=mylab,dc=lan"</span><span class="w"> </span>-s<span class="w"> </span>base
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="c1"># Test Kerberos on DC01</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'docker exec $(docker ps -qf name=samba-dc) samba-tool domain info 127.0.0.1'</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="c1"># Check AD replication status (run from DC01)</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'docker exec $(docker ps -qf name=samba-dc) samba-tool drs showrepl'</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="c1"># List domain users</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'docker exec $(docker ps -qf name=samba-dc) samba-tool user list'</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="c1"># Check allocation logs</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>alloc<span class="w"> </span>logs<span class="w"> </span>-job<span class="w"> </span>samba-dc
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<details class="question">
+<summary>DC won't start</summary>
+<p>The domain controller fails to start or crashes on launch.</p>
+<ol>
+<li>Check container logs:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>alloc<span class="w"> </span>logs<span class="w"> </span>-job<span class="w"> </span>samba-dc
+</code></pre></div></li>
+<li>Verify the storage directories exist and have correct permissions:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'ls -la /opt/samba-dc01/'</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>ssh<span class="w"> </span>nomad02<span class="w"> </span><span class="s1">'ls -la /opt/samba-dc02/'</span>
+</code></pre></div></li>
+<li>Check that ports are not already in use:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'sudo ss -tlnp | grep -E ":88|:389|:445"'</span>
+</code></pre></div></li>
+<li>Verify Vault secrets are accessible:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">VAULT_ADDR</span><span class="o">=</span><span class="s2">"http://nomad01:8200"</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>vault<span class="w"> </span>kv<span class="w"> </span>get<span class="w"> </span>secret/samba-ad
+</code></pre></div></li>
+<li>For a fresh start, stop the job and clean the data directory:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>job<span class="w"> </span>stop<span class="w"> </span>-purge<span class="w"> </span>samba-dc
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'sudo rm -rf /opt/samba-dc01/*'</span>
+</code></pre></div></li>
+</ol>
+</details>
+<details class="question">
+<summary>AD replication failing between DC01 and DC02</summary>
+<p>The domain controllers are not synchronizing.</p>
+<ol>
+<li>Check replication status from inside DC01:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'docker exec $(docker ps -qf name=samba-dc) samba-tool drs showrepl'</span>
+</code></pre></div></li>
+<li>Verify DC02 can reach DC01 over the network:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ssh<span class="w"> </span>nomad02<span class="w"> </span><span class="s1">'nc -zv nomad01 389'</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>ssh<span class="w"> </span>nomad02<span class="w"> </span><span class="s1">'nc -zv nomad01 88'</span>
+</code></pre></div></li>
+<li>Check that DNS is resolving correctly:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ssh<span class="w"> </span>nomad02<span class="w"> </span><span class="s1">'nslookup samba-dc01.ad.mylab.lan'</span>
+</code></pre></div></li>
+<li>Inspect DC02 logs for join/replication errors:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>nomad<span class="w"> </span>alloc<span class="w"> </span>logs<span class="w"> </span>-job<span class="w"> </span>samba-dc
+</code></pre></div></li>
+</ol>
+</details>
+<details class="question">
+<summary>Domain join from a client machine fails</summary>
+<p>A workstation or server cannot join the AD domain.</p>
+<ol>
+<li>Verify DNS forwards the AD realm to the Samba DCs. Test from the client:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>nslookup<span class="w"> </span>ad.mylab.lan
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>nslookup<span class="w"> </span>_ldap._tcp.ad.mylab.lan
+</code></pre></div></li>
+<li>Check Pi-hole's AD forwarding configuration:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>ssh<span class="w"> </span>dns-01<span class="w"> </span><span class="s1">'cat /etc/dnsmasq.d/10-ad-forward.conf'</span>
+</code></pre></div></li>
+<li>Test LDAP connectivity from the client:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>ldapsearch<span class="w"> </span>-x<span class="w"> </span>-H<span class="w"> </span>ldap://nomad01:389<span class="w"> </span>-b<span class="w"> </span><span class="s2">"dc=ad,dc=mylab,dc=lan"</span><span class="w"> </span>-s<span class="w"> </span>base
+</code></pre></div></li>
+<li>Verify the domain admin credentials:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">VAULT_ADDR</span><span class="o">=</span><span class="s2">"http://nomad01:8200"</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>vault<span class="w"> </span>kv<span class="w"> </span>get<span class="w"> </span>-field<span class="o">=</span>admin_password<span class="w"> </span>secret/samba-ad
+</code></pre></div></li>
+</ol>
+</details>
+<details class="question">
+<summary>LDAP connection fails</summary>
+<p>LDAP queries return errors or timeouts.</p>
+<ol>
+<li>Test basic TCP connectivity:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>nc<span class="w"> </span>-zv<span class="w"> </span>nomad01<span class="w"> </span><span class="m">389</span>
+</code></pre></div></li>
+<li>Test LDAP bind:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>ldapsearch<span class="w"> </span>-x<span class="w"> </span>-H<span class="w"> </span>ldap://nomad01:389<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span>-D<span class="w"> </span><span class="s2">"Administrator@ad.mylab.lan"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span>-w<span class="w"> </span><span class="s2">"&lt;admin_password&gt;"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">  </span>-b<span class="w"> </span><span class="s2">"dc=ad,dc=mylab,dc=lan"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">  </span><span class="s2">"(objectClass=user)"</span>
+</code></pre></div></li>
+<li>Check that <code>INSECURELDAP=true</code> is set (allows unencrypted LDAP binds).</li>
+<li>If using LDAPs (port 636), verify the DC has a valid TLS certificate.</li>
+</ol>
+</details>
+<details class="question">
+<summary>Kerberos authentication errors</summary>
+<p>Clients receive Kerberos errors when authenticating.</p>
+<ol>
+<li>Verify the Kerberos service is running:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'nc -zv 127.0.0.1 88'</span>
+</code></pre></div></li>
+<li>Check time synchronization -- Kerberos requires clocks to be within 5 minutes:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ssh<span class="w"> </span>nomad01<span class="w"> </span><span class="s1">'date'</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>ssh<span class="w"> </span>nomad02<span class="w"> </span><span class="s1">'date'</span>
+</code></pre></div></li>
+<li>Verify the realm is correct in the client's <code>krb5.conf</code>:
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="k">[libdefaults]</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">    </span><span class="na">default_realm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">AD.MYLAB.LAN</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="k">[realms]</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="na">AD.MYLAB.LAN</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">{</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">        </span><span class="na">kdc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">nomad01</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">        </span><span class="na">admin_server</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">nomad01</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">    </span><span class="na">}</span>
+</code></pre></div></li>
+</ol>
+</details>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="../authentik/">:octicons-arrow-right-24: Authentik</a> -- Configure AD-to-Authentik user sync</li>
+<li><a href="../vault/">:octicons-arrow-right-24: Vault</a> -- Secrets management powering Samba AD</li>
+<li><a href="../traefik/">:octicons-arrow-right-24: Traefik</a> -- Reverse proxy for other lab services</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

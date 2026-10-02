@@ -1,0 +1,2201 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Infrastructure-as-Code for Proxmox VE — automated deployment of a self-hosted home lab">
+      
+      
+        <meta name="author" content="Jacob Stauffer | CISSP">
+      
+      
+        <link rel="canonical" href="https://jknyght9.github.io/proxmox-lab/unifi-dns-integration/">
+      
+      
+        <link rel="prev" href="../planning/vault-ha/">
+      
+      
+        <link rel="next" href="../developer/adding-services/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>UniFi DNS Integration - Proxmox Lab</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#unifi-dns-integration-featureunifi-dns" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Proxmox Lab" class="md-header__button md-logo" aria-label="Proxmox Lab" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Proxmox Lab
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              UniFi DNS Integration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jknyght9/proxmox-lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jknyght9/proxmox-lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Proxmox Lab" class="md-nav__button md-logo" aria-label="Proxmox Lab" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Proxmox Lab
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jknyght9/proxmox-lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jknyght9/proxmox-lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/prerequisites/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prerequisites
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/bootstrap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Bootstrap Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/local-overlay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local / Site Overlay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/first-deploy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secrets Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Services
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Services
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/vault/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/traefik/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Traefik
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/authentik/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentik
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/pihole-dns/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pi-hole DNS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/samba-ad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Samba AD
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/kasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kasm Workspaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/netbox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Netbox
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../services/uptime-kuma/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Uptime Kuma
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/import-root-ca/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import Root CA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/kasm-ad-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kasm AD Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/nas-domain-join/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NAS Domain Join
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/ha-configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HA Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/adding-ad-users/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing AD Users
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/menu-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Menu Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/rollback-purge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rollback and Purge
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/dependencies/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dependency Manifest
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Planning
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Planning
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../planning/v2-refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    v2 Refactor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../planning/vault-ha/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vault HA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UniFi DNS Integration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UniFi DNS Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-unifi-dns-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What unifi-dns is
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existing-assets-we-reuse-already-in-the-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing assets we reuse (already in the repo)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-layers-decouple-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two layers (decouple them)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two layers (decouple them)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layer-1-records-onto-the-unifi-gateway-the-operational-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1 — Records onto the UniFi gateway (the operational fix)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-unifi-dns-app-managementgovernance-optionaladditive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2 — unifi-dns app (management/governance, optional/additive)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pi-hole-disposition-scope-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pi-hole disposition (scope decision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposed-sequence-once-decisions-are-made" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposed sequence (once decisions are made)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-2026-08-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions (2026-08-31)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upstream-topology-resolved-from-docker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upstream topology (resolved from docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image-gate-hard-prerequisite-for-the-nomad-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Image gate (hard prerequisite for the Nomad path)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-order-implied-by-the-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build order (implied by the above)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image-gate-resolved-path-2026-08-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image gate — resolved path (2026-08-31)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy-side-wiring-done-terraform-validate-clean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy-side wiring — DONE (terraform validate clean)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-terraform-record-writer-dns_backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1 — Terraform record writer (dns_backends)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-to-go-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining to go live
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/adding-services/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-unifi-dns-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What unifi-dns is
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existing-assets-we-reuse-already-in-the-repo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing assets we reuse (already in the repo)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-layers-decouple-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two layers (decouple them)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Two layers (decouple them)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layer-1-records-onto-the-unifi-gateway-the-operational-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1 — Records onto the UniFi gateway (the operational fix)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-unifi-dns-app-managementgovernance-optionaladditive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2 — unifi-dns app (management/governance, optional/additive)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pi-hole-disposition-scope-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pi-hole disposition (scope decision)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposed-sequence-once-decisions-are-made" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Proposed sequence (once decisions are made)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions-2026-08-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions (2026-08-31)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#upstream-topology-resolved-from-docker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upstream topology (resolved from docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image-gate-hard-prerequisite-for-the-nomad-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Image gate (hard prerequisite for the Nomad path)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-order-implied-by-the-above" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build order (implied by the above)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image-gate-resolved-path-2026-08-31" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image gate — resolved path (2026-08-31)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deploy-side-wiring-done-terraform-validate-clean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploy-side wiring — DONE (terraform validate clean)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-terraform-record-writer-dns_backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1 — Terraform record writer (dns_backends)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-to-go-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining to go live
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="unifi-dns-integration-featureunifi-dns">UniFi DNS Integration (feature/unifi-dns)</h1>
+<p><strong>Status:</strong> design / in-flight (started 2026-08-31)
+<strong>Goal:</strong> Replace the fragile Pi-hole + nebula-sync mechanism for <strong>authoritative
+local DNS records</strong> with UniFi local DNS, optionally managed by the <code>unifi-dns</code>
+tool (github.com/jknyght9/unifi-dns).</p>
+<h2 id="why">Why</h2>
+<p>A DNS outage (all internal <code>*.&lt;domain&gt;</code> names → NXDOMAIN) can be
+caused by a Pi-hole node's LXC rootfs filling to 100% (e.g. an unrotated <code>pihole.log</code>),
+which silently prevented <code>pihole-FTL</code> from persisting <code>pihole.toml</code>. The local
+A-records (<code>dns.hosts</code>) and upstream were wiped, and the "HA" replica had never
+received the records because <strong>nebula-sync</strong> was failing every 5 minutes. Net:
+a single overgrown log file on a 4 GB container took down all internal name
+resolution.</p>
+<p>Root problems this feature removes:
+- Local records live on <strong>stateful 4 GB LXCs</strong> vulnerable to disk-full / OOM / wedge.
+- <strong>nebula-sync</strong> replica propagation is fragile and was silently failing.
+- FTL fails <strong>silently</strong> when it can't persist config.</p>
+<p>UniFi local DNS lives on the <strong>always-on gateway (UDM)</strong> — no per-node LXC state,
+no replica sync, no disk-full failure class.</p>
+<h2 id="what-unifi-dns-is">What <code>unifi-dns</code> is</h2>
+<ul>
+<li><strong>FastAPI (Python) + React/TS + PostgreSQL 18</strong>, deployed via Docker Compose.</li>
+<li>Manages records on the UniFi gateway via the <strong>UniFi Integration v1 API</strong>
+  (<code>/v2/api/site/{site}/static-dns</code> + client <code>local_dns_record</code> via <code>/rest/user</code>).</li>
+<li>Zone-aware organization, <strong>audit log + changesets (rollback)</strong>, <strong>drift detection</strong>
+  (catches edits made in the native console), centralized filtering settings.</li>
+<li><strong>Auth:</strong> OIDC (→ our Authentik) or forward-auth header.</li>
+<li><strong>Migration:</strong> built-in import from <strong>Pi-hole (API)</strong>, Technitium, or RFC 1035 zone files.</li>
+<li>Env: <code>UNIFI_API_KEY</code>, <code>UNIFI_HOST</code>, <code>SESSION_SECRET</code>, <code>OIDC_ISSUER/CLIENT_ID/CLIENT_SECRET/REDIRECT_URL</code>.</li>
+</ul>
+<h2 id="existing-assets-we-reuse-already-in-the-repo">Existing assets we reuse (already in the repo)</h2>
+<table>
+<thead>
+<tr>
+<th>Asset</th>
+<th>Where</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UniFi controller addr</td>
+<td><code>unifi_address = 192.168.100.1</code> (tfvars)</td>
+<td>UDM gateway on the mgmt net</td>
+</tr>
+<tr>
+<td>UniFi API key</td>
+<td>Vault <code>secret/unifi</code> (<code>vault_kv_secret_v2.unifi</code>)</td>
+<td>today used by netbox-sync</td>
+</tr>
+<tr>
+<td>UniFi site</td>
+<td><code>unifi_site = default</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Record set (source of truth)</td>
+<td><code>terraform/services/dns-records.tf</code> <code>local.dns_records</code></td>
+<td>21 records, IP+name+FQDN</td>
+</tr>
+<tr>
+<td>Service pattern</td>
+<td><code>terraform/services/templates/*.nomad.hcl.tpl</code></td>
+<td>Traefik + Vault WIF + Authentik OIDC</td>
+</tr>
+</tbody>
+</table>
+<h2 id="two-layers-decouple-them">Two layers (decouple them)</h2>
+<h3 id="layer-1-records-onto-the-unifi-gateway-the-operational-fix">Layer 1 — Records onto the UniFi gateway  <em>(the operational fix)</em></h3>
+<p>Push the same <code>local.dns_records</code> set to the UniFi <strong>static-dns</strong> API instead of
+(or in addition to) <code>pihole-FTL --config dns.hosts</code>. The gateway is always up, so
+this alone removes the outage class. Mechanism options:
+- <strong>(1a)</strong> New Terraform resource that PUTs records to <code>/v2/api/site/{site}/static-dns</code>
+  (mirrors how <code>dns-records.tf</code> renders <code>local.dns_records</code>; reuses <code>unifi_address</code>,
+  <code>secret/unifi</code>, <code>unifi_site</code>). No app required.
+- <strong>(1b)</strong> Use <code>unifi-dns</code>'s Pi-hole import to pull current records into UniFi once.</p>
+<h3 id="layer-2-unifi-dns-app-managementgovernance-optionaladditive">Layer 2 — <code>unifi-dns</code> app  <em>(management/governance, optional/additive)</em></h3>
+<p>Deploy the tool for the UI, audit, changesets, and drift detection over those
+records. Deployment options:
+- <strong>(2a) Nomad job</strong> — fits lab IaC: Traefik route (<code>unifi-dns.&lt;domain&gt;</code>), Vault WIF
+  for secrets, Postgres on gluster, Authentik OIDC. Requires translating upstream
+  compose → Nomad jobspec (FastAPI + React + Postgres tasks).
+- <strong>(2b) Standalone docker-compose host</strong> (small VM/LXC) — matches upstream exactly,
+  simplest to stand up and track upstream, but off the Nomad pattern.</p>
+<h2 id="pi-hole-disposition-scope-decision">Pi-hole disposition (scope decision)</h2>
+<p>Pi-hole currently also provides <strong>ad-blocking</strong> and <strong>unbound DoT</strong> upstream.
+UniFi can do content filtering / ad-blocking too. Options:
+- <strong>Full retire</strong> — UniFi owns local records + filtering; decommission the 3 LXCs,
+  nebula-sync, and <code>dns-records.tf</code> pihole path.
+- <strong>Split</strong> — UniFi owns authoritative local records (fixes HA); keep Pi-hole for
+  ad-blocking + unbound DoT, pointed at UniFi for local names. Smaller blast radius.
+- <strong>Decide later</strong> — do Layer 1 now, keep Pi-hole as-is (already hardened: records
+  restored on all 3 nodes + logrotate installed 2026-08-31), revisit after validation.</p>
+<h2 id="proposed-sequence-once-decisions-are-made">Proposed sequence (once decisions are made)</h2>
+<ol>
+<li>Vault: add <code>secret/unifi-dns</code> (SESSION_SECRET, OIDC client) + policy; reuse <code>secret/unifi</code> for the API key.</li>
+<li>Layer 1: Terraform resource pushing <code>local.dns_records</code> → UniFi static-dns; verify resolution via the gateway.</li>
+<li>Cutover: point clients / Pi-hole conditional-forward at UniFi for local names; validate <code>auth</code>, <code>vault</code>, etc.</li>
+<li>(If chosen) Layer 2: deploy <code>unifi-dns</code> app (Nomad or compose) with Authentik OIDC + Traefik.</li>
+<li>Retire nebula-sync + Pi-hole DNS-record path per the disposition decision; gate <code>pihole_nebula_sync</code> in <code>dns-records.tf</code>.</li>
+</ol>
+<h2 id="decisions-2026-08-31">Decisions (2026-08-31)</h2>
+<ul>
+<li><strong>Records→UniFi:</strong> via the <strong><code>unifi-dns</code> app's built-in Pi-hole import</strong> (1b) — run
+  once from the UI after the app is up, to seed UniFi static-dns from the current
+  (restored) Pi-hole records.</li>
+<li><strong>App deployment:</strong> <strong>Nomad job</strong> (2a) — Traefik route, Vault WIF, Postgres on
+  gluster, Authentik OIDC. Requires translating upstream compose → Nomad jobspec.</li>
+<li><strong>Pi-hole disposition:</strong> <strong>decide later</strong> — keep the (now hardened) Pi-hole nodes
+  running; revisit retire/split after UniFi resolution is validated.</li>
+<li><strong>UniFi API key:</strong> reuse <code>secret/unifi</code> initially (dedicated key can come later).</li>
+</ul>
+<h2 id="upstream-topology-resolved-from-docker-composeyml">Upstream topology (resolved from docker-compose.yml)</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Image</th>
+<th>Port</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>db</td>
+<td><code>postgres:18-alpine</code> (published)</td>
+<td>5432 (→5433 host)</td>
+<td>user/db <code>unifidns</code>, <code>POSTGRES_PASSWORD</code>; vol <code>/var/lib/postgresql</code></td>
+</tr>
+<tr>
+<td>backend</td>
+<td><strong>build <code>./backend</code></strong> (FastAPI)</td>
+<td>8000</td>
+<td><code>DATABASE_URL</code>, <code>UNIFI_*</code>, <code>SESSION_SECRET</code>, <code>OIDC_*</code>, <code>CORS_ORIGINS</code>; depends_on db healthy</td>
+</tr>
+<tr>
+<td>frontend</td>
+<td><strong>build <code>./frontend</code></strong> (nginx SPA)</td>
+<td>80 (→8080 host)</td>
+<td>serves SPA, <strong>reverse-proxies <code>/api/</code> → <code>backend:8000</code></strong>; depends_on backend</td>
+</tr>
+</tbody>
+</table>
+<p>Frontend is the only ingress; backend is internal. Under Nomad <strong>host networking</strong>
+all tasks share the netns, so the frontend nginx upstream is overridden from
+<code>backend:8000</code> → <code>127.0.0.1:8000</code> (mounted <code>default.conf</code>, same trick as netbox's
+unit config). Backend env <code>UNIFI_API_KEY</code> reuses Vault <code>secret/unifi</code>; app secrets
+(<code>SESSION_SECRET</code>, OIDC client) live in new <code>secret/unifi-dns</code>.</p>
+<h2 id="image-gate-hard-prerequisite-for-the-nomad-path">⚠️ Image gate (hard prerequisite for the Nomad path)</h2>
+<p><code>backend</code> and <code>frontend</code> are <strong>built from source</strong> — there are <strong>no published images</strong>,
+and Nomad's docker driver <strong>pulls, it cannot build</strong>. So before the job can run, the two
+images must be published to a registry the Nomad nodes can pull. Options:
+- <strong>GHCR via CI (recommended)</strong> — add a GitHub Actions workflow to the <code>unifi-dns</code> repo
+  that builds+pushes <code>ghcr.io/jknyght9/unifi-dns-backend</code> and <code>-frontend</code> on tag/release.
+  Clean, versioned, reproducible; the jobspec pins a tag.
+- <strong>Local build+push to a lab registry</strong> — <code>docker build</code> both, push to an in-lab registry
+  (would need to stand one up) or Docker Hub. Faster to bootstrap, less clean.</p>
+<p>The jobspec <code>terraform/services/templates/unifi-dns.nomad.hcl.tpl</code> parameterizes both
+images via <code>${unifi_dns_backend_image}</code> / <code>${unifi_dns_frontend_image}</code> so it's ready
+once the registry path is chosen.</p>
+<h2 id="build-order-implied-by-the-above">Build order (implied by the above)</h2>
+<ol>
+<li><strong>Publish images</strong> (image gate above) — pick GHCR-CI vs lab-registry; set the two image vars.</li>
+<li>Vault: <code>secret/unifi-dns</code> (<code>postgres_password</code>, <code>session_secret</code>, <code>oidc_client_id/secret</code>,
+   <code>oidc_issuer</code>) + policy + WIF role <code>unifi-dns</code>; reuse <code>secret/unifi</code> for <code>api_key</code>.</li>
+<li>Nomad job <code>unifi-dns.nomad.hcl.tpl</code> (✅ v1 scaffold committed): PG18 + backend + frontend;
+   gluster PG volume + wait-for-gluster; nginx upstream override; Traefik <code>unifi-dns.&lt;postfix&gt;</code>.
+   Confirm node pin + host ports (8090/8000/5434) against the live cluster at deploy.</li>
+<li>Authentik: OIDC provider + application for unifi-dns
+   (redirect <code>https://unifi-dns.&lt;postfix&gt;/api/auth/callback</code>).</li>
+<li>DNS record <code>unifi-dns.&lt;postfix&gt;</code> → Traefik VIP; wire into <code>nomad-jobs.tf</code> + <code>variables.tf</code>.</li>
+<li>Deploy; from the UI run <strong>Pi-hole import</strong> (source = dns-01) → verify records land in UniFi.</li>
+<li>Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.</li>
+</ol>
+<h2 id="image-gate-resolved-path-2026-08-31">Image gate — resolved path (2026-08-31)</h2>
+<p>GHCR via CI. Workflow <code>publish-images.yml</code> added to the <code>unifi-dns</code> repo (branch
+<code>ci/ghcr-publish</code>, not yet pushed) builds+pushes <code>ghcr.io/jknyght9/unifi-dns-{backend,
+frontend}</code> on push-to-main / <code>v*</code> tags / manual dispatch. <strong>After first run, make both
+GHCR packages public</strong> (or give Nomad a <code>read:packages</code> pull token). Our jobspec image
+refs are declared in <code>variables.tf</code> (<code>unifi_dns_backend_image</code> / <code>unifi_dns_frontend_image</code>,
+default <code>:latest</code>) — pin a version tag once released.</p>
+<p>Backend Dockerfile confirms <strong><code>alembic upgrade head</code> runs on container start</strong> (CMD), so no
+separate migration task is needed. Frontend has <strong>no <code>VITE_*</code> build args</strong> (same-origin <code>/api</code>).</p>
+<h2 id="deploy-side-wiring-done-terraform-validate-clean">Deploy-side wiring — DONE (terraform validate clean)</h2>
+<p>All gated on <code>var.deploy_unifi_dns</code> (default false):
+- <strong>Vault secrets</strong> (<code>vault-secrets.tf</code>): <code>random_password.unifi_dns_postgres</code> (prevent_destroy)
+  + <code>unifi_dns_session</code>; <code>vault_kv_secret_v2.unifi_dns</code> (postgres_password, session_secret) +
+  <code>unifi_dns_oidc</code> placeholder (ignore_changes). API key reused from <code>secret/unifi</code>.
+- <strong>Policy</strong> <code>nomad/vault-policies/unifi-dns.hcl</code> + <code>vault_policy.unifi_dns</code>; <strong>WIF role</strong>
+  <code>vault_jwt_auth_backend_role.unifi_dns</code> (bound to job_id <code>unifi-dns</code>).
+- <strong>Authentik</strong> (<code>authentik-apps.tf</code>): OAuth2 provider "unifi-dns OIDC" + app <code>unifi-dns</code>
+  (confidential, redirect <code>…/api/auth/callback</code>), client_secret → <code>secret/unifi-dns-oidc</code>.
+- <strong>Nomad job</strong> (<code>nomad-jobs.tf</code>): <code>nomad_job.unifi_dns</code> (templatefile, 20m timeout).
+- <strong>DNS</strong>: <code>unifi-dns.&lt;postfix&gt;</code> → Traefik VIP added to <code>dns-records.tf</code>.
+- <strong>Jobspec</strong>: backend reads app secrets from <code>secret/unifi-dns</code>, OIDC from
+  <code>secret/unifi-dns-oidc</code> (issuer = <code>oidc_endpoint</code>), api_key from <code>secret/unifi</code>.</p>
+<h2 id="layer-1-terraform-record-writer-dns_backends">Layer 1 — Terraform record writer (<code>dns_backends</code>)</h2>
+<p>The <code>unifi-dns</code> app manages UniFi DNS interactively; the deploy also needs to push
+the lab's own service records into DNS reproducibly. <code>terraform/services/dns-records.tf</code>
+does this, and the target backend(s) are chosen by the <code>dns_backends</code> list var
+(default <code>["pihole"]</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">dns_backends</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"pihole", "unifi"</span><span class="p">]</span><span class="c1">   # write to both; or just one</span>
+</code></pre></div>
+<ul>
+<li><strong>pihole</strong> — existing path: <code>pihole-FTL --config dns.hosts</code> over SSH (+ nebula-sync,</li>
+<li>AD conditional-forward). Gated on <code>contains(dns_backends, "pihole")</code>.</li>
+<li><strong>unifi</strong> — <code>null_resource.unifi_dns_records</code> renders the same <code>local.dns_records</code>
+  into UniFi A-records and reconciles them through the UniFi <strong>static-dns</strong> API
+  (<code>/proxy/network/v2/api/site/&lt;site&gt;/static-dns</code>, <code>X-API-KEY</code>). Because UniFi
+  management (<code>:443</code>) is firewalled to <strong>nomad01</strong>, the writer SSHes to nomad01 and
+  curls the controller from there (reusing <code>unifi_address</code>/<code>unifi_site</code>/<code>unifi_api_key</code>).</li>
+</ul>
+<p><strong>Scoped reconcile (safe alongside the app):</strong> the writer creates records from
+<code>local.unifi_dns_records</code> and <strong>only deletes records it previously created</strong>, tracked
+in <code>/opt/unifi-dns-tf/managed.json</code> on nomad01. Records added via the app or by hand
+are absent from that state file and are never touched.</p>
+<p><code>dns_backends</code> is list-valued, so <code>lib/deploy/nomadJob/initVault.sh</code> preserves it verbatim
+across every Layer-2 tfvars regeneration (a <code>_preserve_list</code> helper) — otherwise a regen
+would silently drop it to the default and stop writing to UniFi.</p>
+<h2 id="remaining-to-go-live">Remaining to go live</h2>
+<ol>
+<li><strong>Images</strong>: push <code>ci/ghcr-publish</code> in the unifi-dns repo → run workflow → <strong>make both GHCR
+   packages public</strong> (or give Nomad a pull token). Pin a tag in the image vars if not <code>:latest</code>.</li>
+<li><strong>Enable + apply</strong>: set <code>deploy_unifi_dns = true</code> in <code>terraform/services/terraform.tfvars</code>,
+   <code>terraform apply</code>. Confirm node pin (<code>nomad01</code>) + host ports (8090/8000/5434) don't collide.</li>
+<li><strong>Seed records</strong>: from the UI (<code>https://unifi-dns.&lt;postfix&gt;</code>, SSO via Authentik) run the
+   <strong>Pi-hole import</strong> (source = dns-01) → verify records land in UniFi static-dns.</li>
+<li>Validate resolution via the UniFi gateway; then revisit Pi-hole disposition.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
