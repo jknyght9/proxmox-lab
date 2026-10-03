@@ -187,17 +187,23 @@ resource "nomad_job" "kaneo" {
 
 # Forgejo Actions runner registration-token mint.
 #
-# After the forgejo job is up, mint an INSTANCE-LEVEL registration token from
-# the live Forgejo API and write it to Vault at secret/forgejo-runner, where
-# the runner job reads it (via its Vault template) and registers once.
+# Generate an INSTANCE-LEVEL registration token straight from Forgejo's own CLI
+# (`forgejo actions generate-runner-token`) via `nomad alloc exec`, and write it
+# to Vault at secret/forgejo-runner, where the runner job reads it (Vault
+# template) and registers once.
 #
-# Mirrors the authentik_apps / nas_share remote-exec pattern: SSH to nomad01
-# (which can reach git.<postfix> over the internal CA and the Vault API), then
-# curl both APIs. The bearer is the Forgejo automation token at
-# secret/forgejo.automation_token — created in the manual Phase 2b step
-# (docs/services/forgejo.md). If that token is absent, this logs a clear
-# message and leaves the placeholder empty (the runner job then refuses to
-# register with an actionable error) rather than failing the whole apply.
+# Why the CLI and not the admin API: the API path needs a site-admin access
+# token (read:admin). The only admin token we have is created out-of-band in
+# the manual Phase 2b step and stored in secret/forgejo — but that KV secret is
+# Terraform-managed (vault_kv_secret_v2.forgejo), so a later apply CLOBBERS the
+# out-of-band key, breaking the mint. The CLI runs as the server itself (no
+# token), so it has no such dependency.
+#
+# Runs on nomad01, which has the nomad CLI pointed at the local agent. `nomad
+# alloc exec -job forgejo` finds the forgejo alloc on whatever node it runs
+# (no node pin assumed); `su-exec git` drops from root (Forgejo refuses root).
+# generate-runner-token is idempotent — it returns the current unused instance
+# token until one is consumed — so re-running on every apply is harmless.
 resource "null_resource" "forgejo_runner_token" {
   count = var.deploy_forgejo_runner ? 1 : 0
   depends_on = [
@@ -206,9 +212,6 @@ resource "null_resource" "forgejo_runner_token" {
   ]
 
   triggers = {
-    # Re-mint on every apply. The instance registration token is stable until
-    # explicitly reset in Forgejo, so re-fetching simply re-writes the same
-    # value — cheap and keeps secret/forgejo-runner current.
     always = timestamp()
   }
 
@@ -223,41 +226,17 @@ resource "null_resource" "forgejo_runner_token" {
     inline = [
       <<-EOT
       set -e
-      FORGEJO_URL="https://git.${var.dns_postfix}"
       VAULT_ADDR="${var.vault_address}"
       VAULT_TOKEN="${var.vault_token}"
 
-      echo '[+] Reading Forgejo automation token from secret/forgejo...'
-      AUTO_TOKEN=$(curl -sk -H "X-Vault-Token: $VAULT_TOKEN" \
-        "$VAULT_ADDR/v1/secret/data/forgejo" \
-        | jq -r '.data.data.automation_token // ""')
+      echo '[+] Generating runner registration token via forgejo CLI...'
+      REG_TOKEN=$(nomad alloc exec -task forgejo -job forgejo \
+        su-exec git forgejo actions generate-runner-token 2>/dev/null | tr -d '[:space:]')
 
-      if [ -z "$AUTO_TOKEN" ] || [ "$AUTO_TOKEN" = "null" ]; then
-        echo "[!] secret/forgejo has no 'automation_token' key."
-        echo "[!] Create the Forgejo admin user + an automation access token"
-        echo "[!] (Phase 2b, see docs/services/forgejo.md), store it at"
-        echo "[!] secret/forgejo automation_token=<tok>, then re-apply."
-        echo "[!] Leaving secret/forgejo-runner.registration_token empty for now."
-        exit 0
-      fi
-
-      echo '[+] Minting instance-level runner registration token...'
-      # Non-deprecated path in Forgejo 16.x (verified in the live swagger).
-      REG_TOKEN=$(curl -sk -H "Authorization: token $AUTO_TOKEN" \
-        "$FORGEJO_URL/api/v1/admin/actions/runners/registration-token" \
-        | jq -r '.token // ""')
-
-      if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
-        echo "[!] Registration-token mint returned nothing — is the automation"
-        echo "[!] token an ADMIN token? Falling back to the deprecated alias..."
-        REG_TOKEN=$(curl -sk -H "Authorization: token $AUTO_TOKEN" \
-          "$FORGEJO_URL/api/v1/admin/runners/registration-token" \
-          | jq -r '.token // ""')
-      fi
-
-      if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
-        echo "[!] Could not mint a registration token. Check the automation"
-        echo "[!] token's admin scope. Leaving secret/forgejo-runner empty."
+      if [ -z "$REG_TOKEN" ]; then
+        echo "[!] Could not generate a registration token. Is the forgejo job"
+        echo "[!] running and reachable from the local Nomad agent? Leaving"
+        echo "[!] secret/forgejo-runner.registration_token unchanged."
         exit 0
       fi
 

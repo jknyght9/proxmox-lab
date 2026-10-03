@@ -106,8 +106,8 @@ This flips `deploy_forgejo_runner = true` in
 
 !!! warning "Prerequisites"
     Requires `deploy_forgejo = true` (the forge it serves), `deploy_csi = true`
-    (for the state volume), and Vault. The runner cannot register until a
-    Forgejo **automation token** exists (Phase 2b, below).
+    (for the state volume), and Vault. The forgejo job must be running so its
+    registration token can be generated.
 
 ## Registration-token flow
 
@@ -115,38 +115,36 @@ Registration is **instance-level**: a single reusable token lets any repo or
 org (including `cifr-lab`) schedule jobs on the runner — the sensible default
 for a single-tenant lab.
 
-`null_resource.forgejo_runner_token` (SSH → nomad01, mirroring the
-`authentik_apps` pattern):
+`null_resource.forgejo_runner_token` (SSH → nomad01):
 
-1. Reads the Forgejo **automation token** from Vault at
-   `secret/forgejo` → key `automation_token`.
-2. Mints a registration token:
-   `GET /api/v1/admin/actions/runners/registration-token`
-   with `Authorization: token <automation_token>` (this non-deprecated path is
-   confirmed present in the live Forgejo 16.0.5 swagger; the deprecated
-   `/api/v1/admin/runners/registration-token` alias is used as a fallback).
-3. Writes the returned `token` to `secret/forgejo-runner.registration_token`.
+1. Generates a registration token with Forgejo's own CLI, run inside the
+   forgejo container via the local Nomad agent:
+   `nomad alloc exec -task forgejo -job forgejo su-exec git forgejo actions generate-runner-token`.
+   This runs as the server (no API/admin token needed), `su-exec git` drops
+   from root (Forgejo refuses to run as root), and `generate-runner-token` is
+   idempotent — it returns the current unused instance token until one is
+   consumed. `nomad alloc exec -job` finds the forgejo alloc on whatever node
+   it runs, so no node pin is assumed.
+2. Writes the token to `secret/forgejo-runner.registration_token`.
 
 The runner job reads `secret/forgejo-runner` via its Vault template and, if no
 `.runner` file exists yet, registers with
 `forgejo-runner register --no-interactive --instance https://git.<postfix>
 --token <token> --labels <labels>`, then runs `forgejo-runner daemon`.
 
-!!! important "Phase 2b dependency — the automation token"
-    `secret/forgejo` does **not** ship with an `automation_token`. It is created
-    in the manual [Forgejo Phase 2b step](forgejo.md#phase-2b-post-deploy-configuration-manual-deferred):
-    create the Forgejo admin user, generate an **admin-scoped** access token,
-    and store it:
+!!! note "Why the CLI, not the admin API"
+    The admin API path (`GET /api/v1/admin/actions/runners/registration-token`)
+    needs a **site-admin** access token (`read:admin`). The only such token is
+    created out-of-band in Forgejo Phase 2b and stored in `secret/forgejo` —
+    but that KV secret is Terraform-managed (`vault_kv_secret_v2.forgejo`), so a
+    later apply clobbers the out-of-band key and breaks the mint. The CLI runs
+    as the server itself, so it has no token dependency and no clobber hazard.
 
-    ```bash
-    vault kv patch secret/forgejo automation_token=<forgejo-admin-token>
-    ```
-
-    Until then, `null_resource.forgejo_runner_token` logs an actionable message
-    and leaves the placeholder empty; the runner task refuses to register (with
-    the same message in its logs) rather than coming up half-configured. After
-    storing the token, re-run the dev-menu entry (or `tf-services apply`) and
-    restart the job.
+!!! note "First-boot dind race"
+    The runner task may restart a couple of times on first boot while the dind
+    sidecar's daemon finishes starting (`cannot ping the docker daemon`). This
+    self-heals — once dind is accepting connections the runner stays up and
+    `[poller] launched` appears in its logs.
 
 ## Rotating / re-registering
 
@@ -195,11 +193,14 @@ ssh labadmin@nomad03 "nomad alloc logs -job -task runner forgejo-runner"
 
 ### "No registration token in secret/forgejo-runner"
 
-The automation token is missing — see the Phase 2b note above. Verify:
+The token mint could not reach the forgejo job. Verify the forge is running and
+re-run the generator:
 
 ```bash
-vault kv get secret/forgejo          # expect an automation_token key
 vault kv get secret/forgejo-runner   # expect a non-empty registration_token
+# Regenerate manually if empty (same command the mint uses):
+ssh labadmin@nomad01 "nomad alloc exec -task forgejo -job forgejo \
+  su-exec git forgejo actions generate-runner-token"
 ```
 
 ### dind not reachable / jobs fail to start containers

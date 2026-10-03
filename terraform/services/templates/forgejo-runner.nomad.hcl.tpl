@@ -28,12 +28,14 @@
 #     stock dind entrypoint starts dockerd on tcp://0.0.0.0:2375 + the unix
 #     socket, so loopback :2375 reaches it from the host netns.)
 #
-# Registration (instance-level): a reusable registration token is minted from
-# the live instance by null_resource.forgejo_runner_token
-# (GET /api/v1/admin/actions/runners/registration-token, confirmed present in
-# Forgejo 16.0.5's swagger) and written to Vault at secret/forgejo-runner.
+# Registration (instance-level): a reusable registration token is minted by
+# null_resource.forgejo_runner_token, which runs Forgejo's own CLI
+# (`forgejo actions generate-runner-token`) via `nomad alloc exec` — no admin
+# API token needed — and writes it to Vault at secret/forgejo-runner.
 # Instance-level means ANY repo/org (including cifr-lab) can schedule jobs on
-# this runner — the sensible default for a single-tenant lab.
+# this runner — the sensible default for a single-tenant lab. NOTE: on first
+# boot the runner may restart a couple of times until the dind sidecar's
+# daemon is accepting connections; it self-heals and then stays up.
 # =============================================================================
 job "forgejo-runner" {
   datacenters = ["dc1"]
@@ -120,6 +122,10 @@ job "forgejo-runner" {
     # --- Forgejo Actions runner ---
     task "runner" {
       driver = "docker"
+      # Run as root: the runner image is "user-mode" (non-root) by default and
+      # cannot write its .runner config onto the NFS/CSI volume (root-owned, no
+      # squash — same as the postgres tasks, which also run as root on NFS).
+      user = "root"
 
       config {
         image        = "code.forgejo.org/forgejo/runner:13.1.0"
@@ -201,8 +207,11 @@ EOH
       }
 
       # Register once (idempotent via the persisted /data/.runner), then run
-      # the daemon. $${VAR} is terraform-escaped so it reaches the file as a
-      # literal shell variable reference.
+      # the daemon. Shell variable refs are triple-dollar-escaped in this .tpl
+      # so they survive BOTH layers (templatefile first, then Nomad jobspec
+      # parse) and reach the file as a literal shell variable reference the
+      # shell expands at runtime. (Nomad attr-dot interpolations elsewhere are
+      # single-escaped on purpose, because we WANT Nomad to resolve those.)
       template {
         data = <<EOH
 #!/bin/sh
@@ -210,20 +219,19 @@ set -e
 cd /data
 
 if [ ! -f /data/.runner ]; then
-  if [ -z "$${FORGEJO_RUNNER_REGISTRATION_TOKEN}" ]; then
+  if [ -z "$$${FORGEJO_RUNNER_REGISTRATION_TOKEN}" ]; then
     echo "[forgejo-runner] No registration token in secret/forgejo-runner."
-    echo "[forgejo-runner] Mint one (Phase 2b: create the Forgejo admin +"
-    echo "[forgejo-runner] automation token, then re-apply so"
-    echo "[forgejo-runner] null_resource.forgejo_runner_token can populate it),"
+    echo "[forgejo-runner] Re-apply so null_resource.forgejo_runner_token can"
+    echo "[forgejo-runner] generate one (forgejo actions generate-runner-token),"
     echo "[forgejo-runner] then restart this job. Exiting."
     exit 1
   fi
-  echo "[forgejo-runner] Registering against $${FORGEJO_INSTANCE_URL} ..."
+  echo "[forgejo-runner] Registering against $$${FORGEJO_INSTANCE_URL} ..."
   forgejo-runner register --no-interactive \
-    --instance "$${FORGEJO_INSTANCE_URL}" \
-    --token "$${FORGEJO_RUNNER_REGISTRATION_TOKEN}" \
-    --name "nomad-$${NOMAD_SHORT_ALLOC_ID:-forgejo-runner}" \
-    --labels "$${RUNNER_LABELS}"
+    --instance "$$${FORGEJO_INSTANCE_URL}" \
+    --token "$$${FORGEJO_RUNNER_REGISTRATION_TOKEN}" \
+    --name "nomad-$$${NOMAD_SHORT_ALLOC_ID:-forgejo-runner}" \
+    --labels "$$${RUNNER_LABELS}"
 fi
 
 echo "[forgejo-runner] Starting daemon ..."
