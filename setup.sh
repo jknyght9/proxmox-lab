@@ -1322,6 +1322,7 @@ function showMenu() {
     echo "  d16) Reconcile profile folders (force the periodic job to run now)"
     echo "  d17) Deploy Forgejo (Git hosting + Actions)"
     echo "  d18) Deploy Kaneo (project-management board)"
+    echo "  d19) Deploy Forgejo Actions runner (CI executor)"
   fi
   echo
 }
@@ -1342,7 +1343,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d18]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d19]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1383,6 +1384,7 @@ while true; do
     d16|D16) if [ "$DEV_MODE" = true ]; then reconcileProfileFolders;                                         else error "Invalid option"; fi;;
     d17|D17) if [ "$DEV_MODE" = true ]; then enableService "forgejo";                                          else error "Invalid option"; fi;;
     d18|D18) if [ "$DEV_MODE" = true ]; then enableService "kaneo";                                            else error "Invalid option"; fi;;
+    d19|D19) if [ "$DEV_MODE" = true ]; then enableService "forgejo_runner";                                     else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

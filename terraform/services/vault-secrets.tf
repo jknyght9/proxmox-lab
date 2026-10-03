@@ -324,6 +324,24 @@ resource "vault_kv_secret_v2" "kaneo_oidc" {
   }
 }
 
+# Placeholder for the Forgejo Actions runner registration token — populated at
+# deploy time by null_resource.forgejo_runner_token (which mints an
+# instance-level token from the live Forgejo API). Must exist before the runner
+# starts so its Vault policy/template don't block; ignore_changes keeps the
+# out-of-band value from being reverted to the empty placeholder on re-apply
+# (same pattern as the *-oidc placeholders above).
+resource "vault_kv_secret_v2" "forgejo_runner" {
+  count = var.deploy_forgejo_runner ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "forgejo-runner"
+  data_json = jsonencode({
+    registration_token = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
 resource "vault_kv_secret_v2" "unifi" {
   count = var.unifi_address != "" ? 1 : 0
   mount = vault_mount.secret.path

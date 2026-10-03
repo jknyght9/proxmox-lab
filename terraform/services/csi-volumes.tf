@@ -411,6 +411,39 @@ resource "nomad_csi_volume_registration" "kaneo_pg" {
   }
 }
 
+# --- forgejo-runner (registration + config state) ----------------------------
+# Single small dataset holding the runner's .runner registration file and its
+# rendered config. dind storage + CI cache/workdir deliberately live on
+# node-local ephemeral disk (overlayfs can't run on NFS), so only this tiny
+# durable state needs a CSI volume.
+resource "nomad_csi_volume_registration" "forgejo_runner_data" {
+  count = var.deploy_csi && var.deploy_forgejo_runner ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-runner-data"
+  name        = "forgejo-runner-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-runner"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-runner"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-runner"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.

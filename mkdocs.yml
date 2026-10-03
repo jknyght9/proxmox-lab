@@ -66,6 +66,7 @@ nav:
       - Kasm Workspaces: services/kasm.md
       - Netbox: services/netbox.md
       - Forgejo: services/forgejo.md
+      - Forgejo Actions Runner: services/forgejo-runner.md
       - Kaneo: services/kaneo.md
       - Uptime Kuma: services/uptime-kuma.md
       - versitygw (S3 state): services/versitygw.md

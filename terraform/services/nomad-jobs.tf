@@ -185,6 +185,117 @@ resource "nomad_job" "kaneo" {
   }
 }
 
+# Forgejo Actions runner registration-token mint.
+#
+# After the forgejo job is up, mint an INSTANCE-LEVEL registration token from
+# the live Forgejo API and write it to Vault at secret/forgejo-runner, where
+# the runner job reads it (via its Vault template) and registers once.
+#
+# Mirrors the authentik_apps / nas_share remote-exec pattern: SSH to nomad01
+# (which can reach git.<postfix> over the internal CA and the Vault API), then
+# curl both APIs. The bearer is the Forgejo automation token at
+# secret/forgejo.automation_token — created in the manual Phase 2b step
+# (docs/services/forgejo.md). If that token is absent, this logs a clear
+# message and leaves the placeholder empty (the runner job then refuses to
+# register with an actionable error) rather than failing the whole apply.
+resource "null_resource" "forgejo_runner_token" {
+  count = var.deploy_forgejo_runner ? 1 : 0
+  depends_on = [
+    nomad_job.forgejo,
+    vault_kv_secret_v2.forgejo_runner,
+  ]
+
+  triggers = {
+    # Re-mint on every apply. The instance registration token is stable until
+    # explicitly reset in Forgejo, so re-fetching simply re-writes the same
+    # value — cheap and keeps secret/forgejo-runner current.
+    always = timestamp()
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      set -e
+      FORGEJO_URL="https://git.${var.dns_postfix}"
+      VAULT_ADDR="${var.vault_address}"
+      VAULT_TOKEN="${var.vault_token}"
+
+      echo '[+] Reading Forgejo automation token from secret/forgejo...'
+      AUTO_TOKEN=$(curl -sk -H "X-Vault-Token: $VAULT_TOKEN" \
+        "$VAULT_ADDR/v1/secret/data/forgejo" \
+        | jq -r '.data.data.automation_token // ""')
+
+      if [ -z "$AUTO_TOKEN" ] || [ "$AUTO_TOKEN" = "null" ]; then
+        echo "[!] secret/forgejo has no 'automation_token' key."
+        echo "[!] Create the Forgejo admin user + an automation access token"
+        echo "[!] (Phase 2b, see docs/services/forgejo.md), store it at"
+        echo "[!] secret/forgejo automation_token=<tok>, then re-apply."
+        echo "[!] Leaving secret/forgejo-runner.registration_token empty for now."
+        exit 0
+      fi
+
+      echo '[+] Minting instance-level runner registration token...'
+      # Non-deprecated path in Forgejo 16.x (verified in the live swagger).
+      REG_TOKEN=$(curl -sk -H "Authorization: token $AUTO_TOKEN" \
+        "$FORGEJO_URL/api/v1/admin/actions/runners/registration-token" \
+        | jq -r '.token // ""')
+
+      if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
+        echo "[!] Registration-token mint returned nothing — is the automation"
+        echo "[!] token an ADMIN token? Falling back to the deprecated alias..."
+        REG_TOKEN=$(curl -sk -H "Authorization: token $AUTO_TOKEN" \
+          "$FORGEJO_URL/api/v1/admin/runners/registration-token" \
+          | jq -r '.token // ""')
+      fi
+
+      if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then
+        echo "[!] Could not mint a registration token. Check the automation"
+        echo "[!] token's admin scope. Leaving secret/forgejo-runner empty."
+        exit 0
+      fi
+
+      echo '[+] Writing registration token to secret/forgejo-runner...'
+      curl -sk -X POST -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
+        "$VAULT_ADDR/v1/secret/data/forgejo-runner" \
+        -d "{\"data\":{\"registration_token\":\"$REG_TOKEN\"}}" > /dev/null
+      echo '[+] Runner registration token stored at secret/forgejo-runner'
+      EOT
+    ]
+  }
+}
+
+resource "nomad_job" "forgejo_runner" {
+  count = var.deploy_forgejo_runner ? 1 : 0
+  depends_on = [
+    vault_policy.forgejo_runner,
+    vault_jwt_auth_backend_role.forgejo_runner,
+    vault_kv_secret_v2.forgejo_runner,
+    null_resource.nomad_vault_config,
+    null_resource.forgejo_runner_token,
+    nomad_csi_volume_registration.forgejo_runner_data,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/forgejo-runner.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls docker:28-dind + the runner image and registers against
+  # Forgejo. Default 5m create timeout is too tight; match the job's own 15m
+  # progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
 resource "nomad_job" "docs" {
   depends_on = [
     null_resource.nomad_vault_config,

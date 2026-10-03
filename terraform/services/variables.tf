@@ -169,6 +169,12 @@ variable "deploy_kaneo" {
   default     = false
 }
 
+variable "deploy_forgejo_runner" {
+  type        = bool
+  description = "Deploy the Forgejo Actions runner (CI executor, docker-in-docker) as a Layer-2 Nomad service. Requires deploy_forgejo."
+  default     = false
+}
+
 variable "deploy_csi" {
   type        = bool
   description = "Deploy the CSI plugin (csi-driver-nfs) that mounts NFS shares from the cluster_state NAS into Nomad jobs. Required before any service can be migrated off GlusterFS."
