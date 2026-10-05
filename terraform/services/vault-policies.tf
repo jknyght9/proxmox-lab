@@ -43,6 +43,24 @@ resource "vault_policy" "netbox" {
   policy = file("${path.module}/../../nomad/vault-policies/netbox.hcl")
 }
 
+resource "vault_policy" "forgejo" {
+  count  = var.deploy_forgejo ? 1 : 0
+  name   = "forgejo"
+  policy = file("${path.module}/../../nomad/vault-policies/forgejo.hcl")
+}
+
+resource "vault_policy" "kaneo" {
+  count  = var.deploy_kaneo ? 1 : 0
+  name   = "kaneo"
+  policy = file("${path.module}/../../nomad/vault-policies/kaneo.hcl")
+}
+
+resource "vault_policy" "forgejo_runner" {
+  count  = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
+  name   = "forgejo-runner"
+  policy = file("${path.module}/../../nomad/vault-policies/forgejo-runner.hcl")
+}
+
 resource "vault_policy" "netbox_sync" {
   count  = var.deploy_netbox && var.unifi_address != "" ? 1 : 0
   name   = "netbox-sync"

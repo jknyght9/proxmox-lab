@@ -34,6 +34,11 @@ network:
 
 dns_suffix: "mylab.lan"        # Domain suffix for all services
 
+# Internal service DNS records backend: "pihole" (default) or "unifi".
+#   "unifi" requires unifi_address + unifi_api_key (configured below) —
+#   that writer reconciles records against the UniFi controller.
+# dns_backend: "pihole"
+
 # Storage configuration:
 #   - Top half (templates, runtime, snippets, vztmpl, lxc) overrides
 #     Proxmox-side storage pool auto-detection.

@@ -175,11 +175,24 @@ function writeServicesTfvars() {
     echo "$val"
   }
 
+  # Preserve a list-valued tfvar (e.g. dns_backends = ["pihole","unifi"]) by
+  # reusing its bracketed literal verbatim; default when absent.
+  _preserve_list() {
+    local key="$1" default="$2" val=""
+    if [ -f "$SERVICES_TFVARS" ]; then
+      val=$(sed -n "s/^${key}[[:space:]]*=[[:space:]]*\\(\\[.*\\]\\).*/\\1/p" "$SERVICES_TFVARS" 2>/dev/null | head -1)
+    fi
+    [ -z "$val" ] && val="$default"
+    echo "$val"
+  }
+
   local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
   local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
-  local PREV_DEPLOY_UNIFI_DNS PREV_DEPLOY_PULSE
-  local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN
+  local PREV_DEPLOY_CSI PREV_DEPLOY_UNIFI_DNS PREV_DEPLOY_PULSE
+  local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
+  local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
+  local PREV_PULSE_PVE_HOST
   # deploy_traefik / deploy_dns_records default to true on first deploy
   # (Traefik is mandatory for the lab to work; DNS records are written
   # immediately so the cluster is reachable). After that, never let them
@@ -200,12 +213,27 @@ function writeServicesTfvars() {
   PREV_DEPLOY_CSI=$(_preserve_bool       "deploy_csi"         "true")
   PREV_DEPLOY_UNIFI_DNS=$(_preserve_bool "deploy_unifi_dns"   "false")
   PREV_DEPLOY_PULSE=$(_preserve_bool     "deploy_pulse"       "false")
+  PREV_DEPLOY_FORGEJO=$(_preserve_bool   "deploy_forgejo"     "false")
+  PREV_DEPLOY_KANEO=$(_preserve_bool     "deploy_kaneo"       "false")
+  PREV_DEPLOY_FORGEJO_RUNNER=$(_preserve_bool "deploy_forgejo_runner" "false")
   PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
   PREV_CFG_NETBOX=$(_preserve_bool       "configure_netbox"    "false")
   PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
   # Services-net Proxmox API endpoint Pulse uses to auto-add the cluster
   # (e.g. https://10.10.0.101:8006). Operator-set; preserved across regen.
   PREV_PULSE_PVE_HOST=$(_preserve_str    "pulse_pve_host"      "")
+  # dns_backends is list-valued; preserve verbatim or a regen drops it.
+  PREV_DNS_BACKENDS=$(_preserve_list     "dns_backends"        '["pihole"]')
+  # bootstrap.yml's dns_backend (pihole|unifi) is AUTHORITATIVE when set:
+  # it maps to the dns_backends HCL list. When absent/unrecognized, fall back to
+  # the preserved value / default above so re-runs don't clobber the choice.
+  local DNS_BACKEND_CHOICE DNS_BACKENDS_HCL
+  DNS_BACKEND_CHOICE=$(yq -r '.dns_backend // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' || true)
+  case "$DNS_BACKEND_CHOICE" in
+    pihole) DNS_BACKENDS_HCL='["pihole"]' ;;
+    unifi)  DNS_BACKENDS_HCL='["unifi"]' ;;
+    *)      DNS_BACKENDS_HCL="$PREV_DNS_BACKENDS" ;;
+  esac
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
@@ -270,9 +298,16 @@ deploy_backup      = ${PREV_DEPLOY_BACKUP}
 deploy_csi         = ${PREV_DEPLOY_CSI}
 deploy_unifi_dns   = ${PREV_DEPLOY_UNIFI_DNS}
 deploy_pulse       = ${PREV_DEPLOY_PULSE}
+deploy_forgejo     = ${PREV_DEPLOY_FORGEJO}
+deploy_kaneo       = ${PREV_DEPLOY_KANEO}
+deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
 
 # Services-net Proxmox endpoint Pulse auto-adds (empty = skip PVE auto-add)
 pulse_pve_host = "${PREV_PULSE_PVE_HOST}"
+
+# Which DNS backends receive the lab's local records (pihole and/or unifi).
+# Sourced from bootstrap.yml 'dns_backend' (pihole|unifi) when set.
+dns_backends       = ${DNS_BACKENDS_HCL}
 
 # Two-phase configure toggles
 configure_authentik = ${PREV_CFG_AUTH}

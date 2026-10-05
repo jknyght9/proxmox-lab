@@ -157,6 +157,24 @@ variable "deploy_netbox" {
   default     = false
 }
 
+variable "deploy_forgejo" {
+  type        = bool
+  description = "Deploy Forgejo (Git hosting + Actions) as a Layer-2 Nomad service"
+  default     = false
+}
+
+variable "deploy_kaneo" {
+  type        = bool
+  description = "Deploy Kaneo (project-management board) as a Layer-2 Nomad service"
+  default     = false
+}
+
+variable "deploy_forgejo_runner" {
+  type        = bool
+  description = "Deploy the Forgejo Actions runner (CI executor, docker-in-docker) as a Layer-2 Nomad service. Requires deploy_forgejo."
+  default     = false
+}
+
 variable "deploy_csi" {
   type        = bool
   description = "Deploy the CSI plugin (csi-driver-nfs) that mounts NFS shares from the cluster_state NAS into Nomad jobs. Required before any service can be migrated off GlusterFS."
@@ -413,5 +431,16 @@ variable "nas_storage" {
   default = {
     cluster_state = { nas = "" }
     snapshots     = {}
+  }
+}
+
+variable "dns_backends" {
+  type        = list(string)
+  description = "Which DNS backends receive the lab's local records: any of \"pihole\", \"unifi\". Pi-hole is written via pihole-FTL over SSH; UniFi via the static-dns API (run from nomad01). Use both to write records to each."
+  default     = ["pihole"]
+
+  validation {
+    condition     = length(var.dns_backends) > 0 && alltrue([for b in var.dns_backends : contains(["pihole", "unifi"], b)])
+    error_message = "dns_backends must be a non-empty subset of [\"pihole\", \"unifi\"]."
   }
 }

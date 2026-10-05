@@ -21,6 +21,8 @@ resource "null_resource" "authentik_apps" {
     deploy_netbox    = var.deploy_netbox
     deploy_unifi_dns = var.deploy_unifi_dns
     deploy_pulse     = var.deploy_pulse
+    deploy_forgejo   = var.deploy_forgejo
+    deploy_kaneo     = var.deploy_kaneo
   }
 
   connection {
@@ -247,6 +249,63 @@ resource "null_resource" "authentik_apps" {
       fi
       %{endif}
 
+      %{if var.deploy_forgejo}
+      echo '[+] Forgejo OIDC provider...'
+      # Forgejo uses native OIDC (OAuth2 "authentication source") — create an
+      # OAuth2 provider. Forgejo's client callback path is
+      # /user/oauth2/<AuthName>/callback; the auth source created post-deploy
+      # (Phase 2b) is named "authentik", hence the redirect below.
+      FORGEJO_PK=$(create_or_get "providers/oauth2" "name" "forgejo OIDC" \
+        "{\"name\":\"forgejo OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"forgejo\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://git.${var.dns_postfix}/user/oauth2/authentik/callback\"}]}")
+      create_or_get "core/applications" "slug" "forgejo" \
+        "{\"name\":\"Forgejo\",\"slug\":\"forgejo\",\"provider\":$FORGEJO_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://git.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/forgejo.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
+      # Store OIDC credentials in the placeholder Vault path (not managed by
+      # Terraform). Filter by the provider name created above ("forgejo OIDC").
+      FORGEJO_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+        "$API/providers/oauth2/" | jq -r --arg name "forgejo OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
+      if [ -n "$FORGEJO_OIDC_SECRET" ]; then
+        curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
+          "${var.vault_address}/v1/secret/data/forgejo-oidc" \
+          -d "{\"data\":{\"oidc_client_id\":\"forgejo\",\"oidc_client_secret\":\"$FORGEJO_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/forgejo/\"}}" > /dev/null
+        echo "    OIDC credentials stored at secret/forgejo-oidc"
+      else
+        echo "    [!] Forgejo OIDC client_secret not found — SSO will fail until secret/forgejo-oidc is populated"
+      fi
+      %{endif}
+
+      %{if var.deploy_kaneo}
+      echo '[+] Kaneo OIDC provider...'
+      # Kaneo uses a native custom-OIDC backend. Its callback path is fixed at
+      # /api/auth/oauth2/callback/custom (the "custom" provider slug). Kaneo
+      # links accounts by verified email only — there is NO group→role mapping,
+      # so workspace/project membership is granted manually in the Kaneo UI.
+      # Icon: homarr-labs/dashboard-icons has no kaneo icon, so we use the
+      # selfh.st icon set via jsDelivr (Authentik accepts meta_icon as a URL).
+      KANEO_ICON="https://cdn.jsdelivr.net/gh/selfhst/icons/svg/kaneo.svg"
+      KANEO_PK=$(create_or_get "providers/oauth2" "name" "kaneo OIDC" \
+        "{\"name\":\"kaneo OIDC\",\"authorization_flow\":\"$AUTHZ_FLOW\",\"invalidation_flow\":\"$INVAL_FLOW\",\"client_type\":\"confidential\",\"client_id\":\"kaneo\",\"signing_key\":\"$CERT_PK\",\"redirect_uris\":[{\"matching_mode\":\"strict\",\"url\":\"https://tasks.${var.dns_postfix}/api/auth/oauth2/callback/custom\"}]}")
+      create_or_get "core/applications" "slug" "kaneo" \
+        "{\"name\":\"Kaneo\",\"slug\":\"kaneo\",\"provider\":$KANEO_PK,\"group\":\"Admin\",\"meta_launch_url\":\"https://tasks.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$KANEO_ICON\",\"policy_engine_mode\":\"any\"}" > /dev/null
+      # create_or_get only creates when absent, so ensure the icon is set on an
+      # app that already exists (idempotent PATCH by slug).
+      curl -sk -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+        "$API/core/applications/kaneo/" -d "{\"meta_icon\":\"$KANEO_ICON\"}" > /dev/null
+
+      # Store OIDC credentials in the placeholder Vault path (not managed by
+      # Terraform). Filter by the provider name created above ("kaneo OIDC").
+      KANEO_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+        "$API/providers/oauth2/" | jq -r --arg name "kaneo OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
+      if [ -n "$KANEO_OIDC_SECRET" ]; then
+        curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
+          "${var.vault_address}/v1/secret/data/kaneo-oidc" \
+          -d "{\"data\":{\"oidc_client_id\":\"kaneo\",\"oidc_client_secret\":\"$KANEO_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/kaneo/\"}}" > /dev/null
+        echo "    OIDC credentials stored at secret/kaneo-oidc"
+      else
+        echo "    [!] Kaneo OIDC client_secret not found — SSO will fail until secret/kaneo-oidc is populated"
+      fi
+      %{endif}
+
       # --- Documentation (launch URL only — no auth, public access) ---
       echo '[+] Documentation...'
       create_or_get "core/applications" "slug" "docs" \
@@ -292,6 +351,22 @@ resource "null_resource" "authentik_apps" {
       else
         echo "    [!] No embedded proxy outpost found — create one in Authentik Admin"
       fi
+
+      # --- Create the "groups" OIDC scope mapping (codifies a live change) ---
+      # Authentik ships no groups scope mapping by default. Forgejo's OIDC auth
+      # source maps org/team membership from a "groups" claim, so we create a
+      # scope property-mapping that emits the user's Authentik group names. This
+      # was previously applied live via the API; creating it here (before the
+      # assignment loop below) makes it reproducible AND means the loop attaches
+      # it to every OAuth2 provider's property_mappings — forgejo included.
+      echo '[+] Ensuring "groups" OIDC scope mapping exists...'
+      GROUPS_MAPPING_PAYLOAD=$(jq -nc \
+        --arg name "groups" \
+        --arg scope "groups" \
+        --arg desc "Lab: emit the user's Authentik group names as a 'groups' claim (Forgejo/OIDC team mapping)" \
+        --arg expr 'return {"groups": [group.name for group in user.ak_groups.all()]}' \
+        '{name:$name, scope_name:$scope, description:$desc, expression:$expr}')
+      create_or_get "propertymappings/provider/scope" "name" "groups" "$GROUPS_MAPPING_PAYLOAD" > /dev/null
 
       # --- Assign scope mappings to all OAuth2 providers ---
       echo '[+] Assigning scope mappings to OAuth2 providers...'

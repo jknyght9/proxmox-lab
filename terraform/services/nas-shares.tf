@@ -37,6 +37,14 @@ locals {
     netbox-pg         = { recordsize = "16K", description = "Netbox PostgreSQL data" }
     netbox-data       = { recordsize = "128K", description = "Netbox media + reports + scripts" }
     netbox-redis      = { recordsize = "128K", description = "Netbox Redis AOF" }
+    forgejo-pg        = { recordsize = "16K", description = "Forgejo PostgreSQL data" }
+    forgejo-data      = { recordsize = "128K", description = "Forgejo repos + LFS + attachments + actions artifacts" }
+    kaneo-pg          = { recordsize = "16K", description = "Kaneo PostgreSQL data" }
+    # Forgejo Actions runner: only the registration file (.runner) + rendered
+    # config live here (small, rarely written). The dind data-root and CI
+    # cache/workdir stay on node-local ephemeral disk — NOT NFS — because
+    # overlayfs does not work on NFS. 128K is fine for the tiny state here.
+    forgejo-runner    = { recordsize = "128K", description = "Forgejo Actions runner registration + config" }
     # traefik intentionally omitted — Traefik mints its own TLS cert from
     # Vault PKI via a Nomad template stanza, no shared filesystem needed.
     # See terraform/services/templates/traefik.nomad.hcl.tpl.

@@ -2,6 +2,14 @@
 
 Pi-hole provides DNS resolution, ad-blocking, and local hostname records for all lab services. It runs as Proxmox LXC containers (one per Proxmox cluster node) and is managed by the `lxc-pihole` Terraform module.
 
+!!! note "Pi-hole is the default service-record backend, not the only one"
+    The backend that receives the lab's internal service records is operator-selectable
+    via `dns_backend` in `bootstrap.yml` (`pihole` (default) or `unifi`).
+    Choosing `unifi` writes those records to a UniFi controller instead of Pi-hole and
+    requires `unifi_address` + `unifi_api_key`. See
+    [DNS Record Backend](../getting-started/bootstrap.md#dns-record-backend). Pi-hole
+    LXCs still provide ad-blocking and upstream resolution regardless of this choice.
+
 ## Overview
 
 | Property | Value |
