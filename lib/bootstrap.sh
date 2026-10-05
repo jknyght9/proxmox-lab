@@ -85,20 +85,20 @@ function readBootstrapConfig() {
   fi
 
   # Soft guard: dns_backend selects which backend(s) receive service DNS
-  # records (pihole|unifi|both). Non-fatal — unset defaults to pihole.
+  # records (pihole|unifi). Non-fatal — unset defaults to pihole.
   local DNS_BACKEND_CHOICE
   DNS_BACKEND_CHOICE=$(yamlGet "dns_backend" | tr '[:upper:]' '[:lower:]')
   case "$DNS_BACKEND_CHOICE" in
     ""|pihole)
       : # default / Pi-hole only — nothing to warn about
       ;;
-    unifi|both)
+    unifi)
       if [ -z "$(yamlGet "unifi_address")" ]; then
         warn "dns_backend='$DNS_BACKEND_CHOICE' but unifi_address is unset — the UniFi DNS writer won't run without unifi_address + unifi_api_key."
       fi
       ;;
     *)
-      warn "dns_backend='$DNS_BACKEND_CHOICE' is invalid (use pihole|unifi|both) — defaulting to pihole."
+      warn "dns_backend='$DNS_BACKEND_CHOICE' is invalid (use pihole|unifi) — defaulting to pihole."
       ;;
   esac
 

@@ -4,9 +4,9 @@ Pi-hole provides DNS resolution, ad-blocking, and local hostname records for all
 
 !!! note "Pi-hole is the default service-record backend, not the only one"
     The backend that receives the lab's internal service records is operator-selectable
-    via `dns_backend` in `bootstrap.yml` (`pihole` (default), `unifi`, or `both`).
+    via `dns_backend` in `bootstrap.yml` (`pihole` (default) or `unifi`).
     Choosing `unifi` writes those records to a UniFi controller instead of Pi-hole and
-    requires `unifi_address` + `unifi_api_key`; `both` writes to both. See
+    requires `unifi_address` + `unifi_api_key`. See
     [DNS Record Backend](../getting-started/bootstrap.md#dns-record-backend). Pi-hole
     LXCs still provide ad-blocking and upstream resolution regardless of this choice.
 

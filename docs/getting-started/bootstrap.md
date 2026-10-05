@@ -46,19 +46,18 @@ The root password is only used during this bootstrap phase. All subsequent opera
 ### DNS Record Backend
 
 By default, the lab's internal service DNS records are written to Pi-hole. Set
-`dns_backend` to route them to a UniFi controller instead, or to both:
+`dns_backend` to route them to a UniFi controller instead:
 
 ```yaml
-dns_backend: "pihole"   # "pihole" (default), "unifi", or "both"
+dns_backend: "pihole"   # "pihole" (default) or "unifi"
 ```
 
 | Value | Records written to | Requires |
 |-------|--------------------|----------|
 | `pihole` (default) | Pi-hole | — |
 | `unifi` | UniFi controller | `unifi_address` + `unifi_api_key` |
-| `both` | Pi-hole **and** UniFi | `unifi_address` + `unifi_api_key` |
 
-The `unifi` and `both` options reconcile the full service record set against the
+The `unifi` option reconciles the full service record set against the
 UniFi controller, so they need `unifi_address` and `unifi_api_key` configured (see
 [UniFi Controller Integration](#unifi-controller-integration) below). If a UniFi
 backend is selected without `unifi_address`, bootstrap prints a non-fatal warning
@@ -157,7 +156,7 @@ unifi_site: "default"           # Site name (usually "default")
 ```
 
 Requires Netbox to be deployed (menu option 6). The same `unifi_address` /
-`unifi_api_key` also back the `unifi` and `both` options of
+`unifi_api_key` also back the `unifi` option of
 [`dns_backend`](#dns-record-backend), which write service DNS records to the
 UniFi controller.
 
