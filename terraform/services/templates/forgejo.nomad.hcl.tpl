@@ -169,6 +169,10 @@ FORGEJO__oauth2_client__ACCOUNT_LINKING=auto
 FORGEJO__oauth2_client__USERNAME=preferred_username
 FORGEJO__oauth2_client__UPDATE_AVATAR=true
 FORGEJO__actions__ENABLED=true
+# Allow webhooks to private/internal hosts. Forgejo blocks LAN/loopback webhook
+# targets by default; in this lab the webhook consumers (e.g. Kaneo at
+# tasks.${dns_postfix}) live on internal VIPs. "private" permits RFC1918 ranges.
+FORGEJO__webhook__ALLOWED_HOST_LIST=private
 # Distinct cookie names (per brief) so a shared parent domain can't collide
 FORGEJO__session__COOKIE_NAME=forgejo_session
 FORGEJO__security__CSRF_COOKIE_NAME=forgejo_csrf

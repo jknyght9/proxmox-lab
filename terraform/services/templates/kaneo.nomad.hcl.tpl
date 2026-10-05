@@ -140,6 +140,11 @@ EOH
       template {
         data = <<EOH
 KANEO_CLIENT_URL=https://tasks.${dns_postfix}
+# Allow Kaneo's integrations (e.g. the Gitea/Forgejo link + its webhook) to talk
+# to RFC1918/internal addresses. Kaneo's SSRF guard blocks private destinations
+# by default; in this self-hosted lab the forge (git.${dns_postfix}) resolves to
+# an internal VIP, so we opt in. Safe here: the whole lab is a trusted network.
+KANEO_ALLOW_PRIVATE_WEBHOOK_DESTINATIONS=true
 {{ with secret "secret/data/kaneo" }}
 DATABASE_URL=postgresql://kaneo:{{ .Data.data.postgres_password }}@127.0.0.1:5436/kaneo
 AUTH_SECRET={{ .Data.data.auth_secret }}
