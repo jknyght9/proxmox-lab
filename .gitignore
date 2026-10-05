@@ -37,3 +37,7 @@ terraform/vm-nomad/rendered/
 terraform/services/lab-*.tf
 terraform/services/lab-*.auto.tfvars
 terraform/services/lab-*.auto.tfvars.json
+
+# versitygw bootstrap secrets + object data
+bootstrap/versitygw/.env
+bootstrap/versitygw/data/

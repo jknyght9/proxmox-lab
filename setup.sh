@@ -619,9 +619,12 @@ function enableService() {
   # and netbox_api_token internally.
   refreshLayer2Configs || warn "Could not refresh Layer 2 tfvars — using existing values"
 
-  # Add or update the deploy toggle in tfvars
-  if grep -q "^${var_name}" "$tfvars"; then
-    sed -i.bak "s/^${var_name}.*/${var_name} = true/" "$tfvars"
+  # Add or update the deploy toggle in tfvars. Anchor the match on the "="
+  # boundary so a flag whose name is a prefix of another (e.g. deploy_forgejo
+  # vs deploy_forgejo_runner) does not match — an unanchored "^${var_name}"
+  # would rewrite both lines and corrupt the file.
+  if grep -qE "^${var_name}[[:space:]]*=" "$tfvars"; then
+    sed -i.bak -E "s/^${var_name}([[:space:]]*=).*/${var_name} = true/" "$tfvars"
     rm -f "$tfvars.bak"
   else
     echo "${var_name} = true" >> "$tfvars"
@@ -1320,6 +1323,9 @@ function showMenu() {
     echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
     echo "  d15) TrueNAS — purge existing AD join (reads nas_servers from bootstrap.yml)"
     echo "  d16) Reconcile profile folders (force the periodic job to run now)"
+    echo "  d17) Deploy Forgejo (Git hosting + Actions)"
+    echo "  d18) Deploy Kaneo (project-management board)"
+    echo "  d19) Deploy Forgejo Actions runner (CI executor)"
   fi
   echo
 }
@@ -1340,7 +1346,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d16]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d19]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1379,6 +1385,9 @@ while true; do
     d14|D14) if [ "$DEV_MODE" = true ]; then downloadRootCA;                                                  else error "Invalid option"; fi;;
     d15|D15) if [ "$DEV_MODE" = true ]; then truenasLeaveAD;                                                  else error "Invalid option"; fi;;
     d16|D16) if [ "$DEV_MODE" = true ]; then reconcileProfileFolders;                                         else error "Invalid option"; fi;;
+    d17|D17) if [ "$DEV_MODE" = true ]; then enableService "forgejo";                                          else error "Invalid option"; fi;;
+    d18|D18) if [ "$DEV_MODE" = true ]; then enableService "kaneo";                                            else error "Invalid option"; fi;;
+    d19|D19) if [ "$DEV_MODE" = true ]; then enableService "forgejo_runner";                                     else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

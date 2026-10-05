@@ -1,0 +1,24 @@
+# versitygw — S3-compatible gateway for OpenTofu/Terraform state + Packer.
+#
+# BOOTSTRAP service: deployed by hand (docker compose) on a Nomad VM host,
+# deliberately OUTSIDE Nomad and OUTSIDE the OpenTofu state it serves — a state
+# backend cannot be managed by the state it holds.
+#
+# Storage MUST be a LOCAL filesystem with xattrs + working advisory locks
+# (posix backend stores metadata in xattrs and implements conditional writes
+# with advisory lock files). NEVER back ./data with NFS/CSI: advisory locking
+# over NFS silently defeats the If-None-Match lock that state locking relies on.
+services:
+  s3:
+    image: versity/versitygw:v1.8.0
+    container_name: versitygw
+    restart: unless-stopped
+    command: ["--port", ":7070", "posix", "/data"]
+    environment:
+      ROOT_ACCESS_KEY_ID: ${ROOT_ACCESS_KEY_ID:?set in .env}
+      ROOT_SECRET_ACCESS_KEY: ${ROOT_SECRET_ACCESS_KEY:?set in .env}
+      # advisory lock files are what make If-None-Match enforceable — leave false.
+      VGW_DISABLE_OBJECT_LOCK_FILE: "false"
+    ports: ["7070:7070"]
+    volumes:
+      - ./data:/data   # local disk on this host (ext4/zfs) — never NFS

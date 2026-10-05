@@ -189,6 +189,7 @@ function writeServicesTfvars() {
   local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
   local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
+  local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
   # deploy_traefik / deploy_dns_records default to true on first deploy
   # (Traefik is mandatory for the lab to work; DNS records are written
@@ -203,6 +204,9 @@ function writeServicesTfvars() {
   PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
   PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
   PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
+  PREV_DEPLOY_FORGEJO=$(_preserve_bool   "deploy_forgejo"     "false")
+  PREV_DEPLOY_KANEO=$(_preserve_bool     "deploy_kaneo"       "false")
+  PREV_DEPLOY_FORGEJO_RUNNER=$(_preserve_bool "deploy_forgejo_runner" "false")
   PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
   PREV_CFG_NETBOX=$(_preserve_bool       "configure_netbox"    "false")
   PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
@@ -269,6 +273,9 @@ deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
 deploy_netbox      = ${PREV_DEPLOY_NETBOX}
 deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
 deploy_backup      = ${PREV_DEPLOY_BACKUP}
+deploy_forgejo     = ${PREV_DEPLOY_FORGEJO}
+deploy_kaneo       = ${PREV_DEPLOY_KANEO}
+deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
 
 # Which DNS backends receive the lab's local records (pihole and/or unifi).
 dns_backends       = ${PREV_DNS_BACKENDS}

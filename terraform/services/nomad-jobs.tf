@@ -136,6 +136,145 @@ resource "nomad_job" "netbox" {
   }
 }
 
+resource "nomad_job" "forgejo" {
+  count = var.deploy_forgejo ? 1 : 0
+  depends_on = [
+    vault_policy.forgejo,
+    vault_jwt_auth_backend_role.forgejo,
+    vault_kv_secret_v2.forgejo,
+    null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.forgejo_pg,
+    nomad_csi_volume_registration.forgejo_data,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/forgejo.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls postgres:17 + the forgejo image (~400MB) and runs the
+  # initial DB migrations. Default 5m create timeout is too tight; match the
+  # job's own 15m progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
+resource "nomad_job" "kaneo" {
+  count = var.deploy_kaneo ? 1 : 0
+  depends_on = [
+    vault_policy.kaneo,
+    vault_jwt_auth_backend_role.kaneo,
+    vault_kv_secret_v2.kaneo,
+    null_resource.nomad_vault_config,
+    nomad_csi_volume_registration.kaneo_pg,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/kaneo.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls postgres:16-alpine + the kaneo image and runs the initial
+  # DB migrations. Default 5m create timeout is too tight; match the job's own
+  # 15m progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
+# Forgejo Actions runner registration-token mint.
+#
+# Generate an INSTANCE-LEVEL registration token straight from Forgejo's own CLI
+# (`forgejo actions generate-runner-token`) via `nomad alloc exec`, and write it
+# to Vault at secret/forgejo-runner, where the runner job reads it (Vault
+# template) and registers once.
+#
+# Why the CLI and not the admin API: the API path needs a site-admin access
+# token (read:admin). The only admin token we have is created out-of-band in
+# the manual Phase 2b step and stored in secret/forgejo — but that KV secret is
+# Terraform-managed (vault_kv_secret_v2.forgejo), so a later apply CLOBBERS the
+# out-of-band key, breaking the mint. The CLI runs as the server itself (no
+# token), so it has no such dependency.
+#
+# Runs on nomad01, which has the nomad CLI pointed at the local agent. `nomad
+# alloc exec -job forgejo` finds the forgejo alloc on whatever node it runs
+# (no node pin assumed); `su-exec git` drops from root (Forgejo refuses root).
+# generate-runner-token is idempotent — it returns the current unused instance
+# token until one is consumed — so re-running on every apply is harmless.
+resource "null_resource" "forgejo_runner_token" {
+  count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
+  depends_on = [
+    nomad_job.forgejo,
+    vault_kv_secret_v2.forgejo_runner,
+  ]
+
+  triggers = {
+    always = timestamp()
+  }
+
+  connection {
+    type        = "ssh"
+    host        = local.nomad01_ip
+    user        = "labadmin"
+    private_key = file(var.ssh_admin_private_key_file)
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      <<-EOT
+      set -e
+      VAULT_ADDR="${var.vault_address}"
+      VAULT_TOKEN="${var.vault_token}"
+
+      echo '[+] Generating runner registration token via forgejo CLI...'
+      REG_TOKEN=$(nomad alloc exec -task forgejo -job forgejo \
+        su-exec git forgejo actions generate-runner-token 2>/dev/null | tr -d '[:space:]')
+
+      if [ -z "$REG_TOKEN" ]; then
+        echo "[!] Could not generate a registration token. Is the forgejo job"
+        echo "[!] running and reachable from the local Nomad agent? Leaving"
+        echo "[!] secret/forgejo-runner.registration_token unchanged."
+        exit 0
+      fi
+
+      echo '[+] Writing registration token to secret/forgejo-runner...'
+      curl -sk -X POST -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
+        "$VAULT_ADDR/v1/secret/data/forgejo-runner" \
+        -d "{\"data\":{\"registration_token\":\"$REG_TOKEN\"}}" > /dev/null
+      echo '[+] Runner registration token stored at secret/forgejo-runner'
+      EOT
+    ]
+  }
+}
+
+resource "nomad_job" "forgejo_runner" {
+  count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
+  depends_on = [
+    vault_policy.forgejo_runner,
+    vault_jwt_auth_backend_role.forgejo_runner,
+    vault_kv_secret_v2.forgejo_runner,
+    null_resource.nomad_vault_config,
+    null_resource.forgejo_runner_token,
+    nomad_csi_volume_registration.forgejo_runner_data,
+  ]
+
+  jobspec = templatefile("${path.module}/templates/forgejo-runner.nomad.hcl.tpl", {
+    dns_postfix = var.dns_postfix
+  })
+  detach = false
+
+  # First run pulls docker:28-dind + the runner image and registers against
+  # Forgejo. Default 5m create timeout is too tight; match the job's own 15m
+  # progress_deadline.
+  timeouts {
+    create = "20m"
+    update = "20m"
+  }
+}
+
 resource "nomad_job" "docs" {
   depends_on = [
     null_resource.nomad_vault_config,

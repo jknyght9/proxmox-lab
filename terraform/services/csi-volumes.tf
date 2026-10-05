@@ -323,6 +323,127 @@ resource "nomad_csi_volume_registration" "netbox_data" {
   }
 }
 
+# --- forgejo (Postgres + data) -----------------------------------------------
+resource "nomad_csi_volume_registration" "forgejo_pg" {
+  count = var.deploy_csi && var.deploy_forgejo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-pg-data"
+  name        = "forgejo-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-pg"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-pg"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-pg"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+resource "nomad_csi_volume_registration" "forgejo_data" {
+  count = var.deploy_csi && var.deploy_forgejo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-data-data"
+  name        = "forgejo-data-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-data"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-data"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-data"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+# --- kaneo (Postgres) --------------------------------------------------------
+# Single stateful dataset: the Kaneo Postgres sidecar. The kaneo app container
+# itself holds no on-disk state worth persisting (all data lives in Postgres).
+resource "nomad_csi_volume_registration" "kaneo_pg" {
+  count = var.deploy_csi && var.deploy_kaneo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "kaneo-pg-data"
+  name        = "kaneo-pg-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["kaneo-pg"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["kaneo-pg"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["kaneo-pg"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
+# --- forgejo-runner (registration + config state) ----------------------------
+# Single small dataset holding the runner's .runner registration file and its
+# rendered config. dind storage + CI cache/workdir deliberately live on
+# node-local ephemeral disk (overlayfs can't run on NFS), so only this tiny
+# durable state needs a CSI volume.
+resource "nomad_csi_volume_registration" "forgejo_runner_data" {
+  count = var.deploy_csi && var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
+
+  depends_on = [
+    nomad_job.csi_controller,
+    nomad_job.csi_node,
+    null_resource.nas_share,
+  ]
+
+  plugin_id   = "nfs"
+  volume_id   = "forgejo-runner-data"
+  name        = "forgejo-runner-data"
+  external_id = "${local.csi_server}#${local.csi_share_path["forgejo-runner"]}#"
+
+  capability {
+    access_mode     = "multi-node-multi-writer"
+    attachment_mode = "file-system"
+  }
+
+  parameters = { server = local.csi_server, share = local.csi_share_path["forgejo-runner"] }
+  context    = { server = local.csi_server, share = local.csi_share_path["forgejo-runner"] }
+
+  mount_options {
+    fs_type     = "nfs"
+    mount_flags = ["nfsvers=4.1", "hard"]
+  }
+}
+
 # --- docs (MkDocs build artifacts) -------------------------------------------
 # Read-only multi-node — any Nomad node can serve the docs from the same NFS
 # share. access_mode reflects that the consuming job mounts read_only.
