@@ -43,6 +43,28 @@ The root password is only used during this bootstrap phase. All subsequent opera
 
 ## Optional Settings
 
+### DNS Record Backend
+
+By default, the lab's internal service DNS records are written to Pi-hole. Set
+`dns_backend` to route them to a UniFi controller instead, or to both:
+
+```yaml
+dns_backend: "pihole"   # "pihole" (default), "unifi", or "both"
+```
+
+| Value | Records written to | Requires |
+|-------|--------------------|----------|
+| `pihole` (default) | Pi-hole | — |
+| `unifi` | UniFi controller | `unifi_address` + `unifi_api_key` |
+| `both` | Pi-hole **and** UniFi | `unifi_address` + `unifi_api_key` |
+
+The `unifi` and `both` options reconcile the full service record set against the
+UniFi controller, so they need `unifi_address` and `unifi_api_key` configured (see
+[UniFi Controller Integration](#unifi-controller-integration) below). If a UniFi
+backend is selected without `unifi_address`, bootstrap prints a non-fatal warning
+and the UniFi writer is skipped. Leave `dns_backend` commented out to keep the
+default Pi-hole behavior.
+
 ### High Availability VIPs
 
 HA uses keepalived VRRP to provide virtual IPs that float between nodes. When a node fails, the VIP moves to the next healthy node automatically.
@@ -134,7 +156,10 @@ unifi_api_key: "<api-key>"     # Settings > Control Plane > API Key (UniFi OS 4.
 unifi_site: "default"           # Site name (usually "default")
 ```
 
-Requires Netbox to be deployed (menu option 6).
+Requires Netbox to be deployed (menu option 6). The same `unifi_address` /
+`unifi_api_key` also back the `unifi` and `both` options of
+[`dns_backend`](#dns-record-backend), which write service DNS records to the
+UniFi controller.
 
 ## Generated Files
 

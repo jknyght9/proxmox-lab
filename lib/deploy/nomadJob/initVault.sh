@@ -212,6 +212,17 @@ function writeServicesTfvars() {
   PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
   # dns_backends is list-valued; preserve verbatim or a regen drops it.
   PREV_DNS_BACKENDS=$(_preserve_list     "dns_backends"        '["pihole"]')
+  # bootstrap.yml's dns_backend (pihole|unifi|both) is AUTHORITATIVE when set:
+  # it maps to the dns_backends HCL list. When absent/unrecognized, fall back to
+  # the preserved value / default above so re-runs don't clobber the choice.
+  local DNS_BACKEND_CHOICE DNS_BACKENDS_HCL
+  DNS_BACKEND_CHOICE=$(yq -r '.dns_backend // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' || true)
+  case "$DNS_BACKEND_CHOICE" in
+    pihole) DNS_BACKENDS_HCL='["pihole"]' ;;
+    unifi)  DNS_BACKENDS_HCL='["unifi"]' ;;
+    both)   DNS_BACKENDS_HCL='["pihole", "unifi"]' ;;
+    *)      DNS_BACKENDS_HCL="$PREV_DNS_BACKENDS" ;;
+  esac
 
   cat > "$SERVICES_TFVARS" <<EOF
 # =============================================================================
@@ -278,7 +289,8 @@ deploy_kaneo       = ${PREV_DEPLOY_KANEO}
 deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
 
 # Which DNS backends receive the lab's local records (pihole and/or unifi).
-dns_backends       = ${PREV_DNS_BACKENDS}
+# Sourced from bootstrap.yml 'dns_backend' (pihole|unifi|both) when set.
+dns_backends       = ${DNS_BACKENDS_HCL}
 
 # Two-phase configure toggles
 configure_authentik = ${PREV_CFG_AUTH}
