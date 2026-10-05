@@ -7,7 +7,7 @@
 # not live in the state it holds.
 #
 # Env:
-#   TRUENAS_ADDR     TrueNAS host/IP (e.g. 10.10.0.120)
+#   TRUENAS_ADDR     TrueNAS host/IP (e.g. 10.1.50.20)
 #   TRUENAS_API_KEY  TrueNAS API key
 #   VAULT_ADDR, VAULT_TOKEN   read root S3 keys from secret/versitygw
 #   API_PORT   S3 API port (default 7070)    APP_NAME (default versitygw)

@@ -32,7 +32,7 @@
 # null_resource.forgejo_runner_token, which runs Forgejo's own CLI
 # (`forgejo actions generate-runner-token`) via `nomad alloc exec` — no admin
 # API token needed — and writes it to Vault at secret/forgejo-runner.
-# Instance-level means ANY repo/org (including cifr-lab) can schedule jobs on
+# Instance-level means ANY repo/org on this instance can schedule jobs on
 # this runner — the sensible default for a single-tenant lab. NOTE: on first
 # boot the runner may restart a couple of times until the dind sidecar's
 # daemon is accepting connections; it self-heals and then stays up.
