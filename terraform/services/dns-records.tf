@@ -74,13 +74,19 @@ resource "null_resource" "pihole_dns_records" {
   triggers = {
     records_hash = sha256(jsonencode(local.dns_records))
     dns_server   = var.dns_server_ip
+    # Persisted so the destroy-time provisioner (self.* only) can still reach
+    # the host — destroy provisioners may not reference var.*.
+    ssh_key_file = var.ssh_admin_private_key_file
   }
 
+  # Uses self.triggers.* (not var.*) so the SAME connection block serves both
+  # the create and the destroy-time provisioner. self.triggers is already
+  # populated at create time, so this is safe for both.
   connection {
     type        = "ssh"
-    host        = var.dns_server_ip
+    host        = self.triggers.dns_server
     user        = "root"
-    private_key = file(var.ssh_admin_private_key_file)
+    private_key = file(self.triggers.ssh_key_file)
   }
 
   provisioner "remote-exec" {
@@ -91,6 +97,21 @@ resource "null_resource" "pihole_dns_records" {
       pihole-FTL --config dns.cnameRecords '[]'
       echo '[+] DNS records configured'
       EOT
+    ]
+  }
+
+  # Destroy-time prune: when the operator deselects the pihole backend, this
+  # resource's count drops to 0 and Terraform destroys it — firing this. The
+  # pihole writer owns dns.hosts wholesale (create REPLACES the whole array),
+  # so pruning is simply writing '[]' back. A backend that was NEVER selected
+  # never had this resource, so nothing runs for it (correct).
+  provisioner "remote-exec" {
+    when       = destroy
+    on_failure = continue # a retired/unreachable Pi-hole must not block the destroy
+    inline = [
+      "echo '[+] Pruning Pi-hole DNS records (backend deselected)...'",
+      "pihole-FTL --config dns.hosts '[]' || echo '[!] Pi-hole unreachable; skipping'",
+      "pihole-FTL --config dns.cnameRecords '[]' || true",
     ]
   }
 }
@@ -185,13 +206,25 @@ resource "null_resource" "unifi_dns_records" {
     records_hash = sha256(jsonencode(local.unifi_dns_records))
     controller   = var.unifi_address
     site         = var.unifi_site
+    # Persisted so the destroy-time provisioner (self.* only) can reach nomad01
+    # and talk to the controller — destroy provisioners may not reference var.*.
+    nomad01      = local.nomad01_ip
+    ssh_key_file = var.ssh_admin_private_key_file
+    unifi_address = var.unifi_address
+    unifi_site    = var.unifi_site
+    # The API key already lands in state via the create provisioner's inline
+    # interpolation below, so persisting it here is parity (not new exposure)
+    # and lets the scoped destroy prune authenticate.
+    unifi_api_key = var.unifi_api_key
   }
 
+  # Uses self.triggers.* (not var.*) so the SAME connection block serves both
+  # the create and the destroy-time provisioner.
   connection {
     type        = "ssh"
-    host        = local.nomad01_ip
+    host        = self.triggers.nomad01
     user        = "labadmin"
-    private_key = file(var.ssh_admin_private_key_file)
+    private_key = file(self.triggers.ssh_key_file)
   }
 
   provisioner "file" {
@@ -209,6 +242,39 @@ resource "null_resource" "unifi_dns_records" {
       "sudo mkdir -p /opt/unifi-dns-tf",
       "UNIFI_API_KEY='${var.unifi_api_key}' sudo -E bash /tmp/unifi-dns-reconcile.sh",
       "rm -f /tmp/unifi-dns-reconcile.sh",
+    ]
+  }
+
+  # Destroy-time SCOPED prune: when the operator deselects the unifi backend,
+  # count drops to 0 and Terraform destroys this resource — firing this. We
+  # only delete records this writer created, tracked in managed.json by the
+  # reconcile script. Self-contained inline bash (no templatefile at destroy).
+  # HCL-heredoc escaping: ${...} is TF interpolation (ONLY the three
+  # self.triggers refs); every shell/jq variable is brace-free ($VAR / $(...))
+  # so Terraform leaves it literal.
+  provisioner "remote-exec" {
+    when       = destroy
+    on_failure = continue
+    inline = [
+      <<-EOT
+      set -u
+      MANAGED=/opt/unifi-dns-tf/managed.json
+      if [ ! -f "$MANAGED" ]; then echo '[+] no managed UniFi records to prune'; exit 0; fi
+      BASE="https://${self.triggers.unifi_address}/proxy/network/v2/api/site/${self.triggers.unifi_site}/static-dns"
+      KEY='${self.triggers.unifi_api_key}'
+      exec 9>/var/lock/unifi-dns-tf.lock; flock -w 30 9 || { echo '[!] lock busy; skipping'; exit 0; }
+      existing="$(curl -sk -m 15 -H "X-API-KEY: $KEY" -H 'Accept: application/json' "$BASE" || echo '[]')"
+      echo '[+] Pruning UniFi DNS records (backend deselected)...'
+      jq -r '.[]' "$MANAGED" 2>/dev/null | while IFS='|' read -r k v; do
+        [ -z "$k" ] && continue
+        id="$(printf '%s' "$existing" | jq -r --arg k "$k" --arg v "$v" '.[] | select(.record_type=="A" and .key==$k and .value==$v) | ._id' | head -1)"
+        if [ -n "$id" ] && [ "$id" != "null" ]; then
+          curl -sk -m 15 -X DELETE -H "X-API-KEY: $KEY" "$BASE/$id" >/dev/null && echo "  - pruned $k -> $v"
+        fi
+      done
+      rm -f "$MANAGED"
+      echo '[+] UniFi DNS prune complete'
+      EOT
     ]
   }
 }
