@@ -417,7 +417,7 @@ resource "nomad_csi_volume_registration" "kaneo_pg" {
 # node-local ephemeral disk (overlayfs can't run on NFS), so only this tiny
 # durable state needs a CSI volume.
 resource "nomad_csi_volume_registration" "forgejo_runner_data" {
-  count = var.deploy_csi && var.deploy_forgejo_runner ? 1 : 0
+  count = var.deploy_csi && var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
 
   depends_on = [
     nomad_job.csi_controller,

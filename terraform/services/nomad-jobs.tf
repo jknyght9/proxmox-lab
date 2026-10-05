@@ -205,7 +205,7 @@ resource "nomad_job" "kaneo" {
 # generate-runner-token is idempotent — it returns the current unused instance
 # token until one is consumed — so re-running on every apply is harmless.
 resource "null_resource" "forgejo_runner_token" {
-  count = var.deploy_forgejo_runner ? 1 : 0
+  count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   depends_on = [
     nomad_job.forgejo,
     vault_kv_secret_v2.forgejo_runner,
@@ -251,7 +251,7 @@ resource "null_resource" "forgejo_runner_token" {
 }
 
 resource "nomad_job" "forgejo_runner" {
-  count = var.deploy_forgejo_runner ? 1 : 0
+  count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   depends_on = [
     vault_policy.forgejo_runner,
     vault_jwt_auth_backend_role.forgejo_runner,

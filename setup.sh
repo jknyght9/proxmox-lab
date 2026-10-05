@@ -619,9 +619,12 @@ function enableService() {
   # and netbox_api_token internally.
   refreshLayer2Configs || warn "Could not refresh Layer 2 tfvars — using existing values"
 
-  # Add or update the deploy toggle in tfvars
-  if grep -q "^${var_name}" "$tfvars"; then
-    sed -i.bak "s/^${var_name}.*/${var_name} = true/" "$tfvars"
+  # Add or update the deploy toggle in tfvars. Anchor the match on the "="
+  # boundary so a flag whose name is a prefix of another (e.g. deploy_forgejo
+  # vs deploy_forgejo_runner) does not match — an unanchored "^${var_name}"
+  # would rewrite both lines and corrupt the file.
+  if grep -qE "^${var_name}[[:space:]]*=" "$tfvars"; then
+    sed -i.bak -E "s/^${var_name}([[:space:]]*=).*/${var_name} = true/" "$tfvars"
     rm -f "$tfvars.bak"
   else
     echo "${var_name} = true" >> "$tfvars"

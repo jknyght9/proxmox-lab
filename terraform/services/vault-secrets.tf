@@ -380,7 +380,7 @@ resource "vault_kv_secret_v2" "kaneo_admin" {
 # out-of-band value from being reverted to the empty placeholder on re-apply
 # (same pattern as the *-oidc placeholders above).
 resource "vault_kv_secret_v2" "forgejo_runner" {
-  count = var.deploy_forgejo_runner ? 1 : 0
+  count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
   name  = "forgejo-runner"
   data_json = jsonencode({

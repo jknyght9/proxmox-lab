@@ -56,7 +56,7 @@ resource "vault_policy" "kaneo" {
 }
 
 resource "vault_policy" "forgejo_runner" {
-  count  = var.deploy_forgejo_runner ? 1 : 0
+  count  = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   name   = "forgejo-runner"
   policy = file("${path.module}/../../nomad/vault-policies/forgejo-runner.hcl")
 }

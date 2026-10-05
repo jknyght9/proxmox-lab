@@ -162,7 +162,7 @@ resource "vault_jwt_auth_backend_role" "kaneo" {
 }
 
 resource "vault_jwt_auth_backend_role" "forgejo_runner" {
-  count                   = var.deploy_forgejo_runner ? 1 : 0
+  count                   = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   backend                 = vault_jwt_auth_backend.nomad.path
   role_name               = "forgejo-runner"
   role_type               = "jwt"
