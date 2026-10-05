@@ -135,13 +135,97 @@ first successful deploy:
    (`https://git.<dns-suffix>/user/oauth2/authentik/callback`).
 
 2. **Create the admin user and an automation token**; store the token in Vault
-   at `secret/forgejo` for CI/API use.
+   at **`secret/forgejo-admin`** (NOT `secret/forgejo` — see below).
 3. **Create the org and repos** (`lab-templates`, `proxmox-lab`, `lab-services`)
    and import `lab-templates` history via Forgejo's migration (not a file copy).
-4. **Group → team mapping** so Authentik groups drive org/team membership.
+4. **Group → team mapping** so Authentik groups drive org/team membership (see
+   the AD group → team runbook below).
 
 See `docs/planning/pm-code-repo.md` for the full phased plan. The Forgejo
 Actions runner, Kaneo, and versitygw are separate pieces of that plan.
+
+## Admin automation token (`secret/forgejo-admin`)
+
+Forgejo's stable admin automation token (for API/CI use, e.g. the Kaneo↔Forgejo
+link) lives in Vault at **`secret/forgejo-admin`**, **not** `secret/forgejo`.
+
+!!! warning "Why not secret/forgejo"
+    `secret/forgejo` is `vault_kv_secret_v2.forgejo` — Terraform rewrites it to
+    exactly `{postgres_password, admin_password}` on **any** apply whose target
+    pulls in the `forgejo` job's dependency tree. Any out-of-band key added to
+    `secret/forgejo` (like an automation token) is silently wiped on the next
+    apply. `secret/forgejo-admin` (`vault_kv_secret_v2.forgejo_admin`) uses
+    `ignore_changes` so it is a durable, apply-safe home.
+
+| Key | Purpose |
+|-----|---------|
+| `admin_username` | The site-admin username (e.g. `siteadmin`) |
+| `automation_token` | Access token with `all` scopes, for API/CI |
+
+**(Re)create the token** (run inside the forgejo container, dropping to the
+`git` user — Forgejo refuses root):
+
+```bash
+# From nomad01 (local Nomad agent):
+nomad alloc exec -task forgejo -job forgejo su-exec git \
+  forgejo admin user generate-access-token \
+    --username siteadmin --scopes all --token-name automation-stable
+```
+
+Then store it in Vault:
+
+```bash
+vault kv put secret/forgejo-admin \
+  admin_username=siteadmin automation_token=<token>
+```
+
+## AD group → team access mapping
+
+!!! info "Site-specific — this is a runbook, not codified"
+    The group-team map is **runtime state on the OIDC auth source**, not
+    Terraform-managed — the concrete AD group names, org, and teams are
+    site-specific and live in the overlay. The steps below use placeholders
+    `<org>`, `<team>`, `<AD-Group>`, `<AdminGroup>`, and the auth source id `<N>`.
+
+**Prerequisites:**
+
+- Authentik's Samba-AD LDAP source is syncing AD groups into Authentik.
+- The `groups` OIDC scope mapping exists and is attached to the Forgejo OAuth2
+  provider — this is codified in `terraform/services/authentik-apps.tf` (it emits
+  each user's Authentik group names as a `groups` claim).
+- The Forgejo OIDC auth source named `authentik` exists (Phase 2b).
+
+**Steps** (run inside the forgejo container as `su-exec git`):
+
+1. **Enable the groups claim** on the auth source and designate the admin group:
+
+    ```bash
+    forgejo admin auth update-oauth --id <N> \
+      --scopes "openid profile email groups" \
+      --group-claim-name groups \
+      --admin-group "<AdminGroup>"
+    ```
+
+2. **Create the org teams** in the Forgejo UI (or API) so the map has targets.
+
+3. **Apply the group → team map** (reconciled on each user's next SSO login):
+
+    ```bash
+    forgejo admin auth update-oauth --id <N> \
+      --group-team-map '{"<AD-Group>": {"<org>": ["<team>"]}}' \
+      --group-team-map-removal
+    ```
+
+   The JSON shape is `{"<AD-Group>": {"<org>": ["<team>"]}}` — an AD group maps to
+   one or more teams within an org.
+
+!!! warning "Caveats"
+    - **Keep the `Owners` team OUT of the map.** With `--group-team-map-removal`,
+      a user missing from the mapped group is *removed* from the team on next
+      login — mapping Owners can lock you out of the org.
+    - Mapping is **reconciled on each user's next SSO login**, not immediately.
+    - The group-team map is **runtime state on the auth source**, not codified in
+      Terraform — re-apply it manually if the auth source is recreated.
 
 ## Troubleshooting
 

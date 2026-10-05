@@ -152,10 +152,16 @@ POSTGRES_USER=kaneo
 POSTGRES_DB=kaneo
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
-# Leave DISABLE_REGISTRATION false for the FIRST login so your OIDC account can
-# be created. Flip to true after onboarding (set DISABLE_REGISTRATION=true here
-# and redeploy) to lock the instance to existing/OIDC-linked accounts.
+# Access policy:
+#  - DISABLE_REGISTRATION stays false so lab personnel can self-onboard via SSO
+#    (OIDC registration is gated by DISABLE_REGISTRATION, NOT the password flag).
+#  - DISABLE_PASSWORD_REGISTRATION=true closes LOCAL signup (password/OTP/magic
+#    link/guest) now that onboarding is done — the instance accepts only SSO
+#    accounts plus the bootstrap admin. The initial administrator (kaneoadmin)
+#    can still be created via password signup (upstream-exempted), so a fresh
+#    deploy can still bootstrap the service account.
 DISABLE_REGISTRATION=false
+DISABLE_PASSWORD_REGISTRATION=true
 # Node trusts the internal CA via NODE_EXTRA_CA_CERTS (NOT SSL_CERT_FILE — Node
 # does not honour that variable).
 NODE_EXTRA_CA_CERTS=/local/certs/root_ca.crt

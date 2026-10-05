@@ -267,6 +267,12 @@ resource "vault_kv_secret_v2" "netbox_oidc" {
   }
 }
 
+# WARNING: this resource's data_json is fixed to {postgres_password, admin_password}
+# and is RESET to exactly those two keys on every apply whose target pulls in
+# nomad_job.forgejo's dependency tree. Do NOT store the admin automation token or
+# admin_username here — any out-of-band keys written to secret/forgejo get
+# clobbered on the next apply. The stable home for those is secret/forgejo-admin
+# (vault_kv_secret_v2.forgejo_admin below), which uses ignore_changes.
 resource "vault_kv_secret_v2" "forgejo" {
   count = var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
@@ -276,6 +282,26 @@ resource "vault_kv_secret_v2" "forgejo" {
     admin_password    = random_password.forgejo_admin[0].result
   })
   lifecycle { prevent_destroy = true }
+}
+
+# Stable home for the Forgejo admin automation token (created out-of-band in
+# Forgejo Phase 2b: `forgejo admin user generate-access-token ... --scopes all`).
+# It lives here — NOT in secret/forgejo — because secret/forgejo is rewritten to
+# its fixed {postgres_password, admin_password} on any apply that touches the
+# forgejo job's dep tree, which would wipe an automation token stored there.
+# ignore_changes keeps the out-of-band value from reverting to the empty
+# placeholder on re-apply. See docs/services/forgejo.md.
+resource "vault_kv_secret_v2" "forgejo_admin" {
+  count = var.deploy_forgejo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "forgejo-admin"
+  data_json = jsonencode({
+    admin_username   = ""
+    automation_token = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
 }
 
 # Placeholder for Forgejo OIDC — populated by authentik_apps after Authentik is
@@ -318,6 +344,29 @@ resource "vault_kv_secret_v2" "kaneo_oidc" {
     oidc_client_id     = ""
     oidc_client_secret = ""
     oidc_endpoint      = ""
+  })
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
+# Kaneo instance-admin service account. Populated out-of-band by
+# null_resource.kaneo_admin (not TF) — a separate path from secret/kaneo so apply
+# can't clobber it. Holds the dedicated kaneoadmin@<dns_postfix> automation
+# identity: its login creds, Kaneo user id, user-scoped API key (x-api-key), and
+# the Forgejo PAT used for Kaneo↔Forgejo (Gitea) integration. ignore_changes
+# keeps the out-of-band values from reverting to the empty placeholder on
+# re-apply. See docs/services/kaneo.md.
+resource "vault_kv_secret_v2" "kaneo_admin" {
+  count = var.deploy_kaneo ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "kaneo-admin"
+  data_json = jsonencode({
+    admin_email        = ""
+    admin_password     = ""
+    admin_user_id      = ""
+    api_key            = ""
+    forgejo_gitea_token = ""
   })
   lifecycle {
     ignore_changes = [data_json]
