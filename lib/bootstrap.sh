@@ -86,15 +86,18 @@ function readBootstrapConfig() {
 
   # Soft guard: dns_backend selects which backend(s) receive service DNS
   # records (pihole|unifi). Non-fatal — unset defaults to pihole.
+  # Normalize the same way writeServicesTfvars (initVault.sh) does — lowercase AND
+  # strip whitespace — so a stray-space typo (e.g. "unifi ") warns/applies consistently.
   local DNS_BACKEND_CHOICE
-  DNS_BACKEND_CHOICE=$(yamlGet "dns_backend" | tr '[:upper:]' '[:lower:]')
+  DNS_BACKEND_CHOICE=$(yamlGet "dns_backend" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
   case "$DNS_BACKEND_CHOICE" in
     ""|pihole)
       : # default / Pi-hole only — nothing to warn about
       ;;
     unifi)
-      if [ -z "$(yamlGet "unifi_address")" ]; then
-        warn "dns_backend='$DNS_BACKEND_CHOICE' but unifi_address is unset — the UniFi DNS writer won't run without unifi_address + unifi_api_key."
+      # The UniFi writer needs BOTH unifi_address and unifi_api_key to authenticate.
+      if [ -z "$(yamlGet "unifi_address")" ] || [ -z "$(yamlGet "unifi_api_key")" ]; then
+        warn "dns_backend='$DNS_BACKEND_CHOICE' but unifi_address and/or unifi_api_key is unset — the UniFi DNS writer won't run without both."
       fi
       ;;
     *)
