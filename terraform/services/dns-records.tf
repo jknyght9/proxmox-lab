@@ -27,7 +27,6 @@ locals {
       "${local.traefik_ip} vault vault.${var.dns_postfix}",
       "${local.traefik_ip} auth auth.${var.dns_postfix}",
       "${local.traefik_ip} traefik traefik.${var.dns_postfix}",
-      "${local.traefik_ip} status status.${var.dns_postfix}",
       "${local.traefik_ip} nomad nomad.${var.dns_postfix}",
       "${local.traefik_ip} pihole pihole.${var.dns_postfix}",
       "${local.traefik_ip} lam lam.${var.dns_postfix}",
@@ -47,6 +46,9 @@ locals {
 
     # Kaneo project-management board (behind Traefik) — only when deployed
     var.deploy_kaneo ? ["${local.traefik_ip} tasks tasks.${var.dns_postfix}"] : [],
+
+    # Uptime Kuma status page (behind Traefik) — only when deployed
+    var.deploy_uptime_kuma ? ["${local.traefik_ip} status status.${var.dns_postfix}"] : [],
 
     # Kasm (direct IP, not behind Traefik)
     var.kasm_ip != "" ? ["${var.kasm_ip} kasm kasm.${var.dns_postfix}"] : [],
