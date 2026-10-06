@@ -321,6 +321,7 @@ The `bootstrap_dns` variable specifies which DNS server containers use during in
 | 905-907 | Nomad cluster (nomad01-03) |
 | 910-912 | Main DNS cluster (dns-01, dns-02, dns-03) |
 | 930 | Kasm Workspaces |
+| 935 | Build runner (Forgejo Actions, `deploy_builder`) |
 | 9001 | Docker template (Packer, clones 9999) |
 | 9002 | Nomad template (Packer, clones 9999) |
 | 9997 | Debian 12 base template (Packer, manual build only — not used by deployAll) |

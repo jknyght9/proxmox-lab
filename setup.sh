@@ -802,6 +802,44 @@ function deployPulse() {
 }
 
 # -----------------------------------------------------------------------------
+# Build-runner VM (Layer 1): dedicated Forgejo Actions runner, label build-large
+# -----------------------------------------------------------------------------
+function deployBuilder() {
+  ensureBootstrapComplete || return 1
+
+  local l1_tfvars="$SCRIPT_DIR/terraform/terraform.tfvars"
+  if [ ! -f "$l1_tfvars" ]; then
+    error "tfvars not found. Run 'Deploy all' (option 1) first."
+    return 1
+  fi
+
+  # builder_vm_configs is emitted by generateTfvarsFromBootstrap. Don't
+  # regenerate here (a full regen can surface unrelated drift); ask instead.
+  if ! grep -q "^builder_vm_configs" "$l1_tfvars"; then
+    error "builder_vm_configs missing from terraform/terraform.tfvars."
+    info  "Re-run the generators (dev menu) or add a builder_vm_configs block by hand"
+    info  "(see docs/services/forgejo-runner.md#build-runner-vm), then retry."
+    return 1
+  fi
+
+  # Persist deploy_builder=true so a later full 'tf apply' keeps the VM.
+  if grep -q "^deploy_builder" "$l1_tfvars"; then
+    sed -i.bak "s/^deploy_builder.*/deploy_builder = true/" "$l1_tfvars"; rm -f "$l1_tfvars.bak"
+  else
+    echo "deploy_builder = true" >> "$l1_tfvars"
+  fi
+
+  # TARGETED: only the builder module (+ the Vault reads it needs), so the
+  # apply can't act on drift in unrelated Layer 1 resources.
+  doing "Deploying build-runner VM (Layer 1, targeted)..."
+  if ! tf apply -auto-approve -target=module.builder; then
+    error "Build-runner deploy failed."
+    return 1
+  fi
+  success "Build runner registered. Check Forgejo: Site Administration > Actions > Runners (label build-large)."
+}
+
+# -----------------------------------------------------------------------------
 # Main flow: deploy all services
 # -----------------------------------------------------------------------------
 function deployAll() {
@@ -1392,6 +1430,7 @@ function showMenu() {
     echo "  d18) Deploy Kaneo (project-management board)"
     echo "  d19) Deploy Forgejo Actions runner (CI executor)"
     echo "  d20) Deploy Pulse monitoring (Layer 1 mints RO PVE token → Vault, then Layer 2 job)"
+    echo "  d21) Deploy build-runner VM (Forgejo Actions, label build-large, host Docker)"
   fi
   echo
 }
@@ -1412,7 +1451,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d20]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d21]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1455,6 +1494,7 @@ while true; do
     d18|D18) if [ "$DEV_MODE" = true ]; then enableService "kaneo";                                            else error "Invalid option"; fi;;
     d19|D19) if [ "$DEV_MODE" = true ]; then enableService "forgejo_runner";                                     else error "Invalid option"; fi;;
     d20|D20) if [ "$DEV_MODE" = true ]; then deployPulse;                                                      else error "Invalid option"; fi;;
+    d21|D21) if [ "$DEV_MODE" = true ]; then deployBuilder;                                                    else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

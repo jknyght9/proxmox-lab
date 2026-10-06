@@ -10,23 +10,28 @@
 #              spawns the job containers. Running our own daemon (rather than
 #              bind-mounting the host's /var/run/docker.sock) keeps CI
 #              workloads isolated from the host's Nomad-managed containers.
+#              It listens ONLY on a unix socket in the shared alloc dir — no
+#              TCP listener (an unauthenticated API on a privileged daemon is
+#              root on the node for anyone who can reach it).
 #   - `runner` : the forgejo-runner itself. Registers once (idempotent — the
 #              `.runner` file is persisted on the NFS volume) then runs the
-#              daemon, talking to dind over loopback and to Forgejo over HTTPS.
+#              daemon, talking to dind over that socket and to Forgejo over
+#              HTTPS. Jobs here do NOT get Docker access; image builds go to
+#              the build-runner VM (Layer 1 deploy_builder, label build-large).
 #
 # Pinned to nomad03 (same node as forgejo/kaneo/netbox). Host networking is
 # used, so every static port must stay clear of the other services co-located
 # on nomad03 (netbox: http 8080, pg 5433, redis 6380, unit-status 8082;
 # forgejo: http 3000, ssh 2222, pg 5435; kaneo: http 5173, pg 5436). The dind
-# daemon listens on loopback :2375 (verified free on nomad03, 2026-10-03).
+# daemon has no port at all (unix socket at /alloc/data/docker.sock).
 #
 # Image pins (verified 2026-10-03):
 #   - code.forgejo.org/forgejo/runner:13.1.0  (current stable runner; v13.1.0
 #     released 2026-08-31. Both code.forgejo.org and data.forgejo.org publish
 #     it — we use code.forgejo.org per the integration brief.)
-#   - docker:28-dind  (current Docker stable; with DOCKER_TLS_CERTDIR="" the
-#     stock dind entrypoint starts dockerd on tcp://0.0.0.0:2375 + the unix
-#     socket, so loopback :2375 reaches it from the host netns.)
+#   - docker:28-dind  (current Docker stable). Its entrypoint only adds its
+#     default --host=tcp://0.0.0.0:2375 when the first arg is a flag; we pass
+#     an explicit `dockerd ...` command so no TCP listener is created.
 #
 # Registration (instance-level): a reusable registration token is minted by
 # null_resource.forgejo_runner_token, which runs Forgejo's own CLI
@@ -74,7 +79,6 @@ job "forgejo-runner" {
 
     network {
       mode = "host"
-      port "dind" { static = 2375 }
     }
 
     # Small, durable state only: the runner registration (`.runner`) + its
@@ -100,17 +104,16 @@ job "forgejo-runner" {
         image        = "docker:28-dind"
         network_mode = "host"
         privileged   = true
-        # Plain TCP on loopback only (host netns) — no TLS to keep the
-        # runner↔daemon hop simple. Not exposed off-box: 2375 binds to the
-        # host but the firewall/trust model keeps it on the cluster subnet,
-        # and nothing routes loopback. Store layers on node-local scratch.
-        args = ["--data-root=/alloc/data/docker"]
-      }
-
-      env {
-        # Empty cert dir disables TLS; stock dind entrypoint then serves
-        # dockerd on tcp://0.0.0.0:2375 + unix:///var/run/docker.sock.
-        DOCKER_TLS_CERTDIR = ""
+        # Explicit `dockerd` command: the entrypoint then adds NO default
+        # hosts, so the only listener is this unix socket in the alloc dir
+        # (shared with the runner task). Do not add a tcp:// host here — with
+        # network_mode=host it binds on every node address, unauthenticated.
+        # Store layers on node-local scratch.
+        args = [
+          "dockerd",
+          "--host=unix:///alloc/data/docker.sock",
+          "--data-root=/alloc/data/docker",
+        ]
       }
 
       resources {
@@ -167,14 +170,15 @@ FORGEJO_RUNNER_REGISTRATION_TOKEN={{ .Data.data.registration_token }}
 RUNNER_LABELS=docker:docker://node:20-bookworm,ubuntu-22.04:docker://node:20-bookworm,ubuntu-latest:docker://node:20-bookworm
 # The runner is Go — trust the internal CA for the HTTPS hop to Forgejo.
 SSL_CERT_FILE=/local/certs/root_ca.crt
-# Job containers that themselves call docker reach the dind daemon here.
-DOCKER_HOST=tcp://127.0.0.1:2375
+# The runner reaches the dind sidecar over its unix socket in the alloc dir.
+DOCKER_HOST=unix:///alloc/data/docker.sock
 EOH
         destination = "secrets/runner.env"
         env         = true
       }
 
-      # Runner config. docker_host points at the dind sidecar; cache + workdir
+      # Runner config. The runner talks to dind via DOCKER_HOST (env above);
+      # docker_host "-" means job containers get NO Docker access. Cache + workdir
       # live on node-local scratch (/alloc/data), never NFS. The `.runner`
       # registration file is kept on the NFS volume (/data) so a restart or
       # reschedule does not re-register a duplicate runner.
@@ -195,7 +199,7 @@ cache:
 container:
   network: ""
   privileged: false
-  docker_host: tcp://127.0.0.1:2375
+  docker_host: "-"
   valid_volumes: []
   force_pull: false
 host:
