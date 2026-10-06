@@ -79,6 +79,12 @@ variable "runner_capacity" {
   default     = 1
 }
 
+variable "runner_timeout" {
+  type        = string
+  description = "Max duration of one job on the build VM (heavy image builds, e.g. EMBA, run 3.5-4h)"
+  default     = "8h"
+}
+
 variable "runner_registration_token" {
   type        = string
   sensitive   = true

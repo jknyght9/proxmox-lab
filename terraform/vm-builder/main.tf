@@ -11,7 +11,7 @@ locals {
     runner = {
       file           = "/data/.runner"
       capacity       = var.runner_capacity
-      timeout        = "4h"
+      timeout        = var.runner_timeout
       fetch_timeout  = "5s"
       fetch_interval = "2s"
       # Labels live here (not only in .runner) so changing var.runner_labels
