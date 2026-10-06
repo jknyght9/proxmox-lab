@@ -44,10 +44,17 @@ resource "null_resource" "pulse_agent" {
   }
 
   provisioner "remote-exec" {
+    # Clean up via an EXIT trap, NOT a trailing `rm` — a trailing rm returns 0
+    # and masks a non-zero exit from the installer (e.g. an agent download
+    # failure), so a failed install would be reported as a successful apply.
+    # With `set -e` + trap, the failure propagates and fails the apply, while
+    # the temp file is still removed. (POSIX-safe: no `pipefail`, since
+    # remote-exec may run under dash.)
     inline = [
+      "set -e",
+      "trap 'rm -f /tmp/pulse-agent-install.sh' EXIT",
       "chmod +x /tmp/pulse-agent-install.sh",
       "sudo bash /tmp/pulse-agent-install.sh",
-      "rm -f /tmp/pulse-agent-install.sh",
     ]
   }
 }

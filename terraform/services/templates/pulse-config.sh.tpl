@@ -62,8 +62,12 @@ api() {
 # --- SSO provider (match by oidcClientId == "pulse") ---------------------------
 if [ -n "$OIDC_ISSUER" ]; then
   echo '[+] Reconciling Authentik OIDC SSO provider...'
+  # Pulse v6.4.5 requires the OIDC parameters NESTED under an "oidc" object; a
+  # flat payload returns 400 "OIDC configuration is required". Pulse echoes them
+  # back as flat oidc* fields on read, so the GET-match below still keys on
+  # oidcClientId=="pulse".
   SSO_BODY="$(jq -nc --arg iss "$OIDC_ISSUER" --arg cs "$OIDC_CLIENT_SECRET" \
-    '{name:"Authentik",type:"oidc",enabled:true,oidcIssuerUrl:$iss,oidcClientId:"pulse",oidcClientSecret:$cs,caBundle:"/local/certs/root_ca.crt",allowedGroups:[],allowedDomains:[],allowedEmails:[],priority:0}')"
+    '{name:"Authentik",type:"oidc",enabled:true,oidc:{issuerUrl:$iss,clientId:"pulse",clientSecret:$cs,caBundle:"/local/certs/root_ca.crt"}}')"
   SSO_ID="$(curl -s -m10 -b "$JAR" "$PULSE/api/security/sso/providers" \
     | jq -r '[.providers[]? | select(.oidcClientId=="pulse")][0].id // empty')"
   if [ -n "$SSO_ID" ]; then
@@ -82,8 +86,12 @@ fi
 # --- Proxmox cluster (match by host) -------------------------------------------
 if [ -n "$PVE_HOST" ]; then
   echo "[+] Reconciling Proxmox cluster ($PVE_HOST)..."
-  PVE_BODY="$(jq -nc --arg h "$PVE_HOST" --arg tn "$PVE_TID" --arg tv "$PVE_BARE" \
-    '{type:"pve",host:$h,tokenName:$tn,tokenValue:$tv,verifySSL:false,monitorVMs:true,monitorContainers:true,monitorStorage:true,monitorBackups:true,enabled:true}')"
+  # Pulse v6.4.5 requires a "name" on node create (else 400 "Name is required").
+  # Derive a stable, site-agnostic label from the DNS suffix (e.g. iotvf.lab ->
+  # iotvf-pve) rather than hardcoding a site value.
+  PVE_NAME="$(echo "${dns_postfix}" | cut -d. -f1)-pve"
+  PVE_BODY="$(jq -nc --arg h "$PVE_HOST" --arg n "$PVE_NAME" --arg tn "$PVE_TID" --arg tv "$PVE_BARE" \
+    '{type:"pve",name:$n,host:$h,tokenName:$tn,tokenValue:$tv,verifySSL:false,monitorVMs:true,monitorContainers:true,monitorStorage:true,monitorBackups:true,enabled:true}')"
   api POST "/api/config/nodes/test-connection" "$PVE_BODY" || true
   echo "    test-connection: $(jq -r '.message // ("nodeCount=" + (.nodeCount|tostring)) // "n/a"' "$RESP" 2>/dev/null || echo n/a)"
   PVE_ID="$(curl -s -m10 -b "$JAR" "$PULSE/api/config/nodes" \
