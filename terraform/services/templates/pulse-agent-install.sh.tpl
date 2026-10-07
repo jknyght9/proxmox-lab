@@ -9,7 +9,11 @@
 # Vault so re-runs don't mint duplicates. Each host gets its own token.
 #
 # templatefile vars interpolated by terraform: vault_address, vault_token, node,
-#   pulse_api (http://nomad01:7655, no TLS), pulse_url (https://pulse.<postfix>).
+#   pulse_api   (Pulse API base for token mint/login, e.g. http://nomad01:7655),
+#   pulse_url   (installer fetch + agent --url target),
+#   agent_flags (capability flags for the installer, e.g. "--enable-docker" for
+#     Docker hosts, "--enable-host" for bare PVE hosts),
+#   token_scopes (JSON array of Pulse token scopes for this agent).
 # Shell $vars / $(...) stay single; the curl write-out format is doubled (%%) so
 # templatefile emits a literal percent-brace.
 # =============================================================================
@@ -44,7 +48,7 @@ else
 
   MINT_CODE="$(curl -s -m10 -o "$RESP" -w '%%{http_code}' -b "$JAR" -H "X-CSRF-Token: $CSRF" \
     -H 'Content-Type: application/json' -X POST "$PULSE_API/api/security/tokens" \
-    -d "$(jq -nc --arg n "pulse-agent-$NODE" '{name:$n,scopes:["agent:report","docker:report"]}')")"
+    -d "$(jq -nc --arg n "pulse-agent-$NODE" --argjson s '${token_scopes}' '{name:$n,scopes:$s}')")"
   [ "$MINT_CODE" -ge 400 ] && { echo "[!] token mint HTTP $MINT_CODE"; cat "$RESP"; exit 1; }
   TOK="$(jq -r '.token // empty' "$RESP")"
   [ -n "$TOK" ] || { echo '[!] mint response had no .token field'; cat "$RESP"; exit 1; }
@@ -66,6 +70,6 @@ if ! curl -fsSL -m30 "$PULSE_URL/install.sh" -o "$INSTALLER"; then
 fi
 
 echo "[+] running agent installer on $NODE ..."
-bash "$INSTALLER" --url "$PULSE_URL" --token "$TOK" --enable-docker --non-interactive
+bash "$INSTALLER" --url "$PULSE_URL" --token "$TOK" ${agent_flags} --non-interactive
 rm -f "$INSTALLER"
 echo "[+] pulse agent install/refresh complete on $NODE"
