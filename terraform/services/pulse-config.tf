@@ -15,6 +15,18 @@
 # handled here.
 # =============================================================================
 
+# SSO access control + role mapping, derived from the site's group lists.
+# allowedGroups = the union (users outside these groups are denied); the role
+# map grants admin to admin-groups and viewer to viewer-groups. Both empty =>
+# "[]" / "{}" => no restriction and no elevation (safe default).
+locals {
+  pulse_sso_allowed_groups = concat(var.pulse_sso_admin_groups, var.pulse_sso_viewer_groups)
+  pulse_sso_group_roles = merge(
+    { for g in var.pulse_sso_admin_groups : g => "admin" },
+    { for g in var.pulse_sso_viewer_groups : g => "viewer" },
+  )
+}
+
 resource "null_resource" "pulse_config" {
   count = var.deploy_pulse ? 1 : 0
 
@@ -27,6 +39,8 @@ resource "null_resource" "pulse_config" {
   triggers = {
     pve_host    = var.pulse_pve_host
     dns_postfix = var.dns_postfix
+    # re-run when the SSO access/role config changes
+    sso_groups = jsonencode([local.pulse_sso_allowed_groups, local.pulse_sso_group_roles])
     # re-run when the reconcile script itself changes
     script = filesha256("${path.module}/templates/pulse-config.sh.tpl")
   }
@@ -40,10 +54,12 @@ resource "null_resource" "pulse_config" {
 
   provisioner "file" {
     content = templatefile("${path.module}/templates/pulse-config.sh.tpl", {
-      vault_address = var.vault_address
-      vault_token   = var.vault_token
-      pve_host      = var.pulse_pve_host
-      dns_postfix   = var.dns_postfix
+      vault_address       = var.vault_address
+      vault_token         = var.vault_token
+      pve_host            = var.pulse_pve_host
+      dns_postfix         = var.dns_postfix
+      allowed_groups_json = jsonencode(local.pulse_sso_allowed_groups)
+      group_role_map_json = jsonencode(local.pulse_sso_group_roles)
     })
     destination = "/tmp/pulse-config.sh"
   }

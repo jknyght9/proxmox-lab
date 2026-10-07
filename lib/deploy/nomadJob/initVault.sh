@@ -222,6 +222,10 @@ function writeServicesTfvars() {
   # Services-net Proxmox API endpoint Pulse uses to auto-add the cluster
   # (e.g. https://10.10.0.101:8006). Operator-set; preserved across regen.
   PREV_PULSE_PVE_HOST=$(_preserve_str    "pulse_pve_host"      "")
+  # Pulse SSO role mapping (list-valued, site-specific). Preserve verbatim or a
+  # regen drops the operator's admin/viewer group assignment.
+  PREV_PULSE_SSO_ADMIN_GROUPS=$(_preserve_list  "pulse_sso_admin_groups"  '[]')
+  PREV_PULSE_SSO_VIEWER_GROUPS=$(_preserve_list "pulse_sso_viewer_groups" '[]')
   # dns_backends is list-valued; preserve verbatim or a regen drops it.
   PREV_DNS_BACKENDS=$(_preserve_list     "dns_backends"        '["pihole"]')
   # bootstrap.yml's dns_backend (pihole|unifi) is AUTHORITATIVE when set:
@@ -304,6 +308,12 @@ deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
 
 # Services-net Proxmox endpoint Pulse auto-adds (empty = skip PVE auto-add)
 pulse_pve_host = "${PREV_PULSE_PVE_HOST}"
+
+# Pulse SSO role mapping — SSO groups granted admin / viewer (empty = no
+# restriction and no elevation). Union is the allowed-groups list, so users in
+# neither are denied.
+pulse_sso_admin_groups  = ${PREV_PULSE_SSO_ADMIN_GROUPS}
+pulse_sso_viewer_groups = ${PREV_PULSE_SSO_VIEWER_GROUPS}
 
 # Which DNS backends receive the lab's local records (pihole and/or unifi).
 # Sourced from bootstrap.yml 'dns_backend' (pihole|unifi) when set.

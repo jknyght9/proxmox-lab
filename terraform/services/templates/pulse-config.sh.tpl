@@ -10,8 +10,10 @@
 # new UUID, so a blind POST would duplicate on every apply).
 #
 # templatefile vars interpolated by terraform: vault_address, vault_token,
-#   pve_host, dns_postfix. Shell brace-expansions are written $${...}; plain
-#   $var and $(...) stay single.
+#   pve_host, dns_postfix, allowed_groups_json (JSON array of SSO groups allowed
+#   to log in; [] = no restriction), group_role_map_json (JSON object mapping SSO
+#   group -> Pulse role; {} = no role mapping). Shell brace-expansions are
+#   written $${...}; plain $var and $(...) stay single.
 # =============================================================================
 set -e
 
@@ -66,8 +68,21 @@ if [ -n "$OIDC_ISSUER" ]; then
   # flat payload returns 400 "OIDC configuration is required". Pulse echoes them
   # back as flat oidc* fields on read, so the GET-match below still keys on
   # oidcClientId=="pulse".
+  #
+  # Access control + RBAC (SSOProvider struct, verified against Pulse source):
+  #   allowedGroups / groupsClaim / groupRoleMappings are TOP-LEVEL fields;
+  #   scopes is nested under oidc. Pulse's default scopes are openid/profile/
+  #   email (NO groups), so without requesting "groups" the IdP never sends the
+  #   groups claim and no role mapping or group restriction can work — hence
+  #   scopes always includes "groups". allowedGroups/groupRoleMappings come from
+  #   the site's group lists (empty => no restriction / no elevation).
   SSO_BODY="$(jq -nc --arg iss "$OIDC_ISSUER" --arg cs "$OIDC_CLIENT_SECRET" \
-    '{name:"Authentik",type:"oidc",enabled:true,oidc:{issuerUrl:$iss,clientId:"pulse",clientSecret:$cs,caBundle:"/local/certs/root_ca.crt"}}')"
+    --argjson ag '${allowed_groups_json}' --argjson grm '${group_role_map_json}' \
+    '{name:"Authentik",type:"oidc",enabled:true,
+      allowedGroups:$ag,groupsClaim:"groups",groupRoleMappings:$grm,
+      oidc:{issuerUrl:$iss,clientId:"pulse",clientSecret:$cs,
+            caBundle:"/local/certs/root_ca.crt",
+            scopes:["openid","profile","email","groups"]}}')"
   SSO_ID="$(curl -s -m10 -b "$JAR" "$PULSE/api/security/sso/providers" \
     | jq -r '[.providers[]? | select(.oidcClientId=="pulse")][0].id // empty')"
   if [ -n "$SSO_ID" ]; then

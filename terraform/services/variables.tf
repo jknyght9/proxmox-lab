@@ -274,6 +274,28 @@ variable "pulse_pve_host" {
   EOT
 }
 
+# Pulse SSO role mapping. SITE-SPECIFIC group names belong in terraform.tfvars,
+# not here — these default empty so the tracked repo carries no site values and
+# the safe default is "no access restriction, no role elevation" (every
+# authenticated SSO user gets Pulse's built-in default role, as before).
+#
+# When set, pulse-config derives the Authentik OIDC provider's allowedGroups
+# (the UNION of both lists — so everyone NOT in one of these groups is denied)
+# and its groupRoleMappings (admin groups -> "admin", viewer groups ->
+# "viewer"). Requires the "groups" OIDC scope + claim, which pulse-config always
+# requests (Authentik emits group NAMES, so these must match exactly).
+variable "pulse_sso_admin_groups" {
+  type        = list(string)
+  default     = []
+  description = "SSO group names granted the Pulse 'admin' role. Site-specific; set in terraform.tfvars."
+}
+
+variable "pulse_sso_viewer_groups" {
+  type        = list(string)
+  default     = []
+  description = "SSO group names granted the Pulse 'viewer' role. Site-specific; set in terraform.tfvars."
+}
+
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
 # backup Nomad job was retired in Phase 2/3 of the storage migration;
 # ZFS snapshots on the cluster_state NAS handle the backup role now
