@@ -48,6 +48,17 @@ locals {
     # Kasm (direct IP, not behind Traefik)
     var.kasm_ip != "" ? ["${var.kasm_ip} kasm kasm.${var.dns_postfix}"] : [],
 
+    # Samba AD Domain Controllers — so LDAPS clients (e.g. Authentik's LDAP
+    # source) can resolve dcNN.<domain> and match it against the DC's cert.
+    # These names are ALSO served authoritatively by Samba's own AD DNS; the
+    # static A-records here just make them resolvable via the lab resolvers
+    # (Pi-hole/UniFi) without forwarding the whole realm zone to a DC. DC01 on
+    # nomad01; DC02 on nomad02 only when that node exists.
+    var.deploy_samba_ad ? concat(
+      ["${var.nomad_node_ips["nomad01"]} dc01 dc01.${var.dns_postfix}"],
+      contains(keys(var.nomad_node_ips), "nomad02") ? ["${var.nomad_node_ips["nomad02"]} dc02 dc02.${var.dns_postfix}"] : [],
+    ) : [],
+
     # Proxmox node records
     [for name, ip in var.proxmox_node_ips : "${ip} ${name} ${name}.${var.dns_postfix}"],
 
@@ -208,8 +219,8 @@ resource "null_resource" "unifi_dns_records" {
     site         = var.unifi_site
     # Persisted so the destroy-time provisioner (self.* only) can reach nomad01
     # and talk to the controller — destroy provisioners may not reference var.*.
-    nomad01      = local.nomad01_ip
-    ssh_key_file = var.ssh_admin_private_key_file
+    nomad01       = local.nomad01_ip
+    ssh_key_file  = var.ssh_admin_private_key_file
     unifi_address = var.unifi_address
     unifi_site    = var.unifi_site
     # The API key already lands in state via the create provisioner's inline
