@@ -374,8 +374,13 @@ resource "null_resource" "authentik_apps" {
       fi
 
       # Default LDAP + Active Directory source property mappings (managed names).
+      # AD set = the default-* and ms-* mappings (the openldap-* ones aren't part
+      # of the AD preset). Assigned to the NEW fields user_property_mappings /
+      # group_property_mappings (the base Source model renamed these; the old
+      # property_mappings/_group are read-only aliases and a PATCH to them is
+      # silently dropped).
       LDAP_MAPS=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/propertymappings/all/?page_size=200")
-      LDAP_USER_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") | startswith("goauthentik.io/sources/ldap/")) | .pk]')
+      LDAP_USER_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") | test("goauthentik.io/sources/ldap/(default-|ms-)")) | .pk]')
       LDAP_GROUP_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") == "goauthentik.io/sources/ldap/default-name") | .pk]')
 
       # Optional bind password (preserve the live one when absent in Vault).
@@ -388,7 +393,7 @@ resource "null_resource" "authentik_apps" {
         --arg bind "CN=authentik-sync,CN=Users,${local.ad_base_dn}" \
         --arg base "${local.ad_base_dn}" \
         --argjson um "$LDAP_USER_PKS" --argjson gm "$LDAP_GROUP_PKS" \
-        '{enabled:true,server_uri:$uri,start_tls:false,bind_cn:$bind,base_dn:$base,sync_users:true,sync_groups:true,object_uniqueness_field:"objectSid",group_membership_field:"member",property_mappings:$um,property_mappings_group:$gm}')
+        '{enabled:true,server_uri:$uri,start_tls:false,bind_cn:$bind,base_dn:$base,sync_users:true,sync_groups:true,object_uniqueness_field:"objectSid",group_membership_field:"member",user_property_mappings:$um,group_property_mappings:$gm}')
       [ -n "$SYNC_PW" ] && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg p "$SYNC_PW" '. + {bind_password:$p}')
       [ -n "$CA_PK" ]   && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg c "$CA_PK" '. + {peer_certificate:$c}')
       # Authentik source detail/PATCH endpoints are keyed by SLUG (lookup_field
