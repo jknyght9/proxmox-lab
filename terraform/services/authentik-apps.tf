@@ -391,8 +391,11 @@ resource "null_resource" "authentik_apps" {
         '{enabled:true,server_uri:$uri,start_tls:false,bind_cn:$bind,base_dn:$base,sync_users:true,sync_groups:true,object_uniqueness_field:"objectSid",group_membership_field:"member",property_mappings:$um,property_mappings_group:$gm}')
       [ -n "$SYNC_PW" ] && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg p "$SYNC_PW" '. + {bind_password:$p}')
       [ -n "$CA_PK" ]   && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg c "$CA_PK" '. + {peer_certificate:$c}')
-      curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X PATCH "$API/sources/ldap/$LDAP_PK/" -d "$LDAP_PATCH" > /dev/null
-      echo "    Samba AD source reconciled (pk=$LDAP_PK, user-maps=$(echo "$LDAP_USER_PKS" | jq 'length'), group-maps=$(echo "$LDAP_GROUP_PKS" | jq 'length'), ldaps://dc01.${var.dns_postfix})"
+      # Authentik source detail/PATCH endpoints are keyed by SLUG (lookup_field
+      # = slug), NOT pk — PATCHing by pk returns 404. create_or_get above still
+      # returns the pk, which we only use to confirm the source exists.
+      [ -n "$LDAP_PK" ] && curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X PATCH "$API/sources/ldap/samba-ad/" -d "$LDAP_PATCH" > /dev/null
+      echo "    Samba AD source reconciled (user-maps=$(echo "$LDAP_USER_PKS" | jq 'length'), group-maps=$(echo "$LDAP_GROUP_PKS" | jq 'length'), ldaps://dc01.${var.dns_postfix})"
       %{endif}
 
       # --- Configure Vault OIDC auth backend ---
