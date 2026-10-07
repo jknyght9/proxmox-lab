@@ -169,6 +169,14 @@ FORGEJO__oauth2_client__ACCOUNT_LINKING=auto
 FORGEJO__oauth2_client__USERNAME=preferred_username
 FORGEJO__oauth2_client__UPDATE_AVATAR=true
 FORGEJO__actions__ENABLED=true
+# Server-side wall-clock cap that CANCELS any still-running task, independent of
+# the runner's job timeout and the workflow's `timeout-minutes`. Default is 3h,
+# which is shorter than a cold-cache EMBA image build (~3.5-4h, ~2h44m of that
+# is EMBA's own installer), so the task was being killed at ~181m before it
+# could finish. Raised to 8h to match the build-runner job timeout.
+# (ZOMBIE_TASK_TIMEOUT, default 10m, is the separate "runner stopped reporting"
+# cap and intentionally left at its default.)
+FORGEJO__actions__ENDLESS_TASK_TIMEOUT=8h
 # Allow webhooks to private/internal hosts. Forgejo blocks LAN/loopback webhook
 # targets by default; in this lab the webhook consumers (e.g. Kaneo at
 # tasks.${dns_postfix}) live on internal VIPs. "private" permits RFC1918 ranges.
