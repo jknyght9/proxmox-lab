@@ -63,60 +63,22 @@ resource "null_resource" "pulse_agent" {
 }
 
 # =============================================================================
-# Pulse agents — Proxmox VE hosts
+# Pulse agents — Proxmox VE hosts: INTENTIONALLY A MANUAL STEP (not automated).
 #
-# The read-only PVE API token (pulse@pve, agentless) only exposes a limited
-# slice of node telemetry. The Pulse agent installed ON each PVE host reports
-# full host metrics (CPU/mem/disk/SMART/temps) directly; guests/storage/backups
-# still come from the API token, and Pulse merges both for the same node.
+# A Pulse agent installed on ONE Proxmox cluster member reports the whole
+# cluster with FULL data — it reads that node's LOCAL Proxmox API directly, so
+# no separate read-only API-token "source" is needed (and the remote token is
+# the "limited data" path we were trying to avoid). Adding the API source per
+# node AND/OR an agent per node fights Pulse's cluster model: it produces
+# duplicate/standalone nodes and breaks the Proxmox cluster view.
 #
-# Reaches the PVE hosts the same way netbox_proxmox_devices does: root over the
-# enterprise key at their mgmt IPs (var.proxmox_node_ips). Unlike the Nomad VMs
-# (which trust the internal CA), PVE hosts hit the root-CA-trust provisioning
-# gap, so this points the installer + agent at the INTERNAL http Pulse endpoint
-# (http://nomad01:7655, reachable from each PVE host on the lab net) — no TLS,
-# no CA dependency. Host metrics only (no Docker on PVE); per-host token cached
-# in Vault at secret/pulse-agents/<pveNN>, same idempotent reuse as above.
+# So PVE monitoring is a documented one-time manual step (like the TrueNAS
+# agent): in Pulse → Settings → Infrastructure, generate the "add agent"
+# command for one cluster node (a setup-token command) and run it on that host.
+# See docs/services/pulse.md. `pulse_pve_host` is left empty in terraform.tfvars
+# so pulse_config does NOT create a remote API source that would conflict.
+#
+# (A fully-automated, cluster-aware agent rollout via Pulse's cluster-endpoints
+# API is a possible future enhancement; the naive per-node automation was
+# removed because it broke the cluster view.)
 # =============================================================================
-resource "null_resource" "pulse_agent_pve" {
-  for_each = var.deploy_pulse ? var.proxmox_node_ips : {}
-
-  depends_on = [null_resource.pulse_config]
-
-  triggers = {
-    node   = each.key
-    script = filesha256("${path.module}/templates/pulse-agent-install.sh.tpl")
-  }
-
-  connection {
-    type        = "ssh"
-    host        = each.value
-    user        = "root"
-    private_key = file(var.ssh_enterprise_private_key_file)
-  }
-
-  provisioner "file" {
-    content = templatefile("${path.module}/templates/pulse-agent-install.sh.tpl", {
-      vault_address = var.vault_address
-      vault_token   = var.vault_token
-      node          = each.key
-      pulse_api     = "http://${local.nomad01_ip}:7655"
-      pulse_url     = "http://${local.nomad01_ip}:7655"
-      # Bare PVE host: full host metrics, no Docker.
-      agent_flags  = "--enable-host"
-      token_scopes = jsonencode(["agent:report"])
-    })
-    destination = "/tmp/pulse-agent-install.sh"
-  }
-
-  provisioner "remote-exec" {
-    # root on PVE; no sudo. set -e + EXIT-trap so an installer failure fails the
-    # apply instead of being masked by a trailing rm (see the Nomad resource).
-    inline = [
-      "set -e",
-      "trap 'rm -f /tmp/pulse-agent-install.sh' EXIT",
-      "chmod +x /tmp/pulse-agent-install.sh",
-      "bash /tmp/pulse-agent-install.sh",
-    ]
-  }
-}

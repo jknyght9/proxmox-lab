@@ -2,10 +2,30 @@
 
 [Pulse](https://github.com/rcourtman/pulse) is a monitoring dashboard for
 Proxmox VE, PBS, and TrueNAS — nodes, guests, storage, backups, and alerts.
-It is **agentless**: it polls the Proxmox API with a **read-only token**.
 
 Deployed as a single Nomad container behind Traefik, gated on `deploy_pulse`
 (default `false`).
+
+## Proxmox monitoring — recommended: one agent on a cluster node
+
+For a **Proxmox cluster**, install the **Pulse agent on a single cluster
+member** (e.g. `pve01`) and add **no** API-token source. That one agent reads
+its node's *local* Proxmox API and reports the **whole cluster** with full
+data (nodes, guests, storage, backups, plus host hardware — CPU/mem/disk/SMART/
+temps). This is both simpler and richer than the remote read-only API token,
+which exposes only a limited slice of node telemetry.
+
+Install it from **Settings → Infrastructure → add agent** (generates a
+setup-token install command) and run that command on the one node. Leave
+`pulse_pve_host = ""` so `pulse_config` does **not** also create a remote API
+source — mixing per-node API sources and/or per-node agents fights Pulse's
+cluster model (it produces duplicate/standalone nodes and breaks the cluster
+view). This step is intentionally **manual/operator-run**, like the TrueNAS
+agent below; it is not Terraform-automated.
+
+The read-only `pulse@pve` token minted by the infrastructure layer (below)
+remains available for the legacy agentless path, but the agent-on-one-node
+approach above is preferred.
 
 ## How it's wired
 
