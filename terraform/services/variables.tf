@@ -260,7 +260,7 @@ variable "deploy_pulse" {
 variable "pulse_image" {
   type        = string
   description = "Pulse container image ref"
-  default     = "rcourtman/pulse:v6.4.5"
+  default     = "rcourtman/pulse:v6.5.0"
 }
 
 variable "pulse_pve_host" {
