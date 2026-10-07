@@ -6,26 +6,42 @@ Proxmox VE, PBS, and TrueNAS — nodes, guests, storage, backups, and alerts.
 Deployed as a single Nomad container behind Traefik, gated on `deploy_pulse`
 (default `false`).
 
-## Proxmox monitoring — recommended: one agent on a cluster node
+## Proxmox cluster monitoring — agents, in order (no API source)
 
-For a **Proxmox cluster**, install the **Pulse agent on a single cluster
-member** (e.g. `pve01`) and add **no** API-token source. That one agent reads
-its node's *local* Proxmox API and reports the **whole cluster** with full
-data (nodes, guests, storage, backups, plus host hardware — CPU/mem/disk/SMART/
-temps). This is both simpler and richer than the remote read-only API token,
-which exposes only a limited slice of node telemetry.
+For a **Proxmox cluster**, use the Pulse **agent**, not a remote API-token
+source. The agent reads each node's *local* Proxmox API, giving the full
+cluster picture (nodes, guests, storage, backups) **plus** host hardware
+(CPU/mem/disk/SMART/temps) — richer than the read-only `pulse@pve` token, which
+exposes only a limited slice.
 
-Install it from **Settings → Infrastructure → add agent** (generates a
-setup-token install command) and run that command on the one node. Leave
-`pulse_pve_host = ""` so `pulse_config` does **not** also create a remote API
-source — mixing per-node API sources and/or per-node agents fights Pulse's
-cluster model (it produces duplicate/standalone nodes and breaks the cluster
-view). This step is intentionally **manual/operator-run**, like the TrueNAS
-agent below; it is not Terraform-automated.
+**Order matters** — do the first node, let the cluster register, then the rest:
+
+1. **pve01 first.** Settings → Infrastructure → add agent → run the generated
+   command on `pve01`. This registers the node and makes Pulse **detect the
+   cluster**.
+2. **Then each other node** (`pve02`, `pve03`, …). Use Pulse's **"install Linux
+   agent"** command per node, **each with its own unique token**. Now that the
+   cluster exists, the per-node agents attach to it cleanly.
+
+Pitfalls that cost a lot of debugging — do not:
+
+- install agents on all nodes **simultaneously** before the cluster is
+  registered (the later nodes have no source to attach to → "no PVE source …
+  cannot create one");
+- reuse one token across hosts (**each host needs a unique token**; a shared
+  one → "API token already in use by agent");
+- add a remote API-token **source** per node — leave `pulse_pve_host = ""` so
+  `pulse_config` creates none. Per-node API sources duplicate the cluster and
+  break the Proxmox tab.
+
+Agent tokens live at `/var/lib/pulse-agent/token` on each host. This is an
+operator-run step (like the TrueNAS agent below); it is **not**
+Terraform-automated, because Pulse mints the setup tokens through its UI/API in
+this specific sequence.
 
 The read-only `pulse@pve` token minted by the infrastructure layer (below)
-remains available for the legacy agentless path, but the agent-on-one-node
-approach above is preferred.
+remains for the legacy agentless path, but the agent approach above is
+preferred.
 
 ## How it's wired
 
