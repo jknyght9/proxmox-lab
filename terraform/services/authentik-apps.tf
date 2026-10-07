@@ -351,6 +351,50 @@ resource "null_resource" "authentik_apps" {
       done
       echo "    Scope mappings assigned to all OAuth2 providers"
 
+      %{if var.deploy_samba_ad}
+      # --- Samba AD LDAP source (import AD users/groups into Authentik) ---
+      # Codifies the hand-made source: LDAPS to dc01, base/bind DN derived from
+      # the realm, the default LDAP + Active Directory property mappings, and
+      # the lab root CA as the TLS verification cert so ldaps://dc01 validates
+      # once the DC serves its Vault-PKI cert (see null_resource.samba_ldaps_cert).
+      # create_or_get only creates; we always PATCH to converge an existing
+      # (manually-created) source to this config. The bind password is NEVER
+      # clobbered here — it is set ONLY if secret/samba-ad.authentik_sync_password
+      # exists, so the live working bind is preserved when that field is absent.
+      echo '[+] Reconciling Samba AD LDAP source...'
+
+      # Lab root CA -> cert-keypair (for LDAPS peer verification). Idempotent.
+      LAB_CA=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/pki/cert/ca" | jq -r '.data.certificate // empty')
+      CA_PK=""
+      if [ -n "$LAB_CA" ]; then
+        CA_PK=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/crypto/certificatekeypairs/" | jq -r '[.results[] | select(.name == "Lab Root CA")][0].pk // empty')
+        if [ -z "$CA_PK" ]; then
+          CA_PK=$(curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X POST "$API/crypto/certificatekeypairs/" -d "$(jq -nc --arg c "$LAB_CA" '{name:"Lab Root CA",certificate_data:$c}')" | jq -r '.pk // empty')
+        fi
+      fi
+
+      # Default LDAP + Active Directory source property mappings (managed names).
+      LDAP_MAPS=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/propertymappings/all/?page_size=200")
+      LDAP_USER_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") | startswith("goauthentik.io/sources/ldap/")) | .pk]')
+      LDAP_GROUP_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") == "goauthentik.io/sources/ldap/default-name") | .pk]')
+
+      # Optional bind password (preserve the live one when absent in Vault).
+      SYNC_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/secret/data/samba-ad" | jq -r '.data.data.authentik_sync_password // empty')
+
+      LDAP_PK=$(create_or_get "sources/ldap" "slug" "samba-ad" "$(jq -nc --arg uri "ldaps://dc01.${var.dns_postfix}" --arg bind "CN=authentik-sync,CN=Users,${local.ad_base_dn}" --arg base "${local.ad_base_dn}" '{name:"Samba AD",slug:"samba-ad",server_uri:$uri,bind_cn:$bind,base_dn:$base}')")
+
+      LDAP_PATCH=$(jq -nc \
+        --arg uri "ldaps://dc01.${var.dns_postfix}" \
+        --arg bind "CN=authentik-sync,CN=Users,${local.ad_base_dn}" \
+        --arg base "${local.ad_base_dn}" \
+        --argjson um "$LDAP_USER_PKS" --argjson gm "$LDAP_GROUP_PKS" \
+        '{enabled:true,server_uri:$uri,start_tls:false,bind_cn:$bind,base_dn:$base,sync_users:true,sync_groups:true,object_uniqueness_field:"objectSid",group_membership_field:"member",property_mappings:$um,property_mappings_group:$gm}')
+      [ -n "$SYNC_PW" ] && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg p "$SYNC_PW" '. + {bind_password:$p}')
+      [ -n "$CA_PK" ]   && LDAP_PATCH=$(echo "$LDAP_PATCH" | jq -c --arg c "$CA_PK" '. + {peer_certificate:$c}')
+      curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X PATCH "$API/sources/ldap/$LDAP_PK/" -d "$LDAP_PATCH" > /dev/null
+      echo "    Samba AD source reconciled (pk=$LDAP_PK, user-maps=$(echo "$LDAP_USER_PKS" | jq 'length'), group-maps=$(echo "$LDAP_GROUP_PKS" | jq 'length'), ldaps://dc01.${var.dns_postfix})"
+      %{endif}
+
       # --- Configure Vault OIDC auth backend ---
       echo '[+] Configuring Vault OIDC SSO...'
       VAULT_OIDC_SECRET=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/providers/oauth2/" | \
