@@ -157,7 +157,10 @@ EOH
 
       resources {
         cpu    = 500
-        memory = 1024
+        # Authentik 2026.x server spikes past 1 GiB (LDAP sync / task-backlog
+        # processing) and the kernel OOM-kills it at the task limit even with
+        # node memory free — it OOM-wedged the alloc 3x at 1024. 2 GiB.
+        memory = 2048
       }
 
       service {
@@ -240,7 +243,9 @@ EOH
 
       resources {
         cpu    = 300
-        memory = 1024
+        # Worker (dramatiq) also spikes under backlog; headroom so a flush
+        # doesn't OOM-wedge the alloc. 1.5 GiB.
+        memory = 1536
       }
     }
   }
