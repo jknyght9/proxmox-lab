@@ -192,7 +192,7 @@ function writeServicesTfvars() {
   local PREV_DEPLOY_CSI PREV_DEPLOY_UNIFI_DNS PREV_DEPLOY_PULSE
   local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
-  local PREV_PULSE_PVE_HOST
+  local PREV_PULSE_PVE_HOST PREV_SSO_ADMIN_GROUPS PREV_SSO_USER_GROUPS
   # deploy_traefik / deploy_dns_records default to true on first deploy
   # (Traefik is mandatory for the lab to work; DNS records are written
   # immediately so the cluster is reachable). After that, never let them
@@ -226,6 +226,11 @@ function writeServicesTfvars() {
   # regen drops the operator's admin/viewer group assignment.
   PREV_PULSE_SSO_ADMIN_GROUPS=$(_preserve_list  "pulse_sso_admin_groups"  '[]')
   PREV_PULSE_SSO_VIEWER_GROUPS=$(_preserve_list "pulse_sso_viewer_groups" '[]')
+  # Canonical SSO role groups (PR #10) used for Authentik app gating + per-app
+  # admin/user role mapping. Preserve a customized list so a regen doesn't reset
+  # a site to the Lab-Admins/Lab-Users defaults.
+  PREV_SSO_ADMIN_GROUPS=$(_preserve_list "sso_admin_groups" '["Lab-Admins"]')
+  PREV_SSO_USER_GROUPS=$(_preserve_list  "sso_user_groups"  '["Lab-Users"]')
   # dns_backends is list-valued; preserve verbatim or a regen drops it.
   PREV_DNS_BACKENDS=$(_preserve_list     "dns_backends"        '["pihole"]')
   # bootstrap.yml's dns_backend (pihole|unifi) is AUTHORITATIVE when set:
@@ -308,6 +313,12 @@ deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
 
 # Services-net Proxmox endpoint Pulse auto-adds (empty = skip PVE auto-add)
 pulse_pve_host = "${PREV_PULSE_PVE_HOST}"
+
+# SSO role groups (PR #10) — canonical lab groups used for Authentik app gating
+# and per-app admin/user role mapping (Netbox, Pulse, Forgejo, Kasm). Defaults
+# match the standard lab (Lab-Admins / Lab-Users).
+sso_admin_groups = ${PREV_SSO_ADMIN_GROUPS}
+sso_user_groups  = ${PREV_SSO_USER_GROUPS}
 
 # Pulse SSO role mapping — SSO groups granted admin / viewer (empty = no
 # restriction and no elevation). Union is the allowed-groups list, so users in
