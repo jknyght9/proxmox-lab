@@ -453,7 +453,13 @@ resource "null_resource" "authentik_apps" {
       # clobbered here — it is set ONLY if secret/samba-ad.authentik_sync_password
       # exists, so the live working bind is preserved when that field is absent.
       echo '[+] Reconciling Samba AD LDAP source...'
+      # This #7 reconcile hit a latent jq parse error on live data; keep it from
+      # aborting the whole script so the gating loop below still runs. The live
+      # LDAP source already works, so a failed re-assertion here is non-fatal.
+      # The [dbg] step markers pinpoint the failing jq in /tmp/authentik_apps.log.
+      set +e
 
+      echo '    [dbg] step=lab-ca'
       # Lab root CA -> cert-keypair (for LDAPS peer verification). Idempotent.
       LAB_CA=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/pki/cert/ca" | jq -r '.data.certificate // empty')
       CA_PK=""
@@ -470,13 +476,16 @@ resource "null_resource" "authentik_apps" {
       # group_property_mappings (the base Source model renamed these; the old
       # property_mappings/_group are read-only aliases and a PATCH to them is
       # silently dropped).
+      echo '    [dbg] step=ldap-maps'
       LDAP_MAPS=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/propertymappings/all/?page_size=200")
       LDAP_USER_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") | test("goauthentik.io/sources/ldap/(default-|ms-)")) | .pk]')
       LDAP_GROUP_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") == "goauthentik.io/sources/ldap/default-name") | .pk]')
 
       # Optional bind password (preserve the live one when absent in Vault).
+      echo '    [dbg] step=sync-pw'
       SYNC_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/secret/data/samba-ad" | jq -r '.data.data.authentik_sync_password // empty')
 
+      echo '    [dbg] step=source+patch'
       LDAP_PK=$(create_or_get "sources/ldap" "slug" "samba-ad" "$(jq -nc --arg uri "ldaps://dc01.${var.dns_postfix}" --arg bind "CN=authentik-sync,CN=Users,${local.ad_base_dn}" --arg base "${local.ad_base_dn}" '{name:"Samba AD",slug:"samba-ad",server_uri:$uri,bind_cn:$bind,base_dn:$base}')")
 
       LDAP_PATCH=$(jq -nc \
@@ -491,7 +500,9 @@ resource "null_resource" "authentik_apps" {
       # = slug), NOT pk — PATCHing by pk returns 404. create_or_get above still
       # returns the pk, which we only use to confirm the source exists.
       [ -n "$LDAP_PK" ] && curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X PATCH "$API/sources/ldap/samba-ad/" -d "$LDAP_PATCH" > /dev/null
-      echo "    Samba AD source reconciled (user-maps=$(echo "$LDAP_USER_PKS" | jq 'length'), group-maps=$(echo "$LDAP_GROUP_PKS" | jq 'length'), ldaps://dc01.${var.dns_postfix})"
+      echo "    Samba AD source reconciled (user-maps=$(echo "$LDAP_USER_PKS" | jq 'length' 2>/dev/null), group-maps=$(echo "$LDAP_GROUP_PKS" | jq 'length' 2>/dev/null), ldaps://dc01.${var.dns_postfix})"
+      # restore fail-fast for the remaining (vault-oidc + gating) sections
+      set -e
       %{endif}
 
       # --- Configure Vault OIDC auth backend ---
