@@ -45,6 +45,11 @@ resource "null_resource" "authentik_apps" {
     inline = [
       <<-EOT
       set -e
+      # Full output is captured to a nomad01-local log for diagnosis, because
+      # terraform suppresses this provisioner's stdout (it carries the sensitive
+      # API token). NO `set -x` here — that would echo the bearer token into the
+      # log. Read it after a failed apply: cat /tmp/authentik_apps.log on nomad01.
+      exec > /tmp/authentik_apps.log 2>&1
       API="https://${local.nomad01_ip}:9443/api/v3"
       TOKEN="${var.authentik_api_token}"
 
@@ -165,7 +170,7 @@ resource "null_resource" "authentik_apps" {
                 *) curl -sk -H "Authorization: Bearer $TOKEN" -X DELETE "$API/policies/bindings/$_bpk/" > /dev/null
                    echo "    - revoked stale group-binding on $_slug" ;;
               esac
-            done
+            done || true
       }
 
       # Get default flows
@@ -557,12 +562,16 @@ resource "null_resource" "authentik_apps" {
       # is gated here but its admin/user split lives in Kasm's LDAP config; Kaneo
       # links by verified email only, so its role is granted manually.
       echo '[+] Applying application access policies...'
+      # Best-effort convergence: don't let a single binding hiccup abort the
+      # whole (idempotent) script; gate_app logs each bind/revoke/skip line.
+      set +e
       for app in pihole traefik nomad vault lam unifi-dns unifi; do
         gate_app "$app" ${join(" ", var.sso_admin_groups)}
       done
       for app in netbox pulse forgejo kaneo kasm; do
         gate_app "$app" ${join(" ", var.sso_admin_groups)} ${join(" ", var.sso_user_groups)}
       done
+      set -e
 
       echo '[+] Authentik applications configured'
       EOT
