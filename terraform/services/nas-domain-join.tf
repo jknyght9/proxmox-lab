@@ -62,6 +62,14 @@ resource "null_resource" "nas_domain_join" {
       AD_REALM="${var.ad_realm}"
       AD_REALM_LOWER=$(echo "$AD_REALM" | tr '[:upper:]' '[:lower:]')
       DNS_IP="${var.dns_server_ip}"
+      # AD members MUST use the Samba DCs for DNS: the DCs authoritatively serve
+      # the _kerberos/_ldap/_msdcs SRV records kinit needs to locate the KDC.
+      # Pi-hole/UniFi do NOT serve or forward the AD zone (post UniFi-DNS
+      # migration), so pointing nas DNS at DNS_IP alone breaks TGT renewal and
+      # the directory service FAULTS (2026-10-09 incident). DC01=nomad01,
+      # DC02=nomad02 (empty on a single-node cluster); DNS_IP kept as fallback.
+      DC01_IP="${local.nomad01_ip}"
+      DC02_IP="${lookup(var.nomad_node_ips, "nomad02", "")}"
 
       # Stderr to a debug file so we can see what went wrong despite
       # terraform suppressing output (sensitive vars interpolated below).
@@ -211,11 +219,12 @@ resource "null_resource" "nas_domain_join" {
           exit 0
         fi
 
-        # Configure DNS to Pi-hole (required for AD SRV records)
-        echo "[+] Setting DNS to Pi-hole ($DNS_IP)..."
+        # Configure DNS to the Samba DCs (they serve the AD SRV records); keep
+        # DNS_IP as a non-AD fallback. See the DC01_IP/DC02_IP note above.
+        echo "[+] Setting DNS to Samba DCs (ns1=$DC01_IP ns2=$DC02_IP) fallback=$DNS_IP..."
         curl -sk -X PUT -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
           "$API/network/configuration" \
-          -d "{\"nameserver1\":\"$DNS_IP\",\"nameserver2\":\"\",\"nameserver3\":\"\"}" >/dev/null
+          -d "{\"nameserver1\":\"$DC01_IP\",\"nameserver2\":\"$DC02_IP\",\"nameserver3\":\"$DNS_IP\"}" >/dev/null
 
         # Ensure Kerberos realm exists
         echo "[+] Registering Kerberos realm..."
@@ -326,12 +335,12 @@ resource "null_resource" "nas_domain_join" {
           exit 0
         fi
 
-        # Configure DNS to Pi-hole (required for AD SRV record resolution)
-        echo "[+] Setting DNS to Pi-hole ($DNS_IP)..."
+        # Configure DNS to the Samba DC (serves AD SRV records). See note above.
+        echo "[+] Setting DNS to Samba DC ($DC01_IP)..."
         curl -sk -X POST "$API/entry.cgi" \
           -d "api=SYNO.Core.Network&version=1&method=set&_sid=$SID" \
           -d "dns_manual=true" \
-          -d "dns_primary=$DNS_IP" >/dev/null 2>&1 || echo "[!] DNS config may need manual setup"
+          -d "dns_primary=$DC01_IP" >/dev/null 2>&1 || echo "[!] DNS config may need manual setup"
 
         # Join AD domain (admin_name/admin_passwd = domain join credentials, not DSM creds)
         echo "[+] Joining AD domain $AD_REALM_LOWER..."
@@ -340,7 +349,7 @@ resource "null_resource" "nas_domain_join" {
           -d "domain_name=$AD_REALM_LOWER" \
           -d "admin_name=domain-join-svc" \
           -d "admin_passwd=$DOMAIN_JOIN_PW" \
-          -d "dns_server=$DNS_IP" \
+          -d "dns_server=$DC01_IP" \
           -d "enable=true" 2>/dev/null)
         JOIN_SUCCESS=$(echo "$JOIN_RESP" | jq -r '.success // false')
 
