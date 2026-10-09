@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/nomad"
       version = "~> 2.6.0"
     }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
     # NOTE: e-breuninger/netbox provider is added dynamically when
     # configure_netbox=true (see netbox-inventory.tf). The provider validates
     # its connection on init, so it can't be declared here before Netbox is running.

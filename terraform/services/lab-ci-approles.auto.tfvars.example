@@ -1,0 +1,30 @@
+# =============================================================================
+# lab-ci-approles.auto.tfvars — Forgejo-Actions CI identities (lab-extensions overlay)
+#
+# Copy to `lab-ci-approles.auto.tfvars` (gitignored) and fill in your infra-*
+# repos to enable the Vault CI AppRole pattern. Leaving this unset (no overlay)
+# means no CI AppRoles are created. See vault-ci-approle.tf for the full contract.
+#
+# Each entry mints: a per-repo Vault AppRole + least-privilege read policy + a
+# dedicated CI SSH keypair (secret/ci/<repo>/ssh). `secret_read_paths` are KV-v2
+# logical paths (WITHOUT the `secret/data/` prefix) that repo's Terragrunt needs,
+# IN ADDITION to the common set automatically granted to every entry:
+#   - tofu/state-encryption   (shared OpenTofu state-encryption passphrase)
+#   - versitygw               (shared versitygw S3 state-backend key)
+#   - ci/<repo>/ssh           (that repo's own dedicated CI key)
+# =============================================================================
+
+infra_ci_repos = {
+  # "infra-<name>" = {
+  #   secret_read_paths = [
+  #     "proxmox",                    # Proxmox CI token (operator-populated)
+  #     "samba-ad/service-accounts",  # AD domain-join service account
+  #     "nas/nas01",                  # TrueNAS API/creds
+  #     "unifi",                      # UniFi controller API key
+  #   ]
+  # }
+}
+
+# Optional — bind the AppRole secret_id + tokens to specific runner IPs instead
+# of the default services /24 (10.10.0.0/24):
+# infra_ci_bound_cidrs = ["10.10.0.11/32", "10.10.0.14/32"]
