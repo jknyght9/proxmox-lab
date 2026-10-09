@@ -130,7 +130,7 @@ resource "vault_policy" "infra_ci" {
 resource "vault_approle_auth_backend_role" "infra_ci" {
   for_each       = var.infra_ci_repos
   backend        = vault_auth_backend.approle[0].path
-  role_name      = each.key
+  role_name      = "${each.key}-ci"
   token_policies = [vault_policy.infra_ci[each.key].name]
 
   secret_id_num_uses    = 0
