@@ -20,7 +20,12 @@ locals {
     }
     cache = { enabled = false }
     container = {
-      network    = ""
+      # Host network for job containers: this is a dedicated, single-purpose
+      # build VM (jobs are already root-equivalent on it — see below), and the
+      # default bridge NAT adds ~3s per outbound call, which made IaC jobs
+      # (terragrunt/bpg Proxmox-API refresh — many serial calls per VM) crawl
+      # and trip the job deadline. Host net makes those calls direct (~0.03s).
+      network    = "host"
       privileged = false
       # Jobs get the VM's own Docker daemon at /var/run/docker.sock: they build
       # and push images with plain `docker`. This makes every job root-
