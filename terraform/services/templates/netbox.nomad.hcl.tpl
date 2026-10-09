@@ -267,7 +267,6 @@ def _apply_sso_roles(sender, request, user, **kwargs):
     # the bootstrap "admin" superuser.
     if not request.path.startswith("/oauth/"):
         return
-    from django.contrib.auth.models import Group
     try:
         groups = set(user.social_auth.get(provider="oidc").extra_data.get("groups") or [])
     except Exception:
@@ -282,9 +281,18 @@ def _apply_sso_roles(sender, request, user, **kwargs):
         if user.is_superuser:
             user.is_superuser = False
             user.save(update_fields=["is_superuser"])
-        ro, _ = Group.objects.get_or_create(name=NETBOX_SSO_READONLY_GROUP)
-        _ensure_readonly_objperm(ro)
-        user.groups.add(ro)
+        # Best-effort read-only grant. Use NetBox's Group model via the relation
+        # (NetBox 4.x moved User/Group out of django.contrib.auth; user.groups
+        # expects THAT class — mixing them raises "'Group' instance expected").
+        # Wrapped so a model-API change degrades a user to "no perms" (safe/empty)
+        # rather than 500-ing the SSO login.
+        try:
+            Group = user.groups.model
+            ro, _ = Group.objects.get_or_create(name=NETBOX_SSO_READONLY_GROUP)
+            _ensure_readonly_objperm(ro)
+            user.groups.add(ro)
+        except Exception:
+            pass
 
 # Display on login page
 SOCIAL_AUTH_BACKEND_ATTRS = {
