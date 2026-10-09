@@ -284,16 +284,38 @@ variable "pulse_pve_host" {
 # and its groupRoleMappings (admin groups -> "admin", viewer groups ->
 # "viewer"). Requires the "groups" OIDC scope + claim, which pulse-config always
 # requests (Authentik emits group NAMES, so these must match exactly).
+# --- SSO application role groups (canonical — one source of truth) -----------
+# The lab's two role groups, used across every SSO-integrated app. Admin-only
+# apps (Vault, Nomad, Traefik, Pi-hole, LAM, UniFi, UniFi DNS) bind ONLY
+# sso_admin_groups; shared apps (Netbox, Pulse, Forgejo, Kaneo, Kasm) bind both
+# groups and map admins -> admin / users -> basic role inside the app.
+#
+# These names MUST match the AD groups samba-ad-groups.tf creates and the
+# Authentik LDAP source imports — samba-ad-groups.tf seeds them from these same
+# variables so a fresh build is self-consistent. The names are generic role
+# labels (not site-specific), so they live in the repo rather than the overlay.
+variable "sso_admin_groups" {
+  type        = list(string)
+  default     = ["Lab-Admins"]
+  description = "SSO group names granted the ADMIN role in apps and allowed into admin-only apps."
+}
+
+variable "sso_user_groups" {
+  type        = list(string)
+  default     = ["Lab-Users"]
+  description = "SSO group names granted the basic/read-only USER role in shared apps."
+}
+
 variable "pulse_sso_admin_groups" {
   type        = list(string)
   default     = []
-  description = "SSO group names granted the Pulse 'admin' role. Site-specific; set in terraform.tfvars."
+  description = "Override: SSO groups granted the Pulse 'admin' role. Empty => fall back to sso_admin_groups."
 }
 
 variable "pulse_sso_viewer_groups" {
   type        = list(string)
   default     = []
-  description = "SSO group names granted the Pulse 'viewer' role. Site-specific; set in terraform.tfvars."
+  description = "Override: SSO groups granted the Pulse 'viewer' role. Empty => fall back to sso_user_groups."
 }
 
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit

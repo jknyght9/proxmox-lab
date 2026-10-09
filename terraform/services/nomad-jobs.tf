@@ -124,6 +124,9 @@ resource "nomad_job" "netbox" {
 
   jobspec = templatefile("${path.module}/templates/netbox.nomad.hcl.tpl", {
     dns_postfix = var.dns_postfix
+    # Python set literal of the AD groups that get NetBox admin (staff+superuser);
+    # everyone else who can reach NetBox gets the read-only object permission.
+    sso_admin_groups_py = "{${join(", ", [for g in var.sso_admin_groups : "\"${g}\""])}}"
   })
   detach = false
 
