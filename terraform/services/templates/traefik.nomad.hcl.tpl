@@ -41,6 +41,13 @@ job "traefik" {
           "--entrypoints.web.http.redirections.entryPoint.scheme=https",
           "--entrypoints.web.http.redirections.entryPoint.permanent=true",
           "--entrypoints.websecure.address=:443",
+          # Since Traefik v3.0, respondingTimeouts.readTimeout defaults to 60s
+          # and bounds the time to read a WHOLE request including its body, so
+          # any upload over ~60s is killed (observed: `docker push` of large
+          # container-registry layers to git.${dns_postfix} fails with 499 ~1
+          # min in). Raise to 2h to allow multi-GB image layer pushes while
+          # keeping some slowloris protection (0 would be unlimited).
+          "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=2h",
           "--entrypoints.traefik.address=:8081",
           "--providers.nomad=true",
           "--providers.nomad.endpoint.address=http://127.0.0.1:4646",

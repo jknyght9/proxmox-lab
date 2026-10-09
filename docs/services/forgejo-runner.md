@@ -13,7 +13,7 @@ it is **not** fronted by Traefik and has **no DNS record**.
 | **Nomad Job** | `forgejo-runner` (gated on `deploy_forgejo_runner`, default `false`) |
 | **Node** | Pinned to `nomad03` (same node as Forgejo) |
 | **Runner Image** | `code.forgejo.org/forgejo/runner:13.1.0` |
-| **DinD Image** | `docker:28-dind` (privileged, loopback TCP `:2375`) |
+| **DinD Image** | `docker:28-dind` (privileged, unix socket `/alloc/data/docker.sock`, no TCP) |
 | **Vault Role** | `forgejo-runner` (WIF) |
 | **Durable state** | CSI/NFS volume `forgejo-runner-data` (`.runner` + config only) |
 | **Scratch** | node-local `ephemeral_disk` (dind data-root, CI cache + workdir) |
@@ -33,10 +33,10 @@ it is **not** fronted by Traefik and has **no DNS record**.
 ┌──────────────────────── nomad03 (host netns) ────────────────────────┐
 │  forgejo-runner job                                                    │
 │                                                                        │
-│  ┌──────────────┐  tcp://127.0.0.1:2375   ┌────────────────────────┐  │
+│  ┌──────────────┐ unix:///alloc/data/     ┌────────────────────────┐  │
 │  │  runner task │ ───────────────────────▶│  dind task (sidecar)   │  │
-│  │ (poll+exec)  │                          │  docker:28-dind         │  │
-│  └──────┬───────┘                          │  privileged, no TLS     │  │
+│  │ (poll+exec)  │      docker.sock         │  docker:28-dind         │  │
+│  └──────┬───────┘                          │  privileged, no TCP     │  │
 │         │ HTTPS (internal CA)              │  data-root on /alloc    │  │
 │         ▼                                   └────────────┬───────────┘  │
 │  https://git.<postfix>  ◀───── outbound poll ──┘         ▼              │
@@ -50,17 +50,18 @@ The runner needs a Docker daemon to create job containers. We run our **own**
 dind daemon rather than bind-mounting the host's `/var/run/docker.sock`, so CI
 workloads are isolated from the host's Nomad-managed containers.
 
-- dind runs **privileged** with `DOCKER_TLS_CERTDIR=""`, so the stock
-  entrypoint serves `dockerd` on `tcp://0.0.0.0:2375` (plain) plus the unix
-  socket. Because the job uses host networking, the runner reaches it on
-  `tcp://127.0.0.1:2375` (loopback only — nothing routes it off-box).
+- dind runs **privileged** and listens **only** on the unix socket
+  `/alloc/data/docker.sock` (the alloc dir is shared by both tasks). The job
+  passes an explicit `dockerd --host=unix://...` command, because the stock
+  entrypoint otherwise adds `--host=tcp://0.0.0.0:2375`, and with host
+  networking that binds on every node address with no authentication, which
+  is root on the node for anyone on the subnet.
+- Job containers get **no** Docker access (`container.docker_host: "-"`).
+  Image builds run on the [build-runner VM](#build-runner-vm) instead.
 - dind's storage lives at `/alloc/data/docker` (node-local `ephemeral_disk`),
   **never** on NFS — overlayfs does not work on NFS. The trade-off: the image
   layer cache is lost if the alloc is rescheduled to a fresh client, and dind
   simply repopulates it.
-- **Port chosen:** `2375`, verified free on nomad03 (alongside 2376/2377) on
-  2026-10-03. The co-located services use 3000/2222/5435 (forgejo),
-  5173/5436 (kaneo), and 8080/5433/6380/8082 (netbox).
 
 ### CA trust
 
@@ -207,8 +208,10 @@ ssh labadmin@nomad01 "nomad alloc exec -task forgejo -job forgejo \
 
 ```bash
 ssh labadmin@nomad03 "nomad alloc logs -job -task dind forgejo-runner"
-# From the runner task, the daemon should answer on loopback:
-ssh labadmin@nomad03 "curl -s http://127.0.0.1:2375/_ping"   # -> OK
+# The daemon should answer on the alloc socket:
+nomad alloc exec -job -task dind forgejo-runner docker -H unix:///alloc/data/docker.sock info
+# And must NOT answer over TCP from anywhere:
+curl -s -m 3 http://<nomad03-ip>:2375/_ping || echo "closed (good)"
 ```
 
 ### Jobs can't resolve DNS or reach the internet
@@ -217,3 +220,57 @@ dind uses its own default bridge network for job containers. Confirm the dind
 daemon came up (`--data-root=/alloc/data/docker`) and that the node has egress.
 The runner's own HTTPS to Forgejo is validated against the internal root CA via
 `SSL_CERT_FILE=/local/certs/root_ca.crt`.
+
+## Build-runner VM
+
+Heavy image builds (e.g. Kasm workspace images, tens of GB) don't fit the
+Nomad runner's node-local scratch or memory, and need a Docker daemon the job
+can drive. They run on a **dedicated VM** (Layer 1, `deploy_builder`) that
+registers with the same instance-level token under the label `build-large`.
+
+| Property | Value |
+|----------|-------|
+| **Module** | `terraform/vm-builder` (clones the Docker template, VMID 9001) |
+| **Gate** | `deploy_builder` (Layer 1, default `false`); dev menu `d21` |
+| **Default sizing** | VMID 935, `BASE.21`, 8 vCPU, 16 GB, 200 GB (see `generateTfvarsFromBootstrap`) |
+| **Runner** | `code.forgejo.org/forgejo/runner:13.1.0` as a container on the host daemon |
+| **Label** | `build-large:docker://ghcr.io/catthehacker/ubuntu:act-24.04` (`builder_runner_labels`) |
+| **Capacity** | 1 job at a time |
+| **Job Docker access** | host socket automounted at `/var/run/docker.sock` |
+| **CA trust** | Vault `pki/cert/ca` installed system-wide (also covers `docker push`) and bind-mounted into jobs (`GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`) |
+| **Disk hygiene** | nightly `docker image prune` + `builder prune` (older than 72h) |
+
+!!! warning "Trust model"
+    Every job on `build-large` is root-equivalent **on the build VM** (it
+    holds the host Docker socket). That is the reason it is a separate VM:
+    nothing else runs there. The registration is instance-level, so any repo
+    on the forge can target the label. Keep the VM free of credentials beyond
+    what jobs are given as Actions secrets.
+
+Workflows target it with `runs-on: build-large` and can call `docker build` /
+`docker push` directly. The job containers resolve internal names via the
+VM's DNS (the gateway), but external actions (`uses: actions/checkout@v4`)
+may not be fetchable; clone with `git` and an Actions token instead.
+
+### Deploy
+
+Requires Vault, `deploy_forgejo` and the services-layer `forgejo-runner`
+(which mints `secret/forgejo-runner`). `builder_vm_configs` is written by the
+tfvars generator; on an older tfvars add it by hand:
+
+```hcl
+deploy_builder = true
+builder_vm_configs = {
+  "builder01" = { vm_id = 935, name = "builder01", ip = "10.1.50.21", cores = 8, memory = 16384, disk_size = "200G", vm_state = "running", target_node = "pve02", target_storage = "local-lvm" }}
+```
+
+```bash
+./setup.sh --dev    # d21, which runs:
+docker compose run --rm terraform apply -target=module.builder
+```
+
+The apply registers the runner once (`/var/lib/forgejo-runner/.runner` on the
+VM) and (re)creates the `forgejo-runner` container whenever the image, config
+or CA changes. Labels come from the config file, so changing
+`builder_runner_labels` needs no re-registration.
+

@@ -18,6 +18,7 @@ proxmox-lab-root-ca.crt
 terraform/lxc-step-ca/step-ca/
 terraform/vm-kasm/rendered/
 terraform/vm-nomad/rendered/
+terraform/vm-builder/rendered/
 **/.config
 **/archive
 **/dev

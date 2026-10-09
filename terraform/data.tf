@@ -36,3 +36,17 @@ data "vault_kv_secret_v2" "kasm" {
   mount = "secret"
   name  = "kasm"
 }
+
+# Build-runner VM: the instance-level runner registration token (minted by the
+# services layer into secret/forgejo-runner) and the internal root CA, so the
+# VM's Docker daemon, runner and job containers trust git.<postfix>.
+data "vault_kv_secret_v2" "forgejo_runner" {
+  count = local.vault_configured && var.deploy_builder ? 1 : 0
+  mount = "secret"
+  name  = "forgejo-runner"
+}
+
+data "vault_generic_secret" "pki_root_ca" {
+  count = local.vault_configured && var.deploy_builder ? 1 : 0
+  path  = "pki/cert/ca"
+}

@@ -151,6 +151,35 @@ module "kasm" {
   ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
 }
 
+# =============================================================================
+# Build runner (Forgejo Actions, heavy image builds; cloned from Docker template)
+# =============================================================================
+
+module "builder" {
+  count  = var.deploy_builder ? 1 : 0
+  source = "./vm-builder"
+
+  dns_postfix       = var.dns_postfix
+  proxmox_endpoint  = var.proxmox_endpoint
+  proxmox_bridge    = var.network_interface_bridge
+  node_ip_map       = local.node_ip_map
+  vm_storage        = var.vm_storage
+  template_node     = var.proxmox_target_node
+  network_gateway   = var.network_gateway_address
+  network_cidr_bits = split("/", var.dns_main_nodes[0].ip)[1]
+  vm_configs        = var.builder_vm_configs
+  runner_labels     = var.builder_runner_labels
+
+  # Both empty until Vault + the services-layer forgejo-runner exist; the
+  # module's runner provisioner refuses to register without them.
+  runner_registration_token = try(data.vault_kv_secret_v2.forgejo_runner[0].data["registration_token"], "")
+  root_ca_pem               = try(data.vault_generic_secret.pki_root_ca[0].data["certificate"], "")
+
+  ssh_enterprise_private_key_file = var.ssh_enterprise_private_key_file
+  ssh_admin_public_key_file       = var.ssh_admin_public_key_file
+  ssh_admin_private_key_file      = replace(var.ssh_admin_public_key_file, ".pub", "")
+}
+
 # NOTE: Labnet SDN DNS cluster has been moved to feature/labnet-sdn branch.
 # It will be re-integrated once the SDN implementation is stabilized.
 

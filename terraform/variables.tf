@@ -167,6 +167,34 @@ variable "kasm_vm_configs" {
   default     = {}
 }
 
+variable "builder_vm_configs" {
+  type = map(object({
+    vm_id          = number
+    name           = string
+    ip             = string
+    cores          = number
+    memory         = number
+    disk_size      = string
+    vm_state       = string
+    target_node    = string
+    target_storage = string
+  }))
+  description = "Build-runner VM configurations keyed by hostname (only used when deploy_builder = true)"
+  default     = {}
+}
+
+variable "deploy_builder" {
+  type        = bool
+  description = "Deploy the build-runner VM: a dedicated Forgejo Actions runner (label build-large) with host Docker for heavy image builds. Requires the services layer's forgejo + forgejo-runner (secret/forgejo-runner registration token)."
+  default     = false
+}
+
+variable "builder_runner_labels" {
+  type        = string
+  description = "forgejo-runner labels for the build VM (comma-separated label:docker://image). Jobs on these labels get the host Docker socket."
+  default     = "build-large:docker://ghcr.io/catthehacker/ubuntu:act-24.04"
+}
+
 # =============================================================================
 # Vault Configuration
 # =============================================================================

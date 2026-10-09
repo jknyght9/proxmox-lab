@@ -1,0 +1,36 @@
+#cloud-config
+# Bootstrap-only cloud-init for the build-runner VM.
+# Sets up hostname, users, SSH keys, base packages and swap. CA trust and the
+# forgejo-runner are managed by Terraform null_resource provisioners so they
+# can be reconfigured with `terraform apply` without recreating the VM.
+
+hostname: ${hostname}
+manage_etc_hosts: true
+
+users:
+  - name: labadmin
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ${ssh_authorized_keys}
+  - name: root
+    ssh_authorized_keys:
+      - ${ssh_authorized_keys}
+
+packages: [curl, jq, ca-certificates]
+
+runcmd:
+  - |
+    bash -lc '
+      systemctl enable --now systemd-timesyncd || true
+      systemctl restart systemd-timesyncd || true
+    '
+  - |
+    bash -lc '
+      grep -q "/swapfile" /etc/fstab || (fallocate -l 4G /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      echo "/swapfile none swap sw 0 0" >> /etc/fstab)
+    '
