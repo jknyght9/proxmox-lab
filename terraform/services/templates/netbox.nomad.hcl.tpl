@@ -236,9 +236,10 @@ REMOTE_AUTH_STAFF_SUPERUSERS = False
 NETBOX_SSO_ADMIN_GROUPS = ${sso_admin_groups_py}
 NETBOX_SSO_READONLY_GROUP = "SSO Read-Only"
 
+# NB: import Django MODELS lazily inside the functions below. Importing them at
+# module (settings-load) time raises AppRegistryNotReady and crash-loops NetBox.
+# Only the signal/dispatch imports are safe at this top level.
 from django.contrib.auth.signals import user_logged_in
-from django.contrib.auth.models import Group
-from django.contrib.contenttypes.models import ContentType
 from django.dispatch import receiver
 
 def _ensure_readonly_objperm(group):
@@ -248,6 +249,7 @@ def _ensure_readonly_objperm(group):
     # Fully defensive: any failure here degrades a Lab-User to "no permissions"
     # (empty but functional NetBox) rather than 500-ing their login.
     try:
+        from django.contrib.contenttypes.models import ContentType
         from users.models import ObjectPermission
         op, created = ObjectPermission.objects.get_or_create(
             name="SSO Read-Only (view all)",
@@ -265,6 +267,7 @@ def _apply_sso_roles(sender, request, user, **kwargs):
     # the bootstrap "admin" superuser.
     if not request.path.startswith("/oauth/"):
         return
+    from django.contrib.auth.models import Group
     try:
         groups = set(user.social_auth.get(provider="oidc").extra_data.get("groups") or [])
     except Exception:
