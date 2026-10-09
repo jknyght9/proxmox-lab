@@ -183,6 +183,12 @@ variable "deploy_kasm" {
   default     = false
 }
 
+variable "deploy_pulse" {
+  type        = bool
+  description = "Mint a read-only Proxmox API token for the Pulse monitor and store it in Vault (secret/pulse). The Pulse Nomad job itself is deployed in the services layer, also gated on deploy_pulse."
+  default     = false
+}
+
 variable "vault_version" {
   type        = string
   description = "HashiCorp Vault Docker image tag"

@@ -189,8 +189,10 @@ function writeServicesTfvars() {
   local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
   local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
+  local PREV_DEPLOY_CSI PREV_DEPLOY_UNIFI_DNS PREV_DEPLOY_PULSE
   local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
+  local PREV_PULSE_PVE_HOST
   # deploy_traefik / deploy_dns_records default to true on first deploy
   # (Traefik is mandatory for the lab to work; DNS records are written
   # immediately so the cluster is reachable). After that, never let them
@@ -204,12 +206,26 @@ function writeServicesTfvars() {
   PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
   PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
   PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
+  # deploy_csi gates the CSI/NFS storage layer (csi_controller/node + every
+  # nomad_csi_volume_registration). GlusterFS is decommissioned, so CSI is the
+  # only storage backend — default "true" so a regen never silently drops it to
+  # the variable default (false) and plans a teardown of all stateful volumes.
+  PREV_DEPLOY_CSI=$(_preserve_bool       "deploy_csi"         "true")
+  PREV_DEPLOY_UNIFI_DNS=$(_preserve_bool "deploy_unifi_dns"   "false")
+  PREV_DEPLOY_PULSE=$(_preserve_bool     "deploy_pulse"       "false")
   PREV_DEPLOY_FORGEJO=$(_preserve_bool   "deploy_forgejo"     "false")
   PREV_DEPLOY_KANEO=$(_preserve_bool     "deploy_kaneo"       "false")
   PREV_DEPLOY_FORGEJO_RUNNER=$(_preserve_bool "deploy_forgejo_runner" "false")
   PREV_CFG_AUTH=$(_preserve_bool         "configure_authentik" "false")
   PREV_CFG_NETBOX=$(_preserve_bool       "configure_netbox"    "false")
   PREV_NETBOX_TOKEN=$(_preserve_str      "netbox_api_token"    "not-configured")
+  # Services-net Proxmox API endpoint Pulse uses to auto-add the cluster
+  # (e.g. https://10.10.0.101:8006). Operator-set; preserved across regen.
+  PREV_PULSE_PVE_HOST=$(_preserve_str    "pulse_pve_host"      "")
+  # Pulse SSO role mapping (list-valued, site-specific). Preserve verbatim or a
+  # regen drops the operator's admin/viewer group assignment.
+  PREV_PULSE_SSO_ADMIN_GROUPS=$(_preserve_list  "pulse_sso_admin_groups"  '[]')
+  PREV_PULSE_SSO_VIEWER_GROUPS=$(_preserve_list "pulse_sso_viewer_groups" '[]')
   # dns_backends is list-valued; preserve verbatim or a regen drops it.
   PREV_DNS_BACKENDS=$(_preserve_list     "dns_backends"        '["pihole"]')
   # bootstrap.yml's dns_backend (pihole|unifi) is AUTHORITATIVE when set:
@@ -283,9 +299,21 @@ deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
 deploy_netbox      = ${PREV_DEPLOY_NETBOX}
 deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
 deploy_backup      = ${PREV_DEPLOY_BACKUP}
+deploy_csi         = ${PREV_DEPLOY_CSI}
+deploy_unifi_dns   = ${PREV_DEPLOY_UNIFI_DNS}
+deploy_pulse       = ${PREV_DEPLOY_PULSE}
 deploy_forgejo     = ${PREV_DEPLOY_FORGEJO}
 deploy_kaneo       = ${PREV_DEPLOY_KANEO}
 deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
+
+# Services-net Proxmox endpoint Pulse auto-adds (empty = skip PVE auto-add)
+pulse_pve_host = "${PREV_PULSE_PVE_HOST}"
+
+# Pulse SSO role mapping — SSO groups granted admin / viewer (empty = no
+# restriction and no elevation). Union is the allowed-groups list, so users in
+# neither are denied.
+pulse_sso_admin_groups  = ${PREV_PULSE_SSO_ADMIN_GROUPS}
+pulse_sso_viewer_groups = ${PREV_PULSE_SSO_VIEWER_GROUPS}
 
 # Which DNS backends receive the lab's local records (pihole and/or unifi).
 # Sourced from bootstrap.yml 'dns_backend' (pihole|unifi) when set.

@@ -852,9 +852,26 @@ function createAPIToken() {
     pveum user delete "$USER" 2>/dev/null || true
     pveum role delete "$ROLE" 2>/dev/null || true
 
-    # Create role with required privileges
+    # Base build privileges (VMs, storage, SDN).
     # VM.GuestAgent.* = Packer needs guest agent access to discover VM IP for SSH
-    pveum role add "$ROLE" -privs "Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,VM.Migrate,VM.PowerMgmt,VM.Snapshot"
+    BUILD_PRIVS="Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,SDN.Use,Pool.Allocate,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,VM.Migrate,VM.PowerMgmt,VM.Snapshot"
+
+    # User/permission administration — required so Terraform (Layer 1) can mint
+    # per-service read-only tokens like pulse@pve: create the user + token
+    # (Realm.AllocateUser, User.Modify) and assign its ACL (Permissions.Modify).
+    ADMIN_PRIVS="Realm.AllocateUser,User.Modify,Permissions.Modify"
+
+    # Proxmox blocks privilege escalation via ACL updates: to *grant* the
+    # built-in PVEAuditor role at /, this token must itself hold every privilege
+    # PVEAuditor contains. Read them live from the node so this stays correct
+    # across PVE versions (Mapping.Audit exists on 8.x, not 7.x) instead of
+    # hardcoding a list that drifts. Fallback covers a jq-less/empty read.
+    AUDITOR_PRIVS=$(pveum role list --output-format json 2>/dev/null \
+      | jq -r '(.[]|select(.roleid=="PVEAuditor")|.privs) | if type=="array" then join(",") else . end')
+    [ -z "$AUDITOR_PRIVS" ] && AUDITOR_PRIVS="Sys.Audit,Datastore.Audit,VM.Audit,Pool.Audit,SDN.Audit"
+
+    # Create role with required privileges (pveum de-duplicates)
+    pveum role add "$ROLE" -privs "${BUILD_PRIVS},${ADMIN_PRIVS},${AUDITOR_PRIVS}"
 
     # Create user
     pveum user add "$USER" --enable 1

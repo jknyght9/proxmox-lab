@@ -53,8 +53,10 @@ job "traefik" {
         ]
       }
 
-      # Wildcard cert (leaf + issuing CA). Lease tied to ttl below;
-      # Nomad re-fetches when ~1/3 lease remains and signals USR1.
+      # Wildcard cert (leaf + issuing CA). Lease tied to ttl below; Nomad
+      # re-fetches when ~1/3 lease remains and RESTARTS the task to reload.
+      # (SIGUSR1 did NOT reload Traefik's default cert — it served the stale
+      # cert to expiry; change_mode=restart guarantees the renewed cert loads.)
       template {
         data = <<EOH
 {{ with secret "pki_int/issue/acme-certs" "common_name=*.${dns_postfix}" "alt_names=${dns_postfix}" "ttl=2160h" }}
@@ -64,8 +66,7 @@ job "traefik" {
 EOH
         destination   = "local/tls/cert.pem"
         perms         = "0644"
-        change_mode   = "signal"
-        change_signal = "SIGUSR1"
+        change_mode   = "restart"
       }
 
       template {
@@ -76,8 +77,7 @@ EOH
 EOH
         destination   = "local/tls/key.pem"
         perms         = "0600"
-        change_mode   = "signal"
-        change_signal = "SIGUSR1"
+        change_mode   = "restart"
       }
 
       # File-provider config — points Traefik at the templated cert files.

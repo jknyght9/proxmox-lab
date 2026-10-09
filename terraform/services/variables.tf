@@ -246,6 +246,56 @@ variable "unifi_dns_frontend_image" {
   default     = "ghcr.io/jknyght9/unifi-dns-frontend:latest"
 }
 
+# =============================================================================
+# Pulse monitoring — reads secret/pulse (minted by the infra layer). See
+# terraform/pulse-monitoring.tf and docs/services/pulse.md.
+# =============================================================================
+
+variable "deploy_pulse" {
+  type        = bool
+  description = "Deploy the Pulse monitoring app as a Nomad job"
+  default     = false
+}
+
+variable "pulse_image" {
+  type        = string
+  description = "Pulse container image ref"
+  default     = "rcourtman/pulse:v6.5.0"
+}
+
+variable "pulse_pve_host" {
+  type        = string
+  default     = ""
+  description = <<-EOT
+    Pulse-reachable Proxmox API endpoint for auto-adding the cluster to Pulse,
+    e.g. "https://10.10.0.101:8006". MUST be a services-network IP that Pulse
+    (running on nomad01) can reach — NOT a mgmt-network IP. One cluster member
+    is enough; Pulse auto-discovers the rest. Empty = skip PVE auto-add.
+  EOT
+}
+
+# Pulse SSO role mapping. SITE-SPECIFIC group names belong in terraform.tfvars,
+# not here — these default empty so the tracked repo carries no site values and
+# the safe default is "no access restriction, no role elevation" (every
+# authenticated SSO user gets Pulse's built-in default role, as before).
+#
+# When set, pulse-config derives the Authentik OIDC provider's allowedGroups
+# (the UNION of both lists — so everyone NOT in one of these groups is denied)
+# and its groupRoleMappings (admin groups -> "admin", viewer groups ->
+# "viewer"). Requires the "groups" OIDC scope + claim, which pulse-config always
+# requests (Authentik emits group NAMES, so these must match exactly).
+variable "pulse_sso_admin_groups" {
+  type        = list(string)
+  default     = []
+  description = "SSO group names granted the Pulse 'admin' role. Site-specific; set in terraform.tfvars."
+}
+
+variable "pulse_sso_viewer_groups" {
+  type        = list(string)
+  default     = []
+  description = "SSO group names granted the Pulse 'viewer' role. Site-specific; set in terraform.tfvars."
+}
+
 # Removed: backup_type/backup_nfs_*/backup_smb_* variables. The explicit
 # backup Nomad job was retired in Phase 2/3 of the storage migration;
 # ZFS snapshots on the cluster_state NAS handle the backup role now

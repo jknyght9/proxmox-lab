@@ -737,6 +737,71 @@ function enableService() {
 }
 
 # -----------------------------------------------------------------------------
+# Pulse monitoring — unique in that it spans BOTH layers:
+#   Layer 1 mints a read-only PVE token (pulse@pve + PVEAuditor @ /) and
+#   writes it to Vault at secret/pulse; Layer 2 deploys the Nomad job that
+#   reads that secret via WIF. Layer 1 is applied TARGETED (only the five
+#   pulse resources) so enabling monitoring never plans a change against a
+#   VM. enableService "pulse" then handles the Layer 2 half.
+# -----------------------------------------------------------------------------
+function deployPulse() {
+  ensureBootstrapComplete || return 1
+
+  local l1_tfvars="$SCRIPT_DIR/terraform/terraform.tfvars"
+  local l2_tfvars="$SCRIPT_DIR/terraform/services/terraform.tfvars"
+
+  if [ ! -f "$l1_tfvars" ] || [ ! -f "$l2_tfvars" ]; then
+    error "tfvars not found. Run 'Deploy all' (option 1) first."
+    return 1
+  fi
+
+  # Persist deploy_pulse=true in Layer 1 tfvars so a later full 'tf apply'
+  # keeps the minted token instead of destroying it.
+  if grep -q "^deploy_pulse" "$l1_tfvars"; then
+    sed -i.bak "s/^deploy_pulse.*/deploy_pulse = true/" "$l1_tfvars"; rm -f "$l1_tfvars.bak"
+  else
+    echo "deploy_pulse = true" >> "$l1_tfvars"
+  fi
+
+  # --- Layer 1: mint read-only PVE token -> secret/pulse (TARGETED, no VMs) ---
+  doing "Minting read-only Proxmox token for Pulse (Layer 1)..."
+  if ! tf apply -auto-approve \
+      -target=proxmox_virtual_environment_user.pulse \
+      -target=proxmox_virtual_environment_user_token.pulse_monitor \
+      -target=proxmox_virtual_environment_acl.pulse_auditor \
+      -target=random_password.pulse_admin \
+      -target=vault_kv_secret_v2.pulse; then
+    error "Layer 1 token mint failed — aborting before Layer 2."
+    return 1
+  fi
+  success "Pulse token stored in Vault at secret/pulse"
+
+  # --- Layer 2: deploy ONLY the Pulse job (targeted; no full-apply churn) ---
+  # Set the flag in place. Deliberately NOT via enableService/refreshLayer2Configs:
+  # regenerating the whole Layer 2 tfvars can surface unrelated drift (e.g. CSI
+  # volume re-registration for authentik/netbox), and a full apply would then act
+  # on it. Enabling Pulse must touch only Pulse's own resources.
+  if grep -q "^deploy_pulse" "$l2_tfvars"; then
+    sed -i.bak "s/^deploy_pulse.*/deploy_pulse = true/" "$l2_tfvars"; rm -f "$l2_tfvars.bak"
+  else
+    echo "deploy_pulse = true" >> "$l2_tfvars"
+  fi
+
+  doing "Deploying Pulse Nomad job (Layer 2, targeted)..."
+  if ! tf-services apply -auto-approve \
+      -target=vault_policy.pulse \
+      -target=vault_jwt_auth_backend_role.pulse \
+      -target=nomad_job.pulse; then
+    error "Layer 2 Pulse deploy failed."
+    return 1
+  fi
+
+  success "Pulse deployed. Browse https://pulse.<your-domain> and log in as 'admin'."
+  info    "Admin password:  docker compose run --rm terraform-services vault kv get secret/pulse   (field: admin_password)"
+  info    "Then add your PVE node in the Pulse UI (Settings > Infrastructure) using pve_token_id + pve_token from secret/pulse."
+}
+
+# -----------------------------------------------------------------------------
 # Main flow: deploy all services
 # -----------------------------------------------------------------------------
 function deployAll() {
@@ -1326,6 +1391,7 @@ function showMenu() {
     echo "  d17) Deploy Forgejo (Git hosting + Actions)"
     echo "  d18) Deploy Kaneo (project-management board)"
     echo "  d19) Deploy Forgejo Actions runner (CI executor)"
+    echo "  d20) Deploy Pulse monitoring (Layer 1 mints RO PVE token → Vault, then Layer 2 job)"
   fi
   echo
 }
@@ -1346,7 +1412,7 @@ while true; do
 
   showMenu
   if [ "$DEV_MODE" = true ]; then
-    read -rp "$(question "Select [0-11, d1-d19]: ")" choice
+    read -rp "$(question "Select [0-11, d1-d20]: ")" choice
   else
     read -rp "$(question "Select [0-11]: ")" choice
   fi
@@ -1388,6 +1454,7 @@ while true; do
     d17|D17) if [ "$DEV_MODE" = true ]; then enableService "forgejo";                                          else error "Invalid option"; fi;;
     d18|D18) if [ "$DEV_MODE" = true ]; then enableService "kaneo";                                            else error "Invalid option"; fi;;
     d19|D19) if [ "$DEV_MODE" = true ]; then enableService "forgejo_runner";                                     else error "Invalid option"; fi;;
+    d20|D20) if [ "$DEV_MODE" = true ]; then deployPulse;                                                      else error "Invalid option"; fi;;
 
     # Config change apply
     \*) if [ "$CONFIG_CHANGES_DETECTED" = "true" ]; then applyConfigChanges; else error "No changes detected"; fi;;

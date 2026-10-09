@@ -73,6 +73,12 @@ resource "vault_policy" "unifi_dns" {
   policy = file("${path.module}/../../nomad/vault-policies/unifi-dns.hcl")
 }
 
+resource "vault_policy" "pulse" {
+  count  = var.deploy_pulse ? 1 : 0
+  name   = "pulse"
+  policy = file("${path.module}/../../nomad/vault-policies/pulse.hcl")
+}
+
 resource "vault_policy" "domain_join" {
   count  = var.deploy_samba_ad ? 1 : 0
   name   = "domain-join"
