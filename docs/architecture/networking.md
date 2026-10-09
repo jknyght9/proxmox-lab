@@ -70,6 +70,49 @@ Pi-hole (ad blocking, local DNS records)
      Cloudflare (1.1.1.1) or Quad9 (9.9.9.9) via TLS
 ```
 
+### Active Directory members and the realm == domain split
+
+The AD **realm has the same name as the lab domain** (`<dns-suffix>`). DNS
+authority for a single zone cannot be split between two servers, so exactly one
+resolver is authoritative for `<dns-suffix>`:
+
+- **The service-record backend** (UniFi, or Pi-hole) is authoritative for the
+  lab's service records (`vault.<dns-suffix>`, `auth.<dns-suffix>`, …) and the
+  `dc01`/`dc02` A-records.
+- **The Samba AD domain controllers** own the AD service-location records only
+  they can serve: the `_msdcs.<dns-suffix>` subzone and the apex SRV records
+  (`_ldap._tcp`, `_kerberos._tcp`/`_udp`, `_kpasswd`, `_gc._tcp`, …).
+
+Because both cannot be authoritative for `<dns-suffix>`, the lab uses a
+**client-level split** rather than zone forwarding:
+
+| Client type | DNS server |
+|-------------|------------|
+| AD members that do Kerberos SRV discovery (TrueNAS, domain-joined Linux/Windows) | the domain controllers (`dc01`/`dc02`) |
+| Everything else (workstations, non-member services) | the service backend (UniFi / Pi-hole) |
+
+**Why not conditional-forward the AD records on UniFi?** A clean split needs the
+resolver to forward only `_msdcs.<dns-suffix>` + the apex SRV names to the DCs
+while staying authoritative for the rest — which a dnsmasq/Unbound resolver does
+with `server=/_msdcs.<dns-suffix>/<dc-ip>` lines (what Pi-hole did). **UniFi OS on
+the UDM-Pro exposes neither per-name conditional forwarding nor SRV records in its
+local DNS**, so the AD records can neither live on nor be forwarded by UniFi.
+Pointing AD members directly at the DCs is the standard AD design and sidesteps
+the limitation.
+
+**Operational rules:**
+
+- Publish `dc01`/`dc02` A-records in whichever backend is authoritative, so
+  `ldaps://dc01.<dns-suffix>` resolves for clients that use an explicit host
+  (e.g. Authentik's LDAP source — it needs the A-record, not SRV).
+- Any **AD member** sets its DNS to the DCs (`dc01`/`dc02`), never the service
+  backend — TrueNAS Kerberos ticket renewal, for instance, needs `_kerberos._tcp`
+  SRV, which only the DCs serve. `terraform/services/nas-domain-join.tf` enforces
+  this for the NAS.
+- Symptom of getting it wrong: a member enumerates AD fine but fails Kerberos
+  (`KRB5KDC_ERR_*` / ticket-renewal errors) because the SRV lookup NXDOMAINs on
+  the service backend.
+
 ### Pi-hole v6 Configuration
 
 Pi-hole v6 uses the FTL (Faster Than Light) engine with a TOML configuration file at `/etc/pihole/pihole.toml`. Local DNS records are stored in the `dns.hosts` array.
