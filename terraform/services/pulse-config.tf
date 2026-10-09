@@ -20,10 +20,16 @@
 # map grants admin to admin-groups and viewer to viewer-groups. Both empty =>
 # "[]" / "{}" => no restriction and no elevation (safe default).
 locals {
-  pulse_sso_allowed_groups = concat(var.pulse_sso_admin_groups, var.pulse_sso_viewer_groups)
+  # Per-app overrides win when set; otherwise fall back to the canonical lab
+  # role groups so Pulse shares the same two groups as every other SSO app by
+  # default (admins -> "admin", users -> "viewer").
+  pulse_admin_groups  = length(var.pulse_sso_admin_groups) > 0 ? var.pulse_sso_admin_groups : var.sso_admin_groups
+  pulse_viewer_groups = length(var.pulse_sso_viewer_groups) > 0 ? var.pulse_sso_viewer_groups : var.sso_user_groups
+
+  pulse_sso_allowed_groups = concat(local.pulse_admin_groups, local.pulse_viewer_groups)
   pulse_sso_group_roles = merge(
-    { for g in var.pulse_sso_admin_groups : g => "admin" },
-    { for g in var.pulse_sso_viewer_groups : g => "viewer" },
+    { for g in local.pulse_admin_groups : g => "admin" },
+    { for g in local.pulse_viewer_groups : g => "viewer" },
   )
 }
 

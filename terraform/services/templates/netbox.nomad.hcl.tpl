@@ -212,33 +212,76 @@ SOCIAL_AUTH_OIDC_KEY = "{{ .Data.data.oidc_client_id }}"
 SOCIAL_AUTH_OIDC_SECRET = "{{ .Data.data.oidc_client_secret }}"
 {{ end }}
 
-SOCIAL_AUTH_OIDC_SCOPE = ["openid", "profile", "email"]
+# Request the groups claim from Authentik (its default scopes omit it) and
+# persist it onto the social-auth record so the login signal below can read it.
+# The Authentik "groups" scope mapping (authentik-apps.tf) emits the user's AD
+# group names under the "groups" claim.
+SOCIAL_AUTH_OIDC_SCOPE = ["openid", "profile", "email", "groups"]
 SOCIAL_AUTH_OIDC_USERNAME_KEY = "preferred_username"
+SOCIAL_AUTH_OIDC_EXTRA_DATA = [("groups", "groups")]
 
 # Auto-create SSO users
 REMOTE_AUTH_AUTO_CREATE_USER = True
 REMOTE_AUTH_DEFAULT_GROUPS = []
 REMOTE_AUTH_DEFAULT_PERMISSIONS = {}
-# REMOTE_AUTH_STAFF_SUPERUSERS only applies to header-based remote auth,
-# not the social-auth OIDC backend we use for Authentik. Promote OIDC
-# users to staff + superuser via a Django signal instead — every user
-# who reaches Authentik has already passed its access policies, so they
-# get full Netbox access in the lab. Tighten by checking group claims
-# here if you want role separation later.
-REMOTE_AUTH_STAFF_SUPERUSERS = True
+# Role separation is driven by the "groups" claim, NOT the blanket
+# REMOTE_AUTH_STAFF_SUPERUSERS flag — for the social-auth OIDC backend that flag
+# would make EVERY SSO user a superuser. Leave it off and assign roles in the
+# login signal below: admins -> superuser, everyone else -> read-only.
+REMOTE_AUTH_STAFF_SUPERUSERS = False
+
+# AD groups that receive NetBox admin (staff+superuser). Rendered from
+# var.sso_admin_groups. The Authentik application binding already restricts
+# NetBox to the admin + user groups, so a non-admin here is a Lab-User.
+NETBOX_SSO_ADMIN_GROUPS = ${sso_admin_groups_py}
+NETBOX_SSO_READONLY_GROUP = "SSO Read-Only"
 
 from django.contrib.auth.signals import user_logged_in
+from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from django.dispatch import receiver
 
+def _ensure_readonly_objperm(group):
+    # NetBox gates object visibility through its own ObjectPermission model, not
+    # Django's default perms — a user with no ObjectPermission sees nothing. Give
+    # the read-only group a single "view" action across every content type.
+    # Fully defensive: any failure here degrades a Lab-User to "no permissions"
+    # (empty but functional NetBox) rather than 500-ing their login.
+    try:
+        from users.models import ObjectPermission
+        op, created = ObjectPermission.objects.get_or_create(
+            name="SSO Read-Only (view all)",
+            defaults={"actions": ["view"], "enabled": True},
+        )
+        if created or op.object_types.count() == 0:
+            op.object_types.set(ContentType.objects.all())
+        op.groups.add(group)
+    except Exception:
+        pass
+
 @receiver(user_logged_in)
-def _promote_sso_users_to_superuser(sender, request, user, **kwargs):
-    # Netbox 4.5's custom User model treats is_staff as a non-concrete
-    # field (it's derived from group membership / is_superuser), so we
-    # can't pass it to save(update_fields=...). is_superuser alone is
-    # enough for full UI access.
-    if not user.is_superuser and request.path.startswith("/oauth/"):
-        user.is_superuser = True
-        user.save(update_fields=["is_superuser"])
+def _apply_sso_roles(sender, request, user, **kwargs):
+    # Only act on OIDC logins (/oauth/...); never touch local accounts such as
+    # the bootstrap "admin" superuser.
+    if not request.path.startswith("/oauth/"):
+        return
+    try:
+        groups = set(user.social_auth.get(provider="oidc").extra_data.get("groups") or [])
+    except Exception:
+        groups = set()
+    if groups & set(NETBOX_SSO_ADMIN_GROUPS):
+        # NetBox 4.5's custom User model derives is_staff from is_superuser /
+        # group membership, so is_superuser alone grants full admin UI access.
+        if not user.is_superuser:
+            user.is_superuser = True
+            user.save(update_fields=["is_superuser"])
+    else:
+        if user.is_superuser:
+            user.is_superuser = False
+            user.save(update_fields=["is_superuser"])
+        ro, _ = Group.objects.get_or_create(name=NETBOX_SSO_READONLY_GROUP)
+        _ensure_readonly_objperm(ro)
+        user.groups.add(ro)
 
 # Display on login page
 SOCIAL_AUTH_BACKEND_ATTRS = {

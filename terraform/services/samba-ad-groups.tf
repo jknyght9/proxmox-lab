@@ -16,11 +16,24 @@ variable "ad_groups" {
 }
 
 locals {
-  # Overlay-defined groups plus the reconciler's opt-in profile group, which
-  # must exist for profile-reconciler's memberOf filter to resolve. Added only
-  # when at least one NAS opts into profiles (local.profile_nases, defined in
-  # nas-profile-share.tf).
+  # The lab's two SSO role groups are ALWAYS created with Samba AD: the Authentik
+  # application-access bindings and the per-app role mapping (Netbox superuser,
+  # Pulse admin/viewer, Forgejo admin-group, Kasm) reference them by name, so
+  # they must exist for a fresh build to gate access correctly. Names come from
+  # the canonical sso_*_groups variables (same source of truth as the Authentik
+  # gating in authentik-apps.tf), so renaming a role group updates AD and SSO
+  # together.
+  sso_role_groups = merge(
+    { for g in var.sso_admin_groups : g => "Lab administrators — full admin role in SSO-integrated apps" },
+    { for g in var.sso_user_groups : g => "Lab users — basic/read-only role in SSO-integrated apps" },
+  )
+
+  # SSO role groups (baseline) + overlay-defined groups + the reconciler's opt-in
+  # profile group, which must exist for profile-reconciler's memberOf filter to
+  # resolve (added only when at least one NAS opts into profiles —
+  # local.profile_nases, defined in nas-profile-share.tf).
   ad_groups_effective = merge(
+    local.sso_role_groups,
     var.ad_groups,
     length(local.profile_nases) > 0 ? {
       (var.profile_group) = "Members receive a roaming-profile folder (managed by profile-reconciler)"

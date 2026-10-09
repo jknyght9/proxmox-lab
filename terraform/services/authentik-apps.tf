@@ -5,9 +5,15 @@
 # invalidation_flow on OAuth2/LDAP providers. All Authentik configuration
 # is done via the REST API using null_resource + curl instead.
 #
-# Access control:
-# - All users: Kasm (LDAP, see authentik-ldap.tf)
-# - Admins only: Pi-hole, Traefik, Vault, Nomad, Uptime Kuma, LAM
+# Access control (codified as Authentik group PolicyBindings — see the gate_app
+# helper + the gating loop near the end of this script):
+# - Admin-only (var.sso_admin_groups): Pi-hole, Traefik, Nomad, Vault, LAM,
+#   UniFi DNS, UniFi
+# - Admin + user (var.sso_admin_groups + var.sso_user_groups): Netbox, Pulse,
+#   Forgejo, Kaneo, Kasm. In-app role split is per app (Netbox superuser vs
+#   read-only, Pulse groupRoleMappings, Forgejo --admin-group); Kasm's split is
+#   in Kasm's LDAP config and Kaneo's is manual (email-only linking).
+# - Ungated: Documentation (public), Uptime Kuma, Microsoft 365 tiles
 # =============================================================================
 
 resource "null_resource" "authentik_apps" {
@@ -23,6 +29,9 @@ resource "null_resource" "authentik_apps" {
     deploy_pulse     = var.deploy_pulse
     deploy_forgejo   = var.deploy_forgejo
     deploy_kaneo     = var.deploy_kaneo
+    # re-run the gating loop when the role groups change
+    sso_admin_groups = join(",", var.sso_admin_groups)
+    sso_user_groups  = join(",", var.sso_user_groups)
   }
 
   connection {
@@ -114,6 +123,49 @@ resource "null_resource" "authentik_apps" {
           curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
             -X POST "$API/$endpoint/" -d "$payload" | jq -r '.pk'
         fi
+      }
+
+      # Resolve an AD-synced Authentik group's pk by exact name (never creates —
+      # these groups come from the Samba AD LDAP source / samba-ad-groups.tf).
+      group_pk() {
+        curl -sk -H "Authorization: Bearer $TOKEN" "$API/core/groups/?search=$1" \
+          | jq -r --arg n "$1" '[.results[] | select(.name == $n)][0].pk // empty'
+      }
+
+      # gate_app <app-slug> <group-name>... — converge an application's group
+      # PolicyBindings to EXACTLY the named groups: bind any missing, revoke any
+      # group-binding not in the set. The app's policy_engine_mode is "any", so
+      # multiple group bindings OR together (a user in ANY bound group gets in;
+      # everyone else is denied). No-op if the app slug is absent (a
+      # conditionally-deployed app that isn't installed). Only GROUP bindings are
+      # touched — any policy/user bindings are left alone.
+      gate_app() {
+        _slug="$1"; shift
+        _app=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/core/applications/$_slug/" | jq -r '.pk // empty')
+        if [ -z "$_app" ]; then echo "    [i] app '$_slug' not present — skip"; return 0; fi
+        _want=""
+        for _g in "$@"; do
+          _gpk=$(group_pk "$_g")
+          if [ -z "$_gpk" ]; then echo "    [!] group '$_g' not in Authentik (AD sync pending?) — skip"; continue; fi
+          _want="$_want $_gpk"
+          _have=$(curl -sk -H "Authorization: Bearer $TOKEN" "$API/policies/bindings/?target=$_app" \
+            | jq -r --arg g "$_gpk" '[.results[] | select(.group == $g)][0].pk // empty')
+          if [ -z "$_have" ]; then
+            curl -sk -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              -X POST "$API/policies/bindings/" \
+              -d "$(jq -nc --arg t "$_app" --arg g "$_gpk" '{target:$t,group:$g,enabled:true,order:0}')" > /dev/null
+            echo "    + bound '$_g' -> $_slug"
+          fi
+        done
+        curl -sk -H "Authorization: Bearer $TOKEN" "$API/policies/bindings/?target=$_app" \
+          | jq -r '.results[] | select(.group != null) | "\(.pk) \(.group)"' \
+          | while read _bpk _bg; do
+              case " $_want " in
+                *" $_bg "*) : ;;
+                *) curl -sk -H "Authorization: Bearer $TOKEN" -X DELETE "$API/policies/bindings/$_bpk/" > /dev/null
+                   echo "    - revoked stale group-binding on $_slug" ;;
+              esac
+            done
       }
 
       # Get default flows
@@ -316,6 +368,13 @@ resource "null_resource" "authentik_apps" {
       create_or_get "core/applications" "slug" "kasm" \
         "{\"name\":\"Kasm Workspaces\",\"slug\":\"kasm\",\"group\":\"Lab\",\"meta_launch_url\":\"https://kasm.${var.dns_postfix}/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/kasm-workspaces.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
 
+      # --- UniFi (launcher tile → UniFi Site Manager cloud; admin-only) ---
+      # No provider — auth is UniFi's own cloud (unifi.ui.com); this is a
+      # dashboard bookmark whose visibility the gating loop restricts to admins.
+      echo '[+] UniFi...'
+      create_or_get "core/applications" "slug" "unifi" \
+        "{\"name\":\"UniFi\",\"slug\":\"unifi\",\"group\":\"Admin\",\"meta_launch_url\":\"https://unifi.ui.com/\",\"open_in_new_tab\":true,\"meta_icon\":\"$ICON/svg/unifi.svg\",\"policy_engine_mode\":\"any\"}" > /dev/null
+
       # --- Microsoft 365 launcher tiles (no provider — auth is UTSA Entra, not
       #     authentik; these are just bookmarks on the user dashboard) ---
       echo '[+] Microsoft Teams...'
@@ -489,6 +548,21 @@ resource "null_resource" "authentik_apps" {
 
         echo "    Vault OIDC configured (auth backend + role + policy)"
       fi
+
+      # --- Application access policies (group → application bindings) ----------
+      # Admin-only apps bind ONLY the admin groups; shared apps bind admin + user
+      # groups. gate_app no-ops on any app that isn't deployed. In-app role is
+      # handled per app elsewhere: Netbox (OIDC groups → superuser/read-only),
+      # Pulse (groupRoleMappings), Forgejo (--admin-group). Kasm's launcher tile
+      # is gated here but its admin/user split lives in Kasm's LDAP config; Kaneo
+      # links by verified email only, so its role is granted manually.
+      echo '[+] Applying application access policies...'
+      for app in pihole traefik nomad vault lam unifi-dns unifi; do
+        gate_app "$app" ${join(" ", var.sso_admin_groups)}
+      done
+      for app in netbox pulse forgejo kaneo kasm; do
+        gate_app "$app" ${join(" ", var.sso_admin_groups)} ${join(" ", var.sso_user_groups)}
+      done
 
       echo '[+] Authentik applications configured'
       EOT
