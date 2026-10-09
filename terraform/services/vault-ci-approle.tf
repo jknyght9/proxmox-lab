@@ -82,18 +82,22 @@ resource "vault_auth_backend" "approle" {
 }
 
 # --- Shared OpenTofu 1.11+ state-encryption passphrase (operators + all CI) ----
-resource "random_password" "tofu_state_encryption" {
-  count   = local.infra_ci_enabled ? 1 : 0
-  length  = 48
-  special = false
-  lifecycle { prevent_destroy = true }
+# MIRROR the EXISTING passphrase at secret/opentofu/state-encryption (which
+# already encrypts live state) into the canonical secret/tofu/state-encryption
+# path CI reads. We must NOT generate a fresh one — CI would then be unable to
+# decrypt existing state. Operators migrate to the tofu/ path over time;
+# opentofu/ remains the source mirror until cutover.
+data "vault_kv_secret_v2" "opentofu_state_encryption" {
+  count = local.infra_ci_enabled ? 1 : 0
+  mount = vault_mount.secret.path
+  name  = "opentofu/state-encryption"
 }
 
 resource "vault_kv_secret_v2" "tofu_state_encryption" {
   count     = local.infra_ci_enabled ? 1 : 0
   mount     = vault_mount.secret.path
   name      = "tofu/state-encryption"
-  data_json = jsonencode({ passphrase = random_password.tofu_state_encryption[0].result })
+  data_json = jsonencode({ passphrase = data.vault_kv_secret_v2.opentofu_state_encryption[0].data["passphrase"] })
   lifecycle { prevent_destroy = true }
 }
 
