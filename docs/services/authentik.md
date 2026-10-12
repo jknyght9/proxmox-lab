@@ -313,6 +313,43 @@ Authentik can provide SSO for:
 - Grafana (OAuth2)
 - Any Traefik-proxied service (Forward Auth)
 
+## Application access control
+
+Access to each Authentik application is governed by **group PolicyBindings**, not
+the dashboard `group` field (that only sets which launcher section a tile appears
+in). Two AD-synced groups drive everything:
+
+- **Lab-Admins** — administer/configure.
+- **Lab-Users** — basic/read-only.
+
+This is codified in `terraform/services/authentik-apps.tf` (the `gate_app` helper
+binds groups to apps idempotently; `var.sso_admin_groups` / `var.sso_user_groups`
+set the names). The AD groups themselves are created with Samba AD in
+`samba-ad-groups.tf`.
+
+| Tier | Applications | Who gets in |
+|------|--------------|-------------|
+| **Admin-only** | Pi-hole, Traefik, Nomad, Vault, LAM, UniFi DNS, UniFi | Lab-Admins |
+| **Admin + user** | Netbox, Pulse, Forgejo, Kaneo, Kasm | Lab-Admins **and** Lab-Users |
+
+Enforcement depends on the provider type: **proxy/forward-auth** (Pi-hole, Traefik,
+Nomad, LAM) and **OIDC** (Vault, Netbox, UniFi DNS, Pulse, Forgejo, Kaneo) are truly
+gated; **launcher-only tiles** (Kasm, UniFi, Documentation, M365) only gate tile
+visibility.
+
+### In-app roles (admin vs user)
+
+For the shared apps, Authentik emits the user's group names in a **`groups` claim**
+(a scope mapping assigned to every OAuth2 provider), and each app maps that to its
+own roles:
+
+- **Netbox** — Lab-Admins → staff/superuser; everyone else → a read-only object
+  permission. See [Netbox](netbox.md).
+- **Pulse** — `groupRoleMappings`: Lab-Admins → `admin`, Lab-Users → `viewer`.
+- **Forgejo** — the OIDC source maps `--admin-group Lab-Admins`. See [Forgejo](forgejo.md).
+- **Kasm** — the role split lives in Kasm's own LDAP settings, not Authentik.
+- **Kaneo** — links by verified email only (no group→role mapping); roles are manual.
+
 ## Storage Paths
 
 All Authentik data is stored on GlusterFS:

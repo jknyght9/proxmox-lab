@@ -138,9 +138,26 @@ Pulse (white-box infra metrics) is intended to **replace Uptime Kuma** for this
 lab. Deploy Pulse, validate it against live data, then retire the Uptime Kuma
 job. Until then they can run side by side.
 
+## SSO access control
+
+Pulse authenticates via Authentik OIDC and maps AD groups to Pulse roles. The
+reconcile (`terraform/services/pulse-config.tf` → `pulse-config.sh.tpl`) sets, on
+the OIDC provider:
+
+- `allowedGroups` = the admin + viewer groups (users in neither are denied);
+- `groupRoleMappings` = Lab-Admins → `admin`, Lab-Users → `viewer`;
+- `groupsClaim` = `groups`, with the `groups` scope requested — Pulse's default
+  scopes omit it, so without this no group mapping works.
+
+Group lists come from `var.pulse_sso_admin_groups` / `var.pulse_sso_viewer_groups`,
+which fall back to the canonical `var.sso_admin_groups` / `var.sso_user_groups` when
+unset. See [Authentik → Application access control](authentik.md#application-access-control).
+
 ## Configuration knobs
 
 | Variable | Where | Default |
 |----------|-------|---------|
 | `deploy_pulse` | `terraform/` + `terraform/services/` | `false` |
-| `pulse_image` | `terraform/services/` | `rcourtman/pulse:v6.4.1` |
+| `pulse_image` | `terraform/services/` | `rcourtman/pulse:v6.5.0` |
+| `pulse_sso_admin_groups` | `terraform/services/` | `[]` → falls back to `sso_admin_groups` (`["Lab-Admins"]`) |
+| `pulse_sso_viewer_groups` | `terraform/services/` | `[]` → falls back to `sso_user_groups` (`["Lab-Users"]`) |

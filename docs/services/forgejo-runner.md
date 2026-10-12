@@ -165,21 +165,18 @@ nomad job restart forgejo-runner
 Reset the token in the Forgejo UI at **Site Administration → Actions → Runners**
 (or the org's **Settings → Actions → Runners**).
 
-## Adding the Proxmox CI token (future, security-gated)
+## Proxmox CI token — see the CI/CD pattern
 
-A natural next step is giving CI jobs a **Proxmox API token** so workflows can
-build/provision against the cluster. This is intentionally **out of scope** here
-and must be handled as a separate, reviewed change:
+Giving CI jobs a **Proxmox API token** (so `infra-*` workflows can provision
+against the cluster) is now implemented as part of the Vault AppRole CI pattern —
+see [CI/CD (Forgejo Actions + Vault)](../developer/ci-cd.md). In short: a dedicated
+`privsep=0` token on `hashicorp@pam` (**not** the operator deploy token) is stored
+at `secret/proxmox` and read by a per-repo AppRole with a least-privilege policy.
 
-- Mint a dedicated, least-privilege Proxmox token (its own role, scoped to the
-  paths CI actually needs) — **do not** reuse `hashicorp@pam`.
-- Store it in Vault (e.g. `secret/forgejo-runner-proxmox`) and expose it to jobs
-  as an Actions **secret/variable** in Forgejo, not baked into the job template.
-- Review blast radius: an instance-level runner executes code from any repo that
-  can queue a job, so a Proxmox token reachable from CI is effectively a
-  cluster-admin credential. Gate repo/workflow access accordingly first.
-
-No Proxmox token is created by this integration.
+!!! warning "Blast radius"
+    An instance-level runner executes code from any repo that can queue a job, so
+    a Proxmox token reachable from CI is effectively a cluster-admin credential.
+    Gate repo/workflow access accordingly, and keep the token scoped + revocable.
 
 ## Troubleshooting
 
@@ -237,6 +234,7 @@ registers with the same instance-level token under the label `build-large`.
 | **Label** | `build-large:docker://ghcr.io/catthehacker/ubuntu:act-24.04` (`builder_runner_labels`) |
 | **Capacity** | 1 job at a time |
 | **Job Docker access** | host socket automounted at `/var/run/docker.sock` |
+| **Job container network** | `host` (`config.yaml` `container.network`) — avoids the ~3s/call bridge-NAT latency that starved IaC plans making many serial Proxmox-API calls |
 | **CA trust** | Vault `pki/cert/ca` installed system-wide (also covers `docker push`) and bind-mounted into jobs (`GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`) |
 | **Disk hygiene** | nightly `docker image prune` + `builder prune` (older than 72h) |
 
