@@ -80,6 +80,22 @@ Default credentials:
 - **Username**: `admin`
 - **Password**: From Vault: `vault kv get -field=admin_password secret/netbox`
 
+## SSO roles
+
+Netbox logs in via Authentik OIDC (social-auth OpenID Connect backend). Roles are
+driven by the user's AD groups in the `groups` claim — not a blanket promote:
+
+- **Lab-Admins** → staff + superuser (full admin).
+- **Everyone else** (Lab-Users) → a read-only `SSO Read-Only` object permission
+  (view across all object types).
+
+The mapping is applied by a `user_logged_in` signal in the job's `extra.py`
+(`terraform/services/templates/netbox.nomad.hcl.tpl`); admin groups come from
+`var.sso_admin_groups`. Roles are re-evaluated on each OIDC login, so **a user must
+re-login** for a group change to take effect. The local bootstrap `admin` account
+(password in `secret/netbox`) is unaffected. See
+[Authentik → Application access control](authentik.md#application-access-control).
+
 ## Re-running Inventory Sync
 
 To update Netbox after infrastructure changes, re-apply Layer 2:

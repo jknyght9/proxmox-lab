@@ -110,31 +110,21 @@ job template:
   and `GIT_SSL_CAINFO` pointed at it, so Forgejo trusts internal HTTPS for OIDC
   discovery against `auth.<dns-suffix>`.
 
-## Phase 2b — post-deploy configuration (manual, deferred)
+## Phase 2b — post-deploy configuration
 
-The first deploy stands up the platform and the Authentik OIDC provider, but
-the following are intentionally **not** automated yet and are run once after the
-first successful deploy:
+1. **Forgejo-side OIDC auth source — now codified.**
+   `terraform/services/forgejo-oidc-source.tf` creates (or idempotently updates)
+   the auth source named `authentik` via the Forgejo CLI, reading
+   `secret/forgejo-oidc`, with `--group-claim-name groups`, `--admin-group <first
+   sso_admin_group>`, and the `groups` scope. It runs after `authentik_apps` writes
+   the secret. The source is named `authentik` so its callback matches the Authentik
+   redirect URI (`https://git.<dns-suffix>/user/oauth2/authentik/callback`), and the
+   `--admin-group` mapping makes **Lab-Admins** members Forgejo admins on login.
+   (This was previously a manual `forgejo admin auth add-oauth` step; see git
+   history for the raw invocation if you need it.)
 
-1. **Wire up the Forgejo-side OIDC auth source** (reads `secret/forgejo-oidc`):
-
-   ```bash
-   # Run inside the forgejo container (nomad alloc exec -task forgejo ...)
-   forgejo admin auth add-oauth \
-     --name authentik \
-     --provider openidConnect \
-     --key forgejo \
-     --secret "<secret/forgejo-oidc oidc_client_secret>" \
-     --auto-discover-url "https://auth.<dns-suffix>/application/o/forgejo/.well-known/openid-configuration" \
-     --scopes "openid profile email" \
-     --group-claim-name groups
-   ```
-
-   The auth source **must** be named `authentik` so its callback matches the
-   redirect URI registered in Authentik
-   (`https://git.<dns-suffix>/user/oauth2/authentik/callback`).
-
-2. **Create the admin user and an automation token**; store the token in Vault
+2. **Create the admin user and an automation token** (still manual); store the
+   token in Vault
    at **`secret/forgejo-admin`** (NOT `secret/forgejo` — see below).
 3. **Create the org and repos** (`lab-templates`, `proxmox-lab`, `lab-services`)
    and import `lab-templates` history via Forgejo's migration (not a file copy).
@@ -181,10 +171,12 @@ vault kv put secret/forgejo-admin \
 
 ## AD group → team access mapping
 
-!!! info "Site-specific — this is a runbook, not codified"
-    The group-team map is **runtime state on the OIDC auth source**, not
-    Terraform-managed — the concrete AD group names, org, and teams are
-    site-specific and live in the overlay. The steps below use placeholders
+!!! info "Admin-group is codified; the team map is a runbook"
+    The **admin-group** mapping (`--admin-group`, which makes Lab-Admins members
+    Forgejo admins) is set by `forgejo-oidc-source.tf`. The **group→team map** below
+    is **runtime state on the auth source**, not Terraform-managed — the concrete AD
+    group names, org, and teams are site-specific and live in the overlay. The steps
+    below use placeholders
     `<org>`, `<team>`, `<AD-Group>`, `<AdminGroup>`, and the auth source id `<N>`.
 
 **Prerequisites:**

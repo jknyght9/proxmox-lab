@@ -89,3 +89,4 @@ nav:
       - Lab Management Tools (Kaneo/Forgejo/versitygw): planning/pm-code-repo.md
   - Developer Guide:
       - Adding Services: developer/adding-services.md
+      - CI/CD (Forgejo Actions + Vault): developer/ci-cd.md
