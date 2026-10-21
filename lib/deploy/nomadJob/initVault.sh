@@ -330,6 +330,20 @@ backup_retention_days = $(yq -r '.backup.retention_days // 7' "${SCRIPT_DIR}/boo
 tailscale_auth_key         = "$(yq -r '.tailscale.auth_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 tailscale_advertise_routes = "$(yq -r '.tailscale.advertise_routes // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 
+# Traefik certificate resolver (from bootstrap.yml traefik_acme).
+# Unset => Traefik keeps using the internal Vault PKI wildcard. The
+# credentials map is emitted verbatim as Traefik env var names, so adding a
+# DNS provider needs no code change here.
+traefik_acme_enabled       = $(yq -r '.traefik_acme.enabled // false' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo false)
+traefik_acme_provider      = "$(yq -r '.traefik_acme.provider // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_email         = "$(yq -r '.traefik_acme.email // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_staging       = $(yq -r '.traefik_acme.staging // false' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo false)
+traefik_acme_ca_server     = "$(yq -r '.traefik_acme.ca_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_dns_resolvers = "$(yq -r '.traefik_acme.dns_resolvers // "1.1.1.1:53,8.8.8.8:53"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "1.1.1.1:53,8.8.8.8:53")"
+traefik_acme_credentials = {
+$(yq -r '.traefik_acme.credentials // {} | to_entries | .[] | "  " + .key + " = \"" + (.value // "") + "\""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)
+}
+
 # Netbox periodic inventory sync (from bootstrap.yml — defaults to every 6h)
 netbox_sync_cron     = "$(yq -r '.netbox_sync_cron // "0 */6 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 */6 * * *")"
 netbox_sync_timezone = "$(yq -r '.netbox_sync_timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"

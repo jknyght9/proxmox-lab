@@ -416,3 +416,56 @@ variable "dns_backends" {
     error_message = "dns_backends must be a non-empty subset of [\"pihole\", \"unifi\"]."
   }
 }
+
+# =============================================================================
+# Traefik certificate resolvers (optional — publicly trusted certs via ACME)
+#
+# Left unset, Traefik keeps using the internal Vault PKI wildcard. Set
+# traefik_acme_enabled to issue a wildcard from a public ACME CA instead,
+# validated over DNS-01. The provider's credentials are passed as a map of
+# environment variable names, so a new DNS provider needs no code change —
+# only the right keys (see bootstrap.yml.example).
+# =============================================================================
+
+variable "traefik_acme_enabled" {
+  type        = bool
+  description = "Issue Traefik's wildcard from a public ACME CA via DNS-01 instead of Vault PKI."
+  default     = false
+}
+
+variable "traefik_acme_provider" {
+  type        = string
+  description = "Traefik DNS-01 provider name (e.g. cloudflare, route53, azuredns). Must match Traefik's provider code."
+  default     = ""
+}
+
+variable "traefik_acme_email" {
+  type        = string
+  description = "Account email registered with the ACME CA. Required when traefik_acme_enabled."
+  default     = ""
+}
+
+variable "traefik_acme_staging" {
+  type        = bool
+  description = "Use the CA's staging endpoint. Certs are untrusted but rate limits are far looser — use while iterating."
+  default     = false
+}
+
+variable "traefik_acme_ca_server" {
+  type        = string
+  description = "Override the ACME directory URL. Empty uses Let's Encrypt production, or staging when traefik_acme_staging."
+  default     = ""
+}
+
+variable "traefik_acme_dns_resolvers" {
+  type        = string
+  description = "CSV of resolvers used to check the DNS-01 TXT record (e.g. '1.1.1.1:53'). Avoids split-horizon DNS seeing the internal zone."
+  default     = "1.1.1.1:53,8.8.8.8:53"
+}
+
+variable "traefik_acme_credentials" {
+  type        = map(string)
+  sensitive   = true
+  description = "Provider credentials as Traefik env vars, e.g. { CF_DNS_API_TOKEN = \"...\" }. Stored in Vault, injected at runtime."
+  default     = {}
+}

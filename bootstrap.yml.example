@@ -120,6 +120,58 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 #     admin_password: ""                # Synology DSM admin password
 
 # =============================================================================
+# Traefik certificate resolver (optional — publicly trusted TLS)
+# =============================================================================
+# Omit this block entirely and Traefik keeps using the lab's internal Vault
+# PKI: a `*.<dns_suffix>` wildcard minted at deploy time. Browsers warn unless
+# you install the internal root CA, but there is no external dependency and
+# nothing about the lab is published anywhere.
+#
+# Set it to have Traefik obtain a publicly trusted wildcard from an ACME CA
+# instead, validated over DNS-01. DNS-01 is the only challenge that works for
+# internal-only services (no inbound reachability needed) and the only one
+# that can issue wildcards.
+#
+# Vault cannot do this itself. Vault PKI can *serve* ACME to internal clients,
+# but it has no ACME client, so it can never produce a publicly trusted cert.
+# Traefik is the ACME client here.
+#
+# `credentials` is passed through verbatim as environment variables, so any
+# provider Traefik supports works without a code change — only the key names
+# differ. See https://doc.traefik.io/traefik/https/acme/#providers
+#
+#   cloudflare -> CF_DNS_API_TOKEN           (token scoped Zone:DNS:Edit)
+#   route53    -> AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
+#                 AWS_HOSTED_ZONE_ID
+#   azuredns   -> AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID,
+#                 AZURE_SUBSCRIPTION_ID
+#
+# Credentials are written to Vault at secret/traefik-acme and injected into
+# the job at runtime — they never appear in a jobspec or a tracked file.
+#
+# RATE LIMITS: Traefik runs as a system job, so every Nomad node keeps its own
+# acme.json (persisted at /var/lib/traefik-acme on the host) and requests its
+# own cert. Let's Encrypt allows 50 certs/week per registered domain but only
+# 5 duplicate certs/week for an identical name set — a 3-node cluster is fine
+# steady-state, but repeated redeploys will exhaust it. Use staging: true
+# while iterating; those certs are untrusted but the limits are far looser.
+#
+# PRIVACY: publicly issued certs are published in Certificate Transparency
+# logs. A wildcard logs only `*.<dns_suffix>`, revealing no service names,
+# which is why this issues a wildcard as the entrypoint default rather than
+# per-service certs.
+
+# traefik_acme:
+#   enabled: true
+#   provider: "cloudflare"            # Traefik DNS provider code
+#   email: "admin@example.com"        # ACME account email
+#   staging: false                    # true => LE staging (untrusted, loose limits)
+#   # ca_server: ""                   # override the ACME directory URL entirely
+#   # dns_resolvers: "1.1.1.1:53,8.8.8.8:53"   # used to verify the TXT record
+#   credentials:
+#     CF_DNS_API_TOKEN: ""
+
+# =============================================================================
 # UniFi Controller (optional — network device inventory in Netbox)
 # Requires: UniFi Controller/OS accessible on network, API key generated
 # API key: Settings → Control Plane → API Key (UniFi OS 4.x+)
