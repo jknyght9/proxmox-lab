@@ -140,7 +140,12 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # provider Traefik supports works without a code change — only the key names
 # differ. See https://doc.traefik.io/traefik/https/acme/#providers
 #
-#   cloudflare -> CF_DNS_API_TOKEN           (token scoped Zone:DNS:Edit)
+#   cloudflare -> CF_DNS_API_TOKEN
+#                 Needs BOTH Zone:DNS:Edit AND Zone:Zone:Read — the provider
+#                 looks the zone up from the domain, so a DNS:Edit-only token
+#                 fails. Cloudflare's "Edit zone DNS" template grants both;
+#                 scope it to the one zone. No zone ID is required.
+#                 Optional CF_ZONE_API_TOKEN splits the read half off.
 #   route53    -> AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,
 #                 AWS_HOSTED_ZONE_ID
 #   azuredns   -> AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID,
