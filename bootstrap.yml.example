@@ -235,18 +235,6 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # netbox_sync_cron:     "0 */6 * * *"
 # netbox_sync_timezone: "UTC"
 
-# =============================================================================
-# Periodic Backups — superseded by `storage.snapshots` above.
-# =============================================================================
-# The old explicit `backup:` Nomad job (nightly tar+pg_dump to NFS/SMB) has
-# been replaced by ZFS snapshots on the NAS, configured under
-# storage.snapshots. ZFS snapshots are cheaper (copy-on-write), faster to
-# restore (zfs clone), and atomic per-dataset. Per-DB application-consistent
-# safety nets (pg_dump + vault raft snapshot save) run as sidecars inside the
-# same dataset, so each snapshot captures both live files and a logical dump.
-#
-# If you still have a `backup:` block in your bootstrap.yml from an older
-# deploy, it's safe to delete — the parser ignores it.
 
 # =============================================================================
 # Tailscale Subnet Routers (optional — every Nomad node joins the tailnet

@@ -188,7 +188,7 @@ function writeServicesTfvars() {
 
   local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
-  local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
+  local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE
   local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
   # deploy_traefik / deploy_dns_records default to true on first deploy
@@ -203,7 +203,6 @@ function writeServicesTfvars() {
   PREV_DEPLOY_UPTIME_KUMA=$(_preserve_bool "deploy_uptime_kuma" "false")
   PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
   PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
-  PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
   PREV_DEPLOY_FORGEJO=$(_preserve_bool   "deploy_forgejo"     "false")
   PREV_DEPLOY_KANEO=$(_preserve_bool     "deploy_kaneo"       "false")
   PREV_DEPLOY_FORGEJO_RUNNER=$(_preserve_bool "deploy_forgejo_runner" "false")
@@ -282,7 +281,6 @@ deploy_lam         = ${PREV_DEPLOY_LAM}
 deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
 deploy_netbox      = ${PREV_DEPLOY_NETBOX}
 deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
-deploy_backup      = ${PREV_DEPLOY_BACKUP}
 deploy_forgejo     = ${PREV_DEPLOY_FORGEJO}
 deploy_kaneo       = ${PREV_DEPLOY_KANEO}
 deploy_forgejo_runner = ${PREV_DEPLOY_FORGEJO_RUNNER}
@@ -312,17 +310,6 @@ unifi_address = "$(yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>
 unifi_api_key = "$(yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 unifi_site    = "$(yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
 
-# Periodic Backups (from bootstrap.yml)
-backup_type         = "$(yq -r '.backup.type // "nfs"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "nfs")"
-backup_nfs_server   = "$(yq -r '.backup.nfs_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_nfs_path     = "$(yq -r '.backup.nfs_path // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_server   = "$(yq -r '.backup.smb_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_share    = "$(yq -r '.backup.smb_share // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_user     = "$(yq -r '.backup.smb_user // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_password = "$(yq -r '.backup.smb_password // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_cron           = "$(yq -r '.backup.cron // "0 2 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 2 * * *")"
-backup_timezone       = "$(yq -r '.backup.timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"
-backup_retention_days = $(yq -r '.backup.retention_days // 7' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo 7)
 
 # Tailscale subnet routers (from bootstrap.yml). auth_key goes into
 # Vault at secret/data/tailscale; advertise_routes defaults to network_cidr

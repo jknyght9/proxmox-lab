@@ -1300,7 +1300,6 @@ function showMenu() {
   echo "    4) Samba AD + LDAP Account Manager"
   echo "    5) Uptime Kuma (monitoring)"
   echo "    6) Netbox (inventory management)"
-  echo "    7) Periodic backups (NFS/SMB)"
   echo "    8) Tailscale subnet routers"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
@@ -1366,7 +1365,6 @@ while true; do
     4)  enableService "samba_ad" && enableService "lam";;
     5)  enableService "uptime_kuma";;
     6)  enableService "netbox";;
-    7)  enableService "backup";;
     8)  enableService "tailscale";;
 
     # Management

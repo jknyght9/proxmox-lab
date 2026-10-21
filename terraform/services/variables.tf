@@ -201,7 +201,6 @@ variable "netbox_api_token" {
 }
 
 
-# Removed: var.deploy_backup. See vault-secrets.tf / nomad-jobs.tf comments.
 
 # =============================================================================
 # UniFi Controller (for Netbox inventory sync)
