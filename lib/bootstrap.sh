@@ -1049,6 +1049,10 @@ HAEOF
   fi
 )
 
+# Resource pool — every guest this project creates joins it, giving the
+# pool-scoped backup job (lib/proxmox/backupJob.sh) a stable target.
+resource_pool = "$(yq -r '.resource_pool // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+
 # Vault — credentials written to terraform/vault.auto.tfvars after Vault deploys
 # (empty defaults here so terraform validate works before Vault exists)
 vault_address = ""

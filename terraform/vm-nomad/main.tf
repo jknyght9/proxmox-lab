@@ -64,6 +64,10 @@ resource "proxmox_virtual_environment_vm" "nomad" {
   for_each   = var.vm_configs
   depends_on = [null_resource.upload_snippet]
 
+  # Pool membership is declarative: a re-created VM rejoins, so a
+  # pool-scoped backup job never silently loses a guest.
+  pool_id = var.resource_pool != "" ? var.resource_pool : null
+
   vm_id     = each.value.vm_id
   name      = each.value.name
   node_name = each.value.target_node

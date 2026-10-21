@@ -187,3 +187,9 @@ variable "ssh_admin_private_key_file" {
   description = "Path to admin private key for container SSH"
   default     = "/crypto/labadmin"
 }
+
+variable "resource_pool" {
+  type        = string
+  description = "Proxmox resource pool to join. Empty leaves the guest out of any pool."
+  default     = ""
+}

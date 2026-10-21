@@ -120,6 +120,49 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 #     admin_password: ""                # Synology DSM admin password
 
 # =============================================================================
+# Resource pool + backup schedule (optional)
+# =============================================================================
+# resource_pool names a Proxmox resource pool that every guest this project
+# creates joins automatically (Terraform sets pool_id on each VM and LXC). That
+# gives the cluster one handle for "everything proxmox-lab deployed" — which is
+# what the backup job targets, instead of a VMID list that goes stale every
+# time the deployment is rebuilt with different IDs.
+#
+# Leave resource_pool empty and no pool is created or referenced.
+
+# resource_pool: "proxmox-lab"
+
+# pve_backup creates a cluster backup job scoped to that pool. This is the
+# Proxmox-level backup of VM and LXC *images* — distinct from:
+#   - storage.snapshots above, which is ZFS snapshots of Nomad service state
+#     on the NAS, and
+#   - the deprecated `backup:` block further down, which was the old Nomad
+#     tar+pg_dump job and is ignored.
+#
+# storage is any PVE storage with content=backup — a PBS datastore (dedup,
+# incremental, verifiable) or a plain NFS/CIFS share (full copies every run).
+#
+# schedule is a systemd calendar event: "03:00" or "sat 02:00" or
+# "*-*-* 03:00:00". NOT "daily 03:00" — that is rejected as invalid.
+#
+# retention is optional. Omit it and the storage's own policy applies, which is
+# what you want with PBS (its prune job already owns retention). Set keep_* to
+# have the job carry its own prune-backups policy instead.
+#
+# Setting enabled: false removes a job this project previously created, so
+# turning it off actually stops backups rather than orphaning a schedule.
+
+# pve_backup:
+#   enabled: true
+#   storage: "pbs-main"          # PVE storage id with content=backup
+#   schedule: "03:00"            # systemd calendar event
+#   mode: "snapshot"             # snapshot | suspend | stop
+#   retention:                   # optional — omit to inherit the storage policy
+#     keep_daily: 7
+#     keep_weekly: 4
+#     keep_monthly: 6
+
+# =============================================================================
 # Traefik certificate resolver (optional — publicly trusted TLS)
 # =============================================================================
 # Omit this block entirely and Traefik keeps using the lab's internal Vault

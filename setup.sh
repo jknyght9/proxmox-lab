@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/lib/credentials.sh"
 
 source "$SCRIPT_DIR/lib/proxmox/clusterHelpers.sh"
 source "$SCRIPT_DIR/lib/proxmox/configureProxmox.sh"
+source "$SCRIPT_DIR/lib/proxmox/backupJob.sh"
 source "$SCRIPT_DIR/lib/proxmox/purgeClusterResources.sh"
 source "$SCRIPT_DIR/lib/proxmox/selectSharedStorage.sh"
 source "$SCRIPT_DIR/lib/proxmox/ssh.sh"
@@ -1174,6 +1175,11 @@ EOF
   echo
   setNomadVMDNSToLab  || warn "Could not switch Nomad VM DNS — fix manually with menu d12"
   setProxmoxDNSToLab  || warn "Could not switch Proxmox DNS — fix manually with menu d12"
+
+  # Pool-scoped backup schedule. The pool itself is created by Terraform
+  # (terraform/pool.tf) and every guest joins it as it is provisioned, so
+  # this only has to own the schedule. No-op unless pve_backup.enabled.
+  configureBackupJob "$PROXMOX_HOST" || warn "Backup job not configured — see above"
 
   echo
   success "Deployment complete!"

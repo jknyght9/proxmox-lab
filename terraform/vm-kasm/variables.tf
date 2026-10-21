@@ -77,3 +77,9 @@ variable "vm_configs" {
   }))
   description = "Kasm VM configurations. Required — passed in by parent module from bootstrap-generated tfvars (no hardcoded defaults so we don't quietly use a previous lab's IPs)."
 }
+
+variable "resource_pool" {
+  type        = string
+  description = "Proxmox resource pool to join. Empty leaves the guest out of any pool."
+  default     = ""
+}

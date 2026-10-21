@@ -121,3 +121,9 @@ variable "traefik_ha_vrrp_password" {
   description = "VRRP authentication password for Traefik HA"
   default     = "traefik"
 }
+
+variable "resource_pool" {
+  type        = string
+  description = "Proxmox resource pool to join. Empty leaves the guest out of any pool."
+  default     = ""
+}
