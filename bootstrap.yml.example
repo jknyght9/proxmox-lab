@@ -37,6 +37,20 @@ dns_suffix: "mylab.lan"        # Domain suffix for all services
 # Internal service DNS records backend: "pihole" (default) or "unifi".
 #   "unifi" requires unifi_address + unifi_api_key (configured below) —
 #   that writer reconciles records against the UniFi controller.
+#
+# This also decides what the lab's hosts use as their RESOLVER at the end of a
+# deploy. With "pihole" (default) the PVE hosts and Nomad VMs are pointed at the
+# lab Pi-hole, which holds the generated records. With "unifi" they are pointed
+# at network.dns (else network.gateway) instead — otherwise every query would go
+# to a Pi-hole holding none of them.
+#
+# The two writers also differ: the Pi-hole writer REPLACES dns.hosts wholesale,
+# so records added by hand in the Pi-hole UI are lost on the next apply. The
+# UniFi writer is scoped — it tracks what it created and prunes only that, so
+# manual controller records survive.
+#
+# The Pi-hole LXCs are deployed either way; with "unifi" they are simply not the
+# record target.
 # dns_backend: "pihole"
 
 # Storage configuration:
