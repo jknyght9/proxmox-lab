@@ -577,6 +577,33 @@ The old explicit backup Nomad job (nightly tar + pg_dump to NFS/SMB) was
 retired in Phase 2/3 of the storage migration. Its `backup:` block in
 `bootstrap.yml` is ignored, and the former menu option for it is gone.
 
+### DNS backends
+
+`dns_backend` in `bootstrap.yml` selects where the lab's records are written —
+`pihole` (default) or `unifi` — and, since 2026-10-21, what the hosts use as
+their resolver at the end of a deploy:
+
+| `dns_backend` | Records written to | PVE hosts + Nomad VMs point at |
+|---|---|---|
+| `pihole` (default) | the lab Pi-hole LXCs | the Pi-hole VIP (`dns_primary_ipv4`) |
+| `unifi` | the UniFi controller | `network.dns`, else `network.gateway` |
+
+`_labResolverTarget()` in `setup.sh` makes that choice; `setProxmoxDNSToLab`
+and `setNomadVMDNSToLab` (the last steps of `deployAll`, also menu d12) consume
+it. Before that, both pointed unconditionally at Pi-hole, which sent every
+query to a server holding none of the records whenever the UniFi backend was in
+use.
+
+The Pi-hole LXCs are still deployed either way — Layer 1 always builds them, and
+`terraform/main.tf` indexes `dns_main_nodes[0]` unconditionally, so an empty
+list breaks the plan. With `unifi` they simply are not the record target.
+
+The two writers differ in an important way: the Pi-hole writer sets
+`dns.hosts` wholesale (each apply REPLACES the array, so manual entries are
+lost), while the UniFi writer is scoped — it tracks what it created in
+`managed.json` on nomad01 and prunes only that, leaving manual controller
+records alone.
+
 ### DNS for Nomad Services
 `terraform/services/dns-records.tf` writes service DNS entries to Pi-hole:
 - `vault.<dns_postfix>` → Traefik VIP (if HA enabled) or nomad01 IP
