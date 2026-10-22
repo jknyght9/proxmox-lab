@@ -2,6 +2,15 @@ job "tailscale" {
   datacenters = ["dc1"]
   type        = "system"
 
+  # Roll one subnet router at a time so the other two keep advertising
+  # 10.10.0.0/24 — a plain system-job update restarts all nodes at once,
+  # which drops routing entirely during the image pull + restart.
+  update {
+    max_parallel     = 1
+    min_healthy_time = "15s"
+    healthy_deadline = "2m"
+  }
+
   group "tailscale" {
     network {
       mode = "host"
@@ -45,7 +54,7 @@ job "tailscale" {
       driver = "docker"
 
       config {
-        image        = "tailscale/tailscale:v1.92.4"
+        image        = "tailscale/tailscale:v1.104.2"
         network_mode = "host"
         privileged   = true
 
