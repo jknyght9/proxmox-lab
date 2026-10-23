@@ -2,14 +2,14 @@
 # Reads the Netbox API token, the UniFi controller credentials, and
 # cluster config (for site/postfix info).
 
-path "secret/data/netbox" {
+path "secret/data/infra/netbox/app" {
   capabilities = ["read"]
 }
 
-path "secret/data/unifi" {
+path "secret/data/infra/unifi/udm" {
   capabilities = ["read"]
 }
 
-path "secret/data/config/cluster" {
+path "secret/data/infra/config/cluster" {
   capabilities = ["read"]
 }

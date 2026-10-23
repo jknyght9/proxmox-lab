@@ -43,17 +43,17 @@ set -eu
 apk add --no-cache curl jq >/dev/null 2>&1
 
 # Pull credentials from Vault (Workload Identity)
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 NETBOX_TOKEN="{{ .Data.data.api_token }}"
 {{ end }}
 
-{{ with secret "secret/data/unifi" }}
+{{ with secret "secret/data/infra/unifi/udm" }}
 UNIFI_ADDR="{{ .Data.data.address }}"
 UNIFI_KEY="{{ .Data.data.api_key }}"
 UNIFI_SITE="{{ .Data.data.site }}"
 {{ end }}
 
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 DNS_POSTFIX="{{ .Data.data.dns_postfix }}"
 {{ end }}
 

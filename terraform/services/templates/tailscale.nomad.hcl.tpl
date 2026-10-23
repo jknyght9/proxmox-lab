@@ -77,7 +77,7 @@ TS_STATE_DIR=/var/lib/tailscale
 TS_USERSPACE=false
 TS_ACCEPT_DNS=false
 # Auth key from Vault (reusable, pre-authorized)
-{{ with secret "secret/data/tailscale" }}
+{{ with secret "secret/data/infra/tailscale" }}
 TS_AUTHKEY={{ .Data.data.auth_key }}
 {{ end }}
 EOH

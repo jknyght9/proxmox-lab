@@ -73,7 +73,7 @@ PULSE_PUBLIC_URL=https://pulse.${dns_postfix}
 # Local admin kept as break-glass. Set PULSE_AUTH_HIDE_LOCAL_LOGIN=true to force
 # SSO-only once OIDC is verified.
 PULSE_AUTH_USER=admin
-{{ with secret "secret/data/pulse" }}
+{{ with secret "secret/data/infra/pulse/admin" }}
 PULSE_AUTH_PASS={{ .Data.data.admin_password }}
 {{ end }}
 # NOTE: OIDC/SSO is NOT configured via env vars — Pulse 6.4.5 ignores the

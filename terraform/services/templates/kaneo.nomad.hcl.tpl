@@ -94,7 +94,7 @@ job "kaneo" {
         data = <<EOH
 POSTGRES_USER=kaneo
 POSTGRES_DB=kaneo
-{{ with secret "secret/data/kaneo" }}
+{{ with secret "secret/data/infra/kaneo/app" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
@@ -145,7 +145,7 @@ KANEO_CLIENT_URL=https://tasks.${dns_postfix}
 # by default; in this self-hosted lab the forge (git.${dns_postfix}) resolves to
 # an internal VIP, so we opt in. Safe here: the whole lab is a trusted network.
 KANEO_ALLOW_PRIVATE_WEBHOOK_DESTINATIONS=true
-{{ with secret "secret/data/kaneo" }}
+{{ with secret "secret/data/infra/kaneo/app" }}
 DATABASE_URL=postgresql://kaneo:{{ .Data.data.postgres_password }}@127.0.0.1:5436/kaneo
 AUTH_SECRET={{ .Data.data.auth_secret }}
 POSTGRES_USER=kaneo
@@ -168,7 +168,7 @@ NODE_EXTRA_CA_CERTS=/local/certs/root_ca.crt
 # --- Custom OIDC (Authentik) — emitted only once secret/kaneo-oidc is
 #     populated by authentik-apps.tf, so first boot comes up without a
 #     half-configured provider. ---
-{{ with secret "secret/data/kaneo-oidc" }}{{ if .Data.data.oidc_endpoint }}
+{{ with secret "secret/data/infra/kaneo/oidc" }}{{ if .Data.data.oidc_endpoint }}
 CUSTOM_OAUTH_CLIENT_ID=kaneo
 CUSTOM_OAUTH_CLIENT_SECRET={{ .Data.data.oidc_client_secret }}
 CUSTOM_OAUTH_DISCOVERY_URL=https://auth.${dns_postfix}/application/o/kaneo/.well-known/openid-configuration

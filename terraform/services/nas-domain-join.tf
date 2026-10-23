@@ -19,7 +19,7 @@ locals {
 resource "vault_kv_secret_v2" "nas" {
   for_each = var.deploy_samba_ad ? local.nas_map : {}
   mount    = vault_mount.secret.path
-  name     = "nas/${each.key}"
+  name     = "infra/nas/${each.key}"
   data_json = jsonencode({
     type           = each.value.type
     address        = each.value.address
@@ -97,7 +97,7 @@ resource "null_resource" "nas_domain_join" {
 
       # Get domain-join credentials from Vault
       DOMAIN_JOIN_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" \
-        "${var.vault_address}/v1/secret/data/samba-ad/service-accounts" \
+        "${var.vault_address}/v1/secret/data/ad/service-accounts" \
         | jq -r '.data.data.domain_join_password // empty')
 
       if [ -z "$DOMAIN_JOIN_PW" ]; then

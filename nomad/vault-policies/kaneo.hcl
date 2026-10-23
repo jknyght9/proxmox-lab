@@ -2,21 +2,21 @@
 # This policy allows Kaneo to read its secrets from Vault KV v2
 
 # Allow reading Kaneo secrets (postgres password + auth secret)
-path "secret/data/kaneo" {
+path "secret/data/infra/kaneo/app" {
   capabilities = ["read"]
 }
 
 # Allow reading OIDC credentials (written by authentik_apps, not Terraform)
-path "secret/data/kaneo-oidc" {
+path "secret/data/infra/kaneo/oidc" {
   capabilities = ["read"]
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/kaneo" {
+path "secret/metadata/infra/kaneo/app" {
   capabilities = ["read", "list"]
 }
 
-path "secret/metadata/kaneo-oidc" {
+path "secret/metadata/infra/kaneo/oidc" {
   capabilities = ["read", "list"]
 }
 

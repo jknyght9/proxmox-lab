@@ -3,18 +3,18 @@
 # plus the domain-join service-account password (used for LDAPS bind to
 # Samba AD) and cluster config (for AD realm / base DN).
 
-path "secret/data/nas/*" {
+path "secret/data/infra/nas/*" {
   capabilities = ["read"]
 }
 
-path "secret/data/samba-ad/service-accounts" {
+path "secret/data/ad/service-accounts" {
   capabilities = ["read"]
 }
 
-path "secret/data/config/cluster" {
+path "secret/data/infra/config/cluster" {
   capabilities = ["read"]
 }
 
-path "secret/data/config/nomad-nodes" {
+path "secret/data/infra/config/nomad-nodes" {
   capabilities = ["read"]
 }

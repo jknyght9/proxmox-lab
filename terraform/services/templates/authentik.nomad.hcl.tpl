@@ -68,7 +68,7 @@ job "authentik" {
         data = <<EOH
 POSTGRES_USER=authentik
 POSTGRES_DB=authentik
-{{ with secret "secret/data/authentik" }}
+{{ with secret "secret/data/infra/authentik" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
@@ -125,7 +125,7 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "secret/data/authentik" }}
+{{ with secret "secret/data/infra/authentik" }}
 AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}
@@ -218,7 +218,7 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "secret/data/authentik" }}
+{{ with secret "secret/data/infra/authentik" }}
 AUTHENTIK_SECRET_KEY={{ .Data.data.secret_key }}
 AUTHENTIK_POSTGRESQL__PASSWORD={{ .Data.data.postgres_password }}
 AUTHENTIK_BOOTSTRAP_PASSWORD={{ .Data.data.admin_password }}

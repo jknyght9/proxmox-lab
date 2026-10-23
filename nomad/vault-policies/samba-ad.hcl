@@ -4,22 +4,22 @@
 #   - Issue TLS certificates from PKI for LDAPS
 
 # Allow reading Samba AD secrets (admin password, sync credentials)
-path "secret/data/samba-ad" {
+path "secret/data/ad/dc" {
   capabilities = ["read"]
 }
 
 # Allow listing and reading metadata (for debugging)
-path "secret/metadata/samba-ad" {
+path "secret/metadata/ad/dc" {
   capabilities = ["read", "list"]
 }
 
 # Allow reading cluster config (AD realm, domain, DNS forwarder)
-path "secret/data/config/cluster" {
+path "secret/data/infra/config/cluster" {
   capabilities = ["read"]
 }
 
 # Allow reading Nomad node IPs (for DC host IP and DC-to-DC communication)
-path "secret/data/config/nomad-nodes" {
+path "secret/data/infra/config/nomad-nodes" {
   capabilities = ["read"]
 }
 

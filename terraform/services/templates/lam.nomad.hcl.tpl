@@ -105,15 +105,15 @@ EOH
       # AD config injected from Vault KV via template
       template {
         data = <<EOH
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 LDAP_DOMAIN={{ .Data.data.ad_realm_lower }}
 LDAP_BASE_DN={{ .Data.data.base_dn }}
 LDAP_USER=CN=Administrator,CN=Users,{{ .Data.data.base_dn }}
 {{ end }}
-{{ with secret "secret/data/config/nomad-nodes" }}
+{{ with secret "secret/data/infra/config/nomad-nodes" }}
 LDAP_SERVER=ldaps://{{ .Data.data.nomad01_ip }}
 {{ end }}
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 DNS_SERVER={{ .Data.data.dns_server }}
 {{ end }}
 LAM_LANG=en_US

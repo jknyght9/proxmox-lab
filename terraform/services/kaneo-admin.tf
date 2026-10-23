@@ -50,7 +50,7 @@ resource "null_resource" "kaneo_admin" {
 
       echo '[+] kaneo_admin: reading Kaneo postgres password from Vault...'
       PW=$(curl -sk -H "X-Vault-Token: $VAULT_TOKEN" \
-        "$VAULT_ADDR/v1/secret/data/kaneo" | jq -r '.data.data.postgres_password // empty')
+        "$VAULT_ADDR/v1/secret/data/infra/kaneo/app" | jq -r '.data.data.postgres_password // empty')
       if [ -z "$PW" ]; then
         echo "[!] kaneo_admin: could not read secret/kaneo.postgres_password (Vault down or secret/kaneo missing). Skipping — not failing apply."
         exit 0
@@ -117,7 +117,7 @@ resource "null_resource" "kaneo_admin" {
       #    forgejo_gitea_token (set out-of-band for the Forgejo/Gitea link).
       echo "[+] kaneo_admin: writing credentials to secret/kaneo-admin (preserving forgejo_gitea_token)..."
       EXISTING_GITEA=$(curl -sk -H "X-Vault-Token: $VAULT_TOKEN" \
-        "$VAULT_ADDR/v1/secret/data/kaneo-admin" | jq -r '.data.data.forgejo_gitea_token // ""')
+        "$VAULT_ADDR/v1/secret/data/infra/kaneo/admin" | jq -r '.data.data.forgejo_gitea_token // ""')
       PAYLOAD=$(jq -nc \
         --arg email "$ADMIN_EMAIL" \
         --arg password "$NEWPW" \
@@ -126,7 +126,7 @@ resource "null_resource" "kaneo_admin" {
         --arg gitea "$EXISTING_GITEA" \
         '{data:{admin_email:$email, admin_password:$password, admin_user_id:$uid, api_key:$key, forgejo_gitea_token:$gitea}}')
       curl -sk -X POST -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
-        "$VAULT_ADDR/v1/secret/data/kaneo-admin" -d "$PAYLOAD" > /dev/null
+        "$VAULT_ADDR/v1/secret/data/infra/kaneo/admin" -d "$PAYLOAD" > /dev/null
       echo "[+] kaneo_admin: provisioned $ADMIN_EMAIL and stored creds at secret/kaneo-admin."
       EOT
     ]
