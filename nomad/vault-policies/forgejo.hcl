@@ -2,7 +2,7 @@
 # This policy allows Forgejo to read its secrets from Vault KV v2
 
 # Allow reading Forgejo secrets (postgres + admin passwords)
-path "secret/data/infra/forgejo/admin" {
+path "secret/data/infra/forgejo/app" {
   capabilities = ["read"]
 }
 
@@ -12,7 +12,7 @@ path "secret/data/infra/forgejo/oidc" {
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/infra/forgejo/admin" {
+path "secret/metadata/infra/forgejo/app" {
   capabilities = ["read", "list"]
 }
 

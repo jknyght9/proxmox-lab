@@ -94,7 +94,7 @@ job "kaneo" {
         data = <<EOH
 POSTGRES_USER=kaneo
 POSTGRES_DB=kaneo
-{{ with secret "secret/data/infra/kaneo/admin" }}
+{{ with secret "secret/data/infra/kaneo/app" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
@@ -145,7 +145,7 @@ KANEO_CLIENT_URL=https://tasks.${dns_postfix}
 # by default; in this self-hosted lab the forge (git.${dns_postfix}) resolves to
 # an internal VIP, so we opt in. Safe here: the whole lab is a trusted network.
 KANEO_ALLOW_PRIVATE_WEBHOOK_DESTINATIONS=true
-{{ with secret "secret/data/infra/kaneo/admin" }}
+{{ with secret "secret/data/infra/kaneo/app" }}
 DATABASE_URL=postgresql://kaneo:{{ .Data.data.postgres_password }}@127.0.0.1:5436/kaneo
 AUTH_SECRET={{ .Data.data.auth_secret }}
 POSTGRES_USER=kaneo

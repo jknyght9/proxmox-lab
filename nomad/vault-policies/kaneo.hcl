@@ -2,7 +2,7 @@
 # This policy allows Kaneo to read its secrets from Vault KV v2
 
 # Allow reading Kaneo secrets (postgres password + auth secret)
-path "secret/data/infra/kaneo/admin" {
+path "secret/data/infra/kaneo/app" {
   capabilities = ["read"]
 }
 
@@ -12,7 +12,7 @@ path "secret/data/infra/kaneo/oidc" {
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/infra/kaneo/admin" {
+path "secret/metadata/infra/kaneo/app" {
   capabilities = ["read", "list"]
 }
 
