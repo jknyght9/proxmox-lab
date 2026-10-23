@@ -162,7 +162,7 @@ EOH
       template {
         data = <<EOH
 FORGEJO_INSTANCE_URL=https://git.${dns_postfix}
-{{ with secret "secret/data/forgejo-runner" }}
+{{ with secret "secret/data/infra/forgejo/runner" }}
 FORGEJO_RUNNER_REGISTRATION_TOKEN={{ .Data.data.registration_token }}
 {{ end }}
 # Runner labels: a label maps a workflow `runs-on:` value to the image the job

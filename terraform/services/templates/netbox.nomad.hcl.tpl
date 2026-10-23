@@ -77,7 +77,7 @@ job "netbox" {
         data = <<EOH
 POSTGRES_USER=netbox
 POSTGRES_DB=netbox
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
@@ -170,7 +170,7 @@ UNITCFG
 
       template {
         data = <<EOH
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 DB_PASSWORD={{ .Data.data.postgres_password }}
 SECRET_KEY={{ .Data.data.secret_key }}
 SUPERUSER_PASSWORD={{ .Data.data.admin_password }}
@@ -201,12 +201,12 @@ EOH
       # OIDC SSO configuration — reads from separate Vault path (not managed by Terraform)
       template {
         data = <<SSOCFG
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 # API token peppers required for Netbox v4.5+ v2 tokens
 API_TOKEN_PEPPERS = {1: "{{ .Data.data.secret_key }}"}
 {{ end }}
 
-{{ with secret "secret/data/netbox-oidc" }}
+{{ with secret "secret/data/infra/netbox/oidc" }}
 SOCIAL_AUTH_OIDC_OIDC_ENDPOINT = "{{ .Data.data.oidc_endpoint }}"
 SOCIAL_AUTH_OIDC_KEY = "{{ .Data.data.oidc_client_id }}"
 SOCIAL_AUTH_OIDC_SECRET = "{{ .Data.data.oidc_client_secret }}"
@@ -350,7 +350,7 @@ SSOCFG
 
       template {
         data = <<EOH
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 DB_PASSWORD={{ .Data.data.postgres_password }}
 SECRET_KEY={{ .Data.data.secret_key }}
 {{ end }}
@@ -393,7 +393,7 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "secret/data/netbox" }}
+{{ with secret "secret/data/infra/netbox/app" }}
 DB_PASSWORD={{ .Data.data.postgres_password }}
 SECRET_KEY={{ .Data.data.secret_key }}
 {{ end }}

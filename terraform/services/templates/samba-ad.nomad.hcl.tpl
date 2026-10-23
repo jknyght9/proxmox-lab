@@ -72,15 +72,15 @@ job "samba-ad" {
 
       template {
         data = <<EOH
-{{ with secret "secret/data/samba-ad" }}
+{{ with secret "secret/data/ad/dc" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 DOMAIN={{ .Data.data.ad_realm }}
 DOMAINNAME={{ .Data.data.ad_domain }}
 DNSFORWARDER={{ .Data.data.dns_forwarder }}
 {{ end }}
-{{ with secret "secret/data/config/nomad-nodes" }}
+{{ with secret "secret/data/infra/config/nomad-nodes" }}
 HOSTIP={{ .Data.data.nomad01_ip }}
 {{ end }}
 JOIN=false
@@ -192,14 +192,14 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "secret/data/samba-ad" }}
+{{ with secret "secret/data/ad/dc" }}
 DOMAINPASS={{ .Data.data.admin_password }}
 {{ end }}
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 DOMAIN={{ .Data.data.ad_realm }}
 DOMAINNAME={{ .Data.data.ad_domain }}
 {{ end }}
-{{ with secret "secret/data/config/nomad-nodes" }}
+{{ with secret "secret/data/infra/config/nomad-nodes" }}
 HOSTIP={{ .Data.data.nomad02_ip }}
 DNSFORWARDER={{ .Data.data.nomad01_ip }}
 DCIP={{ .Data.data.nomad01_ip }}

@@ -34,16 +34,16 @@ set -eu
 apk add --no-cache curl jq openldap-clients >/dev/null 2>&1
 
 # --- AD bind credentials + cluster context ---
-{{ with secret "secret/data/samba-ad/service-accounts" }}
+{{ with secret "secret/data/ad/service-accounts" }}
 DOMAIN_JOIN_PW="{{ .Data.data.domain_join_password }}"
 {{ end }}
 
-{{ with secret "secret/data/config/cluster" }}
+{{ with secret "secret/data/infra/config/cluster" }}
 AD_REALM_LOWER="{{ .Data.data.ad_realm_lower }}"
 BASE_DN="{{ .Data.data.base_dn }}"
 {{ end }}
 
-{{ with secret "secret/data/config/nomad-nodes" }}
+{{ with secret "secret/data/infra/config/nomad-nodes" }}
 LDAP_HOST="{{ .Data.data.nomad01_ip }}"
 {{ end }}
 
@@ -91,7 +91,7 @@ echo "[+] Found $USER_COUNT member(s) of '${profile_group}'"
 
 echo ""
 echo "=== ${nas.name} (${nas.address}) — dataset ${nas.profile_dataset} ==="
-{{ with secret "secret/data/nas/${nas.name}" }}
+{{ with secret "secret/data/infra/nas/${nas.name}" }}
 NAS_API_KEY="{{ .Data.data.api_key }}"
 {{ end }}
 
