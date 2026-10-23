@@ -53,7 +53,7 @@ resource "random_password" "pulse_admin" {
 resource "vault_kv_secret_v2" "pulse" {
   count = var.deploy_pulse && local.vault_configured ? 1 : 0
   mount = "secret"
-  name  = "pulse"
+  name  = "infra/pulse/admin"
   data_json = jsonencode({
     # pve_token_* is what the operator pastes into Pulse's UI
     # (Settings -> Infrastructure) to add the Proxmox node(s) read-only.

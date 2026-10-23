@@ -68,8 +68,8 @@ locals {
   # its own CI SSH key: the shared OpenTofu state-encryption passphrase and the
   # shared versitygw S3 state-backend key.
   infra_ci_common_paths = [
-    "tofu/state-encryption",
-    "versitygw",
+    "infra/tofu/state-encryption",
+    "infra/versitygw/s3",
   ]
 }
 
@@ -96,7 +96,7 @@ data "vault_kv_secret_v2" "opentofu_state_encryption" {
 resource "vault_kv_secret_v2" "tofu_state_encryption" {
   count     = local.infra_ci_enabled ? 1 : 0
   mount     = vault_mount.secret.path
-  name      = "tofu/state-encryption"
+  name      = "infra/tofu/state-encryption"
   data_json = jsonencode({ passphrase = data.vault_kv_secret_v2.opentofu_state_encryption[0].data["passphrase"] })
   lifecycle { prevent_destroy = true }
 }

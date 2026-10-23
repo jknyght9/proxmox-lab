@@ -57,7 +57,7 @@ resource "null_resource" "forgejo_oidc_source" {
       ADMIN_GROUP="${local.forgejo_admin_group}"
 
       echo '[+] Reading Forgejo OIDC secret from Vault...'
-      OIDC=$(curl -sk -m5 -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/secret/data/forgejo-oidc")
+      OIDC=$(curl -sk -m5 -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/secret/data/infra/forgejo/oidc")
       CID=$(echo "$OIDC" | jq -r '.data.data.oidc_client_id // empty')
       CSECRET=$(echo "$OIDC" | jq -r '.data.data.oidc_client_secret // empty')
       ENDPOINT=$(echo "$OIDC" | jq -r '.data.data.oidc_endpoint // empty')
