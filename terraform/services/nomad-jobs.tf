@@ -10,6 +10,8 @@ resource "nomad_job" "traefik" {
     vault_policy.traefik,
     vault_jwt_auth_backend_role.traefik,
     vault_pki_secret_backend_role.acme_certs,
+    vault_kv_secret_v2.traefik_acme,
+    null_resource.traefik_acme_validation,
   ]
 
   jobspec = templatefile("${path.module}/templates/traefik.nomad.hcl.tpl", {
@@ -18,6 +20,14 @@ resource "nomad_job" "traefik" {
     nomad01_ip  = local.nomad01_ip
     nomad_ips   = [for _, ip in var.nomad_node_ips : ip]
     dns01_ip    = var.dns_server_ip
+
+    # Certificate source. When acme_enabled is false the job renders exactly
+    # as before: a wildcard minted from Vault PKI as the default cert.
+    acme_enabled       = local.acme_active
+    acme_provider      = var.traefik_acme_provider
+    acme_email         = var.traefik_acme_email
+    acme_ca_server     = local.acme_ca_server
+    acme_dns_resolvers = var.traefik_acme_dns_resolvers
   })
   detach = false
 }

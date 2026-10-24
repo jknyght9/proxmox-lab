@@ -29,6 +29,14 @@ job "traefik" {
         image        = "traefik:v3.6.14"
         network_mode = "host"
         dns_servers  = ["${dns_server}"]
+%{ if acme_enabled ~}
+        # acme.json lives on the host, not in the alloc dir, so a restart or
+        # reschedule reuses the existing cert instead of re-issuing. This is a
+        # system job, so each node keeps its own account and cert — see the
+        # rate-limit note in bootstrap.yml.example before lowering renewal
+        # intervals or redeploying in a loop.
+        volumes = ["/var/lib/traefik-acme:/acme"]
+%{ endif ~}
         args = [
           "--log.level=DEBUG",
           "--api=true",
@@ -57,9 +65,42 @@ job "traefik" {
           "--providers.file.directory=/local/config",
           "--providers.file.watch=true",
           "--serversTransport.insecureSkipVerify=true",
+%{ if acme_enabled ~}
+          # Public ACME wildcard over DNS-01. Applied as the websecure
+          # entrypoint's default, so every router inherits it and jobs keep
+          # tagging only `tls=true` — no per-service certresolver tags, and no
+          # per-service names in Certificate Transparency logs.
+          "--certificatesresolvers.acme.acme.email=${acme_email}",
+          "--certificatesresolvers.acme.acme.storage=/acme/acme.json",
+          "--certificatesresolvers.acme.acme.caserver=${acme_ca_server}",
+          "--certificatesresolvers.acme.acme.dnschallenge=true",
+          "--certificatesresolvers.acme.acme.dnschallenge.provider=${acme_provider}",
+          "--certificatesresolvers.acme.acme.dnschallenge.resolvers=${acme_dns_resolvers}",
+          "--entrypoints.websecure.http.tls=true",
+          "--entrypoints.websecure.http.tls.certresolver=acme",
+          "--entrypoints.websecure.http.tls.domains[0].main=${dns_postfix}",
+          "--entrypoints.websecure.http.tls.domains[0].sans=*.${dns_postfix}",
+%{ endif ~}
         ]
       }
 
+%{ if acme_enabled ~}
+      # DNS-01 provider credentials, read from Vault at runtime via this
+      # job's WIF role and exported as the env vars Traefik's provider code
+      # expects (CF_DNS_API_TOKEN, AWS_*, AZURE_*, ...). Nothing secret is
+      # rendered into the jobspec.
+      template {
+        data = <<EOH
+{{ with secret "secret/data/traefik-acme" }}
+{{ range $k, $v := .Data.data }}{{ $k }}={{ $v }}
+{{ end }}{{ end }}
+EOH
+        destination = "secrets/acme.env"
+        env         = true
+        perms       = "0600"
+        change_mode = "restart"
+      }
+%{ else ~}
       # Wildcard cert (leaf + issuing CA). Lease tied to ttl below; Nomad
       # re-fetches when ~1/3 lease remains and RESTARTS the task to reload.
       # (SIGUSR1 did NOT reload Traefik's default cert — it served the stale
@@ -102,6 +143,7 @@ EOH
         perms       = "0644"
         change_mode = "noop"
       }
+%{ endif ~}
 
       # Authentik forward-auth middleware + routers for Nomad UI, Pi-hole UI,
       # and the Traefik dashboard. Previously written to gluster by

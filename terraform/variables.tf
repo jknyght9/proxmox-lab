@@ -293,3 +293,19 @@ variable "nomad_traefik_ha_vrrp_password" {
   description = "VRRP authentication password for Traefik HA (8 chars max)"
   default     = "traefik"
 }
+
+# =============================================================================
+# Resource pool (optional)
+#
+# When set, every guest this project creates joins the named pool, and the
+# pool itself is managed here. That gives the cluster a single handle for
+# "everything proxmox-lab deployed" — which is what a pool-scoped backup job
+# targets, instead of enumerating VMIDs that change between deploys.
+# Leave empty and no pool is created or referenced.
+# =============================================================================
+
+variable "resource_pool" {
+  type        = string
+  description = "Proxmox resource pool for all guests this project creates. Empty disables pool management."
+  default     = ""
+}

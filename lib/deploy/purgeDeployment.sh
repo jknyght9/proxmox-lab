@@ -232,6 +232,10 @@ EOF
   success "Local files cleaned"
 
   # Step 9: Remove Tailscale DNS override (if configured)
+  # Remove the managed backup job before the guests it targets disappear,
+  # so the cluster is not left with a schedule pointing at an empty pool.
+  removeBackupJob "$PROXMOX_HOST" 2>/dev/null || true
+
   doing "Step 9/10: Resetting Tailscale DNS settings..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
