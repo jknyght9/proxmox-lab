@@ -14,11 +14,6 @@ locals {
 # =============================================================================
 
 module "nomad" {
-  # Join the project pool (empty var = no pool). depends_on keeps the
-  # pool created before any guest references it.
-  resource_pool = var.resource_pool
-  depends_on    = [proxmox_virtual_environment_pool.lab]
-
   source = "./vm-nomad"
 
   dns_postfix      = var.dns_postfix
@@ -103,11 +98,6 @@ resource "nomad_job" "vault" {
 # =============================================================================
 
 module "dns-main" {
-  # Join the project pool (empty var = no pool). depends_on keeps the
-  # pool created before any guest references it.
-  resource_pool = var.resource_pool
-  depends_on    = [proxmox_virtual_environment_pool.lab]
-
   source = "./lxc-pihole"
 
   cluster_name   = "main"
@@ -141,11 +131,6 @@ module "dns-main" {
 # =============================================================================
 
 module "kasm" {
-  # Join the project pool (empty var = no pool). depends_on keeps the
-  # pool created before any guest references it.
-  resource_pool = var.resource_pool
-  depends_on    = [proxmox_virtual_environment_pool.lab]
-
   count  = var.deploy_kasm ? 1 : 0
   source = "./vm-kasm"
 

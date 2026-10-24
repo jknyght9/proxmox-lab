@@ -1204,10 +1204,12 @@ EOF
   setNomadVMDNSToLab  || warn "Could not switch Nomad VM DNS — fix manually with menu d12"
   setProxmoxDNSToLab  || warn "Could not switch Proxmox DNS — fix manually with menu d12"
 
-  # Pool-scoped backup schedule. The pool itself is created by Terraform
-  # (terraform/pool.tf) and every guest joins it as it is provisioned, so
-  # this only has to own the schedule. No-op unless pve_backup.enabled.
-  configureBackupJob "$PROXMOX_HOST" || warn "Backup job not configured — see above"
+  # Pool membership, then the pool-scoped backup schedule. Terraform creates
+  # the pool object (terraform/pool.tf); membership is applied here because the
+  # provider's pool_id is unusable on cloned guests. Both are no-ops when
+  # resource_pool / pve_backup.enabled are unset.
+  ensurePoolMembership "$PROXMOX_HOST" || warn "Pool membership incomplete — see above"
+  configureBackupJob  "$PROXMOX_HOST" || warn "Backup job not configured — see above"
 
   echo
   success "Deployment complete!"

@@ -28,8 +28,6 @@ locals {
 resource "proxmox_virtual_environment_container" "dns" {
   for_each = local.nodes_map
 
-  pool_id = var.resource_pool != "" ? var.resource_pool : null
-
   node_name   = each.value.target_node
   vm_id       = each.value.vmid
   tags        = ["terraform", "lxc", "dns", var.cluster_name]

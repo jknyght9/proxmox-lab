@@ -8,9 +8,10 @@
 # purge), so this sits with those rather than behind a null_resource shelling
 # out from Terraform.
 #
-# Terraform owns the POOL and guest membership (terraform/pool.tf); this owns
-# the SCHEDULE that targets it. Idempotent: the job is identified by a marker
-# in its comment, so re-running updates in place instead of duplicating.
+# Terraform owns the POOL OBJECT (terraform/pool.tf); this file owns both the
+# MEMBERSHIP (ensurePoolMembership) and the SCHEDULE (configureBackupJob).
+# Idempotent: the job is identified by a marker in its comment, so re-running
+# updates in place instead of duplicating.
 #
 # Reads from bootstrap.yml:
 #   resource_pool
@@ -34,6 +35,76 @@ for j in jobs:
     if '${BACKUP_JOB_MARKER}' in (j.get('comment') or ''):
         print(j.get('id', '')); break
 " 2>/dev/null
+}
+
+# Add every guest this project deployed to the resource pool.
+#
+# Membership is applied here rather than via the provider's pool_id, which is
+# unusable on cloned guests: the provider sets the pool during the clone and
+# then PUTs it again, so Proxmox returns "already a pool member" (HTTP 500) and
+# the resource errors after the guest exists — leaving a VM that is in the pool
+# but missing from Terraform state.
+#
+# Idempotent: only VMIDs that are not already members are added, so re-running
+# a deploy is a no-op. --allow-move is NOT passed, so a guest deliberately
+# placed in another pool is left alone and reported instead of being hijacked.
+function ensurePoolMembership() {
+  local host="${1:-$PROXMOX_HOST}"
+  local pool
+  pool=$(yq -r '.resource_pool // ""' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null)
+  [ -z "$pool" ] && return 0
+
+  # Everything this project deploys, per lib/constants.sh.
+  local candidates="${VMID_NOMAD_START}-${VMID_NOMAD_END} ${VMID_DNS_START}-${VMID_DNS_END} ${VMID_KASM}"
+  local want=""
+  local range
+  for range in $candidates; do
+    if [[ "$range" == *-* ]]; then
+      local lo="${range%-*}" hi="${range#*-}" i
+      for ((i=lo; i<=hi; i++)); do want="$want $i"; done
+    else
+      want="$want $range"
+    fi
+  done
+
+  local existing_json
+  existing_json=$(sshRun "$REMOTE_USER" "$host" \
+    "pvesh get /cluster/resources --type vm --output-format json 2>/dev/null" 2>/dev/null)
+  [ -z "$existing_json" ] && { warn "Could not read cluster resources — skipping pool membership"; return 0; }
+
+  local to_add=() elsewhere=() vmid
+  for vmid in $want; do
+    local state
+    state=$(printf '%s' "$existing_json" | python3 -c "
+import sys, json
+try:    rs = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for r in rs:
+    if r.get('vmid') == $vmid:
+        print(r.get('pool') or 'none'); break
+" 2>/dev/null)
+    case "$state" in
+      "")      : ;;                       # guest does not exist — nothing to do
+      none)    to_add+=("$vmid") ;;
+      "$pool") : ;;                       # already correct
+      *)       elsewhere+=("$vmid:$state") ;;
+    esac
+  done
+
+  if [ ${#elsewhere[@]} -gt 0 ]; then
+    warn "Not moving guests already in another pool: ${elsewhere[*]}"
+  fi
+  if [ ${#to_add[@]} -eq 0 ]; then
+    info "  Pool '$pool': membership already correct"
+    return 0
+  fi
+
+  local csv; csv=$(IFS=,; echo "${to_add[*]}")
+  doing "Adding to pool '$pool': $csv"
+  sshRun "$REMOTE_USER" "$host" "pvesh set /pools/$pool --vms $csv" >/dev/null 2>&1 \
+    && success "Pool membership updated" \
+    || { error "Failed adding $csv to pool $pool"; return 1; }
+  return 0
 }
 
 function configureBackupJob() {
@@ -108,7 +179,7 @@ function configureBackupJob() {
       || { error "Failed to create backup job"; return 1; }
   fi
 
-  info "  Scope:     pool '$pool' (guests join via terraform/pool.tf)"
+  info "  Scope:     pool '$pool' (membership applied by ensurePoolMembership)"
   info "  Storage:   $storage"
   info "  Schedule:  $schedule  (systemd calendar event — '03:00', not 'daily 03:00')"
   [ -n "$retention" ] && info "  Retention: $retention" \
