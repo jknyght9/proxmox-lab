@@ -185,13 +185,13 @@ function syncSecretsToVault() {
     --arg template "$(jq -r '.template_password' "$PASSWORDS_FILE")" \
     '{data: {root_password: $root, ssh_password: $ssh, template_password: $template}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/packer" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/infra/packer" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$PACKER_PAYLOAD" > /dev/null; then
-    success "  secret/packer"
+    success "  secret/infra/packer"
   else
-    warn "  Failed to write secret/packer"
+    warn "  Failed to write secret/infra/packer"
   fi
 
   # SSH keys — store both key pairs for disaster recovery
@@ -205,13 +205,13 @@ function syncSecretsToVault() {
     --arg enterprise_pub "$(cat "$CRYPTO_DIR/labenterpriseadmin.pub" 2>/dev/null || echo "")" \
     '{data: {labadmin: $labadmin, labadmin_pub: $labadmin_pub, enterprise: $enterprise, enterprise_pub: $enterprise_pub}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/ssh-keys" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/infra/ssh-keys" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$SSH_PAYLOAD" > /dev/null; then
-    success "  secret/ssh-keys"
+    success "  secret/infra/ssh-keys"
   else
-    warn "  Failed to write secret/ssh-keys"
+    warn "  Failed to write secret/infra/ssh-keys"
   fi
 
   # Cluster configuration — used by Nomad jobs (samba-dc, lam) via Vault templates
@@ -261,13 +261,13 @@ function syncSecretsToVault() {
     --arg dns_forwarder "$DNS_FORWARDER" \
     '{data: {dns_postfix: $dns_postfix, dns_server: $dns_server, network_cidr: $network_cidr, gateway: $gateway, ad_realm: $ad_realm, ad_domain: $ad_domain, ad_realm_lower: $ad_realm_lower, base_dn: $base_dn, dns_forwarder: $dns_forwarder}}')
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/config/cluster" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/infra/config/cluster" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$CLUSTER_PAYLOAD" > /dev/null; then
-    success "  secret/config/cluster"
+    success "  secret/infra/config/cluster"
   else
-    warn "  Failed to write secret/config/cluster"
+    warn "  Failed to write secret/infra/config/cluster"
   fi
 
   # Nomad node IPs — used by samba-dc and lam jobs via Vault templates
@@ -285,13 +285,13 @@ function syncSecretsToVault() {
   fi
   NOMAD_NODES_PAYLOAD+="}}"
 
-  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/config/nomad-nodes" \
+  if curl -skf -X POST "${VAULT_ADDR}/v1/secret/data/infra/config/nomad-nodes" \
     -H "X-Vault-Token: $ROOT_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$NOMAD_NODES_PAYLOAD" > /dev/null; then
-    success "  secret/config/nomad-nodes"
+    success "  secret/infra/config/nomad-nodes"
   else
-    warn "  Failed to write secret/config/nomad-nodes"
+    warn "  Failed to write secret/infra/config/nomad-nodes"
   fi
 
   success "Secrets synced to Vault"

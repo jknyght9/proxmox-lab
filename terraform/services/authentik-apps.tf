@@ -512,7 +512,7 @@ resource "null_resource" "authentik_apps" {
       if [ -n "$VAULT_OIDC_SECRET" ]; then
         # Store secret in Vault KV
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/vault-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/vault/oidc" \
           -d "{\"data\":{\"client_id\":\"vault\",\"client_secret\":\"$VAULT_OIDC_SECRET\",\"discovery_url\":\"https://auth.${var.dns_postfix}/application/o/vault/\"}}" > /dev/null
 
         # Enable OIDC auth backend (idempotent — ignores if already enabled)

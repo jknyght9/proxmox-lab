@@ -668,7 +668,7 @@ function enableService() {
     local VAULT_ADDR ROOT_TOKEN API_TOKEN
     VAULT_ADDR=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
     ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
-    API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+    API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/infra/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
 
     sed -i.bak "s/^authentik_api_token.*/authentik_api_token = \"${API_TOKEN}\"/" "$tfvars"
     sed -i.bak "s/^configure_authentik.*/configure_authentik = true/" "$tfvars"
@@ -684,7 +684,7 @@ function enableService() {
     # Sync akadmin password — bootstrap password only applies on first DB init
     doing "Syncing Authentik admin password with Vault..."
     local ADMIN_PW
-    ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
+    ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/infra/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
     if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "not-configured" ] && [ -n "$ADMIN_PW" ]; then
       local NOMAD01_IP_
       NOMAD01_IP_=$(getNomad01IP)
@@ -715,7 +715,7 @@ function enableService() {
     local VAULT_ADDR ROOT_TOKEN NETBOX_TOKEN
     VAULT_ADDR=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
     ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
-    NETBOX_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/netbox" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+    NETBOX_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR/v1/secret/data/infra/netbox/app" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
 
     sed -i.bak "s/^netbox_api_token.*/netbox_api_token = \"${NETBOX_TOKEN}\"/" "$tfvars"
     rm -f "$tfvars.bak"
@@ -797,8 +797,8 @@ function deployPulse() {
   fi
 
   success "Pulse deployed. Browse https://pulse.<your-domain> and log in as 'admin'."
-  info    "Admin password:  docker compose run --rm terraform-services vault kv get secret/pulse   (field: admin_password)"
-  info    "Then add your PVE node in the Pulse UI (Settings > Infrastructure) using pve_token_id + pve_token from secret/pulse."
+  info    "Admin password:  docker compose run --rm terraform-services vault kv get secret/infra/pulse/admin   (field: admin_password)"
+  info    "Then add your PVE node in the Pulse UI (Settings > Infrastructure) using pve_token_id + pve_token from secret/infra/pulse/admin."
 }
 
 # -----------------------------------------------------------------------------
@@ -1244,7 +1244,7 @@ EOF
   local VAULT_ADDR_FINAL ROOT_TOKEN API_TOKEN
   VAULT_ADDR_FINAL=$(jq -r '.vault_address' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
   ROOT_TOKEN=$(jq -r '.root_token' "$VAULT_CREDENTIALS_FILE" 2>/dev/null)
-  API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
+  API_TOKEN=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/infra/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"')
 
   sed -i.bak "s/^authentik_api_token.*/authentik_api_token = \"${API_TOKEN}\"/" "$SERVICES_TFVARS"
   sed -i.bak "s/^configure_authentik.*/configure_authentik = true/" "$SERVICES_TFVARS"
@@ -1258,7 +1258,7 @@ EOF
   # If the DB persisted from a previous deployment, the password won't match Vault.
   doing "Syncing Authentik admin password with Vault..."
   local ADMIN_PW
-  ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
+  ADMIN_PW=$(curl -sk -H "X-Vault-Token: $ROOT_TOKEN" "$VAULT_ADDR_FINAL/v1/secret/data/infra/authentik" 2>/dev/null | jq -r '.data.data.admin_password // empty')
   if [ -n "$API_TOKEN" ] && [ "$API_TOKEN" != "not-configured" ] && [ -n "$ADMIN_PW" ]; then
     local ADMIN_PK
     ADMIN_PK=$(curl -sk -H "Authorization: Bearer $API_TOKEN" "https://${NOMAD01_IP}:9443/api/v3/core/users/?username=akadmin" 2>/dev/null | jq -r '.results[0].pk // empty')
