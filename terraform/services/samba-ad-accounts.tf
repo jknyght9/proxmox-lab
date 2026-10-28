@@ -53,7 +53,7 @@ resource "random_password" "kasm_bind" {
 resource "vault_kv_secret_v2" "samba_ad_accounts" {
   count = var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "samba-ad/service-accounts"
+  name  = "ad/service-accounts"
   data_json = jsonencode({
     domain_join_password    = random_password.domain_join[0].result
     domain_join_dn          = "CN=domain-join-svc,CN=Users,${local.ad_base_dn}"

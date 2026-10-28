@@ -2,21 +2,21 @@
 # This policy allows Forgejo to read its secrets from Vault KV v2
 
 # Allow reading Forgejo secrets (postgres + admin passwords)
-path "secret/data/forgejo" {
+path "secret/data/infra/forgejo/app" {
   capabilities = ["read"]
 }
 
 # Allow reading OIDC credentials (written by authentik_apps, not Terraform)
-path "secret/data/forgejo-oidc" {
+path "secret/data/infra/forgejo/oidc" {
   capabilities = ["read"]
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/forgejo" {
+path "secret/metadata/infra/forgejo/app" {
   capabilities = ["read", "list"]
 }
 
-path "secret/metadata/forgejo-oidc" {
+path "secret/metadata/infra/forgejo/oidc" {
   capabilities = ["read", "list"]
 }
 

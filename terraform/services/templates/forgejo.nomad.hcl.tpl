@@ -102,7 +102,7 @@ job "forgejo" {
         data = <<EOH
 POSTGRES_USER=forgejo
 POSTGRES_DB=forgejo
-{{ with secret "secret/data/forgejo" }}
+{{ with secret "secret/data/infra/forgejo/app" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGDATA=/var/lib/postgresql/data
@@ -155,7 +155,7 @@ EOH
       # to app.ini on first start; INSTALL_LOCK skips the web installer).
       template {
         data = <<EOH
-{{ with secret "secret/data/forgejo" }}
+{{ with secret "secret/data/infra/forgejo/app" }}
 FORGEJO__database__PASSWD={{ .Data.data.postgres_password }}
 {{ end }}
 # --- General ---

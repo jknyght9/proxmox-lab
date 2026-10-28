@@ -1,21 +1,21 @@
 # Vault policy for the pulse job
 # Allows Pulse to read its secret (read-only PVE token + web-login password).
 
-path "secret/data/pulse" {
+path "secret/data/infra/pulse/admin" {
   capabilities = ["read"]
 }
 
-path "secret/metadata/pulse" {
+path "secret/metadata/infra/pulse/admin" {
   capabilities = ["read", "list"]
 }
 
 # OIDC client credentials (Authentik). Populated by authentik-apps.tf after the
 # Authentik provider/app for Pulse is created; consumed by the job's OIDC_* env.
-path "secret/data/pulse-oidc" {
+path "secret/data/infra/pulse/oidc" {
   capabilities = ["read"]
 }
 
-path "secret/metadata/pulse-oidc" {
+path "secret/metadata/infra/pulse/oidc" {
   capabilities = ["read", "list"]
 }
 

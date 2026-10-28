@@ -255,7 +255,7 @@ resource "null_resource" "forgejo_runner_token" {
 
       echo '[+] Writing registration token to secret/forgejo-runner...'
       curl -sk -X POST -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
-        "$VAULT_ADDR/v1/secret/data/forgejo-runner" \
+        "$VAULT_ADDR/v1/secret/data/infra/forgejo/runner" \
         -d "{\"data\":{\"registration_token\":\"$REG_TOKEN\"}}" > /dev/null
       echo '[+] Runner registration token stored at secret/forgejo-runner'
       EOT

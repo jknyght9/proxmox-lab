@@ -24,7 +24,7 @@ locals {
 resource "vault_kv_secret_v2" "traefik_acme" {
   count = local.acme_active ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "traefik-acme"
+  name  = "infra/traefik/acme"
 
   data_json = jsonencode(var.traefik_acme_credentials)
 }

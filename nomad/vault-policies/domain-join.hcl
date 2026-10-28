@@ -4,6 +4,6 @@
 # Used with AppRole auth - not Nomad WIF.
 
 # Allow reading domain join credentials from Samba AD secrets
-path "secret/data/samba-ad" {
+path "secret/data/ad/dc" {
   capabilities = ["read"]
 }

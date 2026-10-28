@@ -69,7 +69,7 @@ job "unifi-dns" {
         data = <<EOH
 POSTGRES_USER=unifidns
 POSTGRES_DB=unifidns
-{{ with secret "secret/data/unifi-dns" }}
+{{ with secret "secret/data/infra/unifi-dns/app" }}
 POSTGRES_PASSWORD={{ .Data.data.postgres_password }}
 {{ end }}
 PGPORT=5434
@@ -112,17 +112,17 @@ EOH
 
       template {
         data = <<EOH
-{{ with secret "secret/data/unifi-dns" }}
+{{ with secret "secret/data/infra/unifi-dns/app" }}
 DATABASE_URL=postgresql+asyncpg://unifidns:{{ .Data.data.postgres_password }}@127.0.0.1:5434/unifidns
 SESSION_SECRET={{ .Data.data.session_secret }}
 {{ end }}
-{{ with secret "secret/data/unifi-dns-oidc" }}
+{{ with secret "secret/data/infra/unifi-dns/oidc" }}
 OIDC_ISSUER={{ .Data.data.oidc_endpoint }}
 OIDC_CLIENT_ID={{ .Data.data.oidc_client_id }}
 OIDC_CLIENT_SECRET={{ .Data.data.oidc_client_secret }}
 {{ end }}
 OIDC_REDIRECT_URL=https://unifi-dns.${dns_postfix}/api/auth/callback
-{{ with secret "secret/data/unifi" }}
+{{ with secret "secret/data/infra/unifi/udm" }}
 UNIFI_API_KEY={{ .Data.data.api_key }}
 {{ end }}
 UNIFI_HOST=https://${unifi_address}

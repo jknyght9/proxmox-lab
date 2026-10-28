@@ -91,7 +91,7 @@ job "traefik" {
       # rendered into the jobspec.
       template {
         data = <<EOH
-{{ with secret "secret/data/traefik-acme" }}
+{{ with secret "secret/data/infra/traefik/acme" }}
 {{ range $k, $v := .Data.data }}{{ $k }}={{ $v }}
 {{ end }}{{ end }}
 EOH

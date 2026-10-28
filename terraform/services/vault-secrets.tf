@@ -204,7 +204,7 @@ resource "vault_kv_secret_v2" "kasm" {
 
 resource "vault_kv_secret_v2" "packer" {
   mount = vault_mount.secret.path
-  name  = "packer"
+  name  = "infra/packer"
   data_json = jsonencode({
     root_password     = random_password.packer_root.result
     ssh_password      = random_password.packer_ssh.result
@@ -214,7 +214,7 @@ resource "vault_kv_secret_v2" "packer" {
 
 resource "vault_kv_secret_v2" "ssh_keys" {
   mount = vault_mount.secret.path
-  name  = "ssh-keys"
+  name  = "infra/ssh-keys"
   data_json = jsonencode({
     labadmin       = file(var.ssh_admin_private_key_file)
     labadmin_pub   = file(var.ssh_admin_public_key_file)
@@ -226,7 +226,7 @@ resource "vault_kv_secret_v2" "ssh_keys" {
 resource "vault_kv_secret_v2" "authentik" {
   count = var.deploy_authentik ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "authentik"
+  name  = "infra/authentik"
   data_json = jsonencode({
     secret_key        = random_password.authentik_secret_key[0].result
     postgres_password = random_password.authentik_postgres[0].result
@@ -240,7 +240,7 @@ resource "vault_kv_secret_v2" "authentik" {
 resource "vault_kv_secret_v2" "netbox" {
   count = var.deploy_netbox ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "netbox"
+  name  = "infra/netbox/app"
   data_json = jsonencode({
     secret_key        = random_password.netbox_secret_key[0].result
     postgres_password = random_password.netbox_postgres[0].result
@@ -256,7 +256,7 @@ resource "vault_kv_secret_v2" "netbox" {
 resource "vault_kv_secret_v2" "netbox_oidc" {
   count = var.deploy_netbox ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "netbox-oidc"
+  name  = "infra/netbox/oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
@@ -276,7 +276,7 @@ resource "vault_kv_secret_v2" "netbox_oidc" {
 resource "vault_kv_secret_v2" "forgejo" {
   count = var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "forgejo"
+  name  = "infra/forgejo/app"
   data_json = jsonencode({
     postgres_password = random_password.forgejo_postgres[0].result
     admin_password    = random_password.forgejo_admin[0].result
@@ -294,7 +294,7 @@ resource "vault_kv_secret_v2" "forgejo" {
 resource "vault_kv_secret_v2" "forgejo_admin" {
   count = var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "forgejo-admin"
+  name  = "infra/forgejo/admin"
   data_json = jsonencode({
     admin_username   = ""
     automation_token = ""
@@ -310,7 +310,7 @@ resource "vault_kv_secret_v2" "forgejo_admin" {
 resource "vault_kv_secret_v2" "forgejo_oidc" {
   count = var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "forgejo-oidc"
+  name  = "infra/forgejo/oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
@@ -324,7 +324,7 @@ resource "vault_kv_secret_v2" "forgejo_oidc" {
 resource "vault_kv_secret_v2" "kaneo" {
   count = var.deploy_kaneo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "kaneo"
+  name  = "infra/kaneo/app"
   data_json = jsonencode({
     postgres_password = random_password.kaneo_postgres[0].result
     auth_secret       = random_password.kaneo_auth_secret[0].result
@@ -339,7 +339,7 @@ resource "vault_kv_secret_v2" "kaneo" {
 resource "vault_kv_secret_v2" "kaneo_oidc" {
   count = var.deploy_kaneo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "kaneo-oidc"
+  name  = "infra/kaneo/oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
@@ -360,7 +360,7 @@ resource "vault_kv_secret_v2" "kaneo_oidc" {
 resource "vault_kv_secret_v2" "kaneo_admin" {
   count = var.deploy_kaneo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "kaneo-admin"
+  name  = "infra/kaneo/admin"
   data_json = jsonencode({
     admin_email        = ""
     admin_password     = ""
@@ -382,7 +382,7 @@ resource "vault_kv_secret_v2" "kaneo_admin" {
 resource "vault_kv_secret_v2" "forgejo_runner" {
   count = var.deploy_forgejo_runner && var.deploy_forgejo ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "forgejo-runner"
+  name  = "infra/forgejo/runner"
   data_json = jsonencode({
     registration_token = ""
   })
@@ -394,7 +394,7 @@ resource "vault_kv_secret_v2" "forgejo_runner" {
 resource "vault_kv_secret_v2" "unifi" {
   count = var.unifi_address != "" ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "unifi"
+  name  = "infra/unifi/udm"
   data_json = jsonencode({
     address = var.unifi_address
     api_key = var.unifi_api_key
@@ -407,7 +407,7 @@ resource "vault_kv_secret_v2" "unifi" {
 resource "vault_kv_secret_v2" "unifi_dns" {
   count = var.deploy_unifi_dns ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "unifi-dns"
+  name  = "infra/unifi-dns/app"
   data_json = jsonencode({
     postgres_password = random_password.unifi_dns_postgres[0].result
     session_secret    = random_password.unifi_dns_session[0].result
@@ -420,7 +420,7 @@ resource "vault_kv_secret_v2" "unifi_dns" {
 resource "vault_kv_secret_v2" "unifi_dns_oidc" {
   count = var.deploy_unifi_dns ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "unifi-dns-oidc"
+  name  = "infra/unifi-dns/oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
@@ -438,7 +438,7 @@ resource "vault_kv_secret_v2" "unifi_dns_oidc" {
 resource "vault_kv_secret_v2" "pulse_oidc" {
   count = var.deploy_pulse ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "pulse-oidc"
+  name  = "infra/pulse/oidc"
   data_json = jsonencode({
     oidc_client_id     = ""
     oidc_client_secret = ""
@@ -459,7 +459,7 @@ resource "vault_kv_secret_v2" "pulse_oidc" {
 resource "vault_kv_secret_v2" "tailscale" {
   count = var.deploy_tailscale ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "tailscale"
+  name  = "infra/tailscale"
   data_json = jsonencode({
     auth_key = var.tailscale_auth_key
   })
@@ -468,7 +468,7 @@ resource "vault_kv_secret_v2" "tailscale" {
 resource "vault_kv_secret_v2" "samba_ad" {
   count = var.deploy_samba_ad ? 1 : 0
   mount = vault_mount.secret.path
-  name  = "samba-ad"
+  name  = "ad/dc"
   data_json = jsonencode({
     admin_password = random_password.samba_admin[0].result
   })
@@ -484,7 +484,7 @@ locals {
 
 resource "vault_kv_secret_v2" "cluster_config" {
   mount = vault_mount.secret.path
-  name  = "config/cluster"
+  name  = "infra/config/cluster"
   data_json = jsonencode({
     dns_postfix    = var.dns_postfix
     dns_server     = var.dns_server_ip
@@ -500,7 +500,7 @@ resource "vault_kv_secret_v2" "cluster_config" {
 
 resource "vault_kv_secret_v2" "nomad_nodes" {
   mount = vault_mount.secret.path
-  name  = "config/nomad-nodes"
+  name  = "infra/config/nomad-nodes"
   data_json = jsonencode({
     for name, ip in var.nomad_node_ips : "${name}_ip" => ip
   })

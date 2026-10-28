@@ -19,16 +19,16 @@
 #     useless off-network and tokens expire fast.
 #
 # NOT managed here (operator-populated; this file only grants READ on them):
-#   - secret/proxmox       — a DEDICATED Proxmox CI token (operator mints in
-#                            Proxmox, then: vault kv put secret/proxmox
+#   - secret/infra/proxmox/api — a DEDICATED Proxmox CI token (operator mints in
+#                            Proxmox, then: vault kv put secret/infra/proxmox/api
 #                            token_id=... token=...). Not in TF so the token
 #                            never lands in tfvars/state.
-#   - secret/versitygw     — the shared versitygw S3 state-backend key (exists
+#   - secret/infra/versitygw/s3 — the shared versitygw S3 state-backend key (exists
 #                            out-of-band). Per-repo prefix-scoped IAM is the
 #                            future hardening (pm-code-repo).
 #
 # OPERATOR RUNBOOK (after `tf-services apply` of these resources):
-#   1. Mint the Proxmox CI token + `vault kv put secret/proxmox ...` (see above).
+#   1. Mint the Proxmox CI token + `vault kv put secret/infra/proxmox/api ...` (see above).
 #   2. Pull a secret_id (lifecycle stays operator-owned, never in TF state):
 #        vault write -f auth/approle/role/<repo>/secret-id
 #      and read the role_id from the `infra_ci_role_ids` output.
@@ -68,8 +68,8 @@ locals {
   # its own CI SSH key: the shared OpenTofu state-encryption passphrase and the
   # shared versitygw S3 state-backend key.
   infra_ci_common_paths = [
-    "tofu/state-encryption",
-    "versitygw",
+    "infra/tofu/state-encryption",
+    "infra/versitygw/s3",
   ]
 }
 
@@ -96,7 +96,7 @@ data "vault_kv_secret_v2" "opentofu_state_encryption" {
 resource "vault_kv_secret_v2" "tofu_state_encryption" {
   count     = local.infra_ci_enabled ? 1 : 0
   mount     = vault_mount.secret.path
-  name      = "tofu/state-encryption"
+  name      = "infra/tofu/state-encryption"
   data_json = jsonencode({ passphrase = data.vault_kv_secret_v2.opentofu_state_encryption[0].data["passphrase"] })
   lifecycle { prevent_destroy = true }
 }

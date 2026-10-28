@@ -8,6 +8,6 @@
 
 # Reserved: NAS credentials path. Empty grant for now; democratic-csi would
 # need this if we swap in dynamic provisioning later.
-path "secret/data/nas/*" {
+path "secret/data/infra/nas/*" {
   capabilities = []
 }

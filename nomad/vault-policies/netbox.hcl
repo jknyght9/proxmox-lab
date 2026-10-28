@@ -2,21 +2,21 @@
 # This policy allows Netbox to read its secrets from Vault KV v2
 
 # Allow reading Netbox secrets
-path "secret/data/netbox" {
+path "secret/data/infra/netbox/app" {
   capabilities = ["read"]
 }
 
 # Allow reading OIDC credentials (written by authentik_apps, not Terraform)
-path "secret/data/netbox-oidc" {
+path "secret/data/infra/netbox/oidc" {
   capabilities = ["read"]
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/netbox" {
+path "secret/metadata/infra/netbox/app" {
   capabilities = ["read", "list"]
 }
 
-path "secret/metadata/netbox-oidc" {
+path "secret/metadata/infra/netbox/oidc" {
   capabilities = ["read", "list"]
 }
 

@@ -2,12 +2,12 @@
 # This policy allows Authentik to read its secrets from Vault KV v2
 
 # Allow reading Authentik secrets
-path "secret/data/authentik" {
+path "secret/data/infra/authentik" {
   capabilities = ["read"]
 }
 
 # Allow listing and reading metadata (optional, for debugging)
-path "secret/metadata/authentik" {
+path "secret/metadata/infra/authentik" {
   capabilities = ["read", "list"]
 }
 

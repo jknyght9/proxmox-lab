@@ -22,13 +22,13 @@ data "vault_kv_secret_v2" "pihole" {
 data "vault_kv_secret_v2" "cluster_config" {
   count = local.vault_configured ? 1 : 0
   mount = "secret"
-  name  = "config/cluster"
+  name  = "infra/config/cluster"
 }
 
 data "vault_kv_secret_v2" "nomad_nodes" {
   count = local.vault_configured ? 1 : 0
   mount = "secret"
-  name  = "config/nomad-nodes"
+  name  = "infra/config/nomad-nodes"
 }
 
 data "vault_kv_secret_v2" "kasm" {
@@ -38,12 +38,12 @@ data "vault_kv_secret_v2" "kasm" {
 }
 
 # Build-runner VM: the instance-level runner registration token (minted by the
-# services layer into secret/forgejo-runner) and the internal root CA, so the
+# services layer into secret/infra/forgejo/runner) and the internal root CA, so the
 # VM's Docker daemon, runner and job containers trust git.<postfix>.
 data "vault_kv_secret_v2" "forgejo_runner" {
   count = local.vault_configured && var.deploy_builder ? 1 : 0
   mount = "secret"
-  name  = "forgejo-runner"
+  name  = "infra/forgejo/runner"
 }
 
 data "vault_generic_secret" "pki_root_ca" {

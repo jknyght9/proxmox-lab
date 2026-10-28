@@ -21,6 +21,6 @@ path "pki_int/cert/ca_chain" {
 # configured in bootstrap.yml. Written by terraform/services/traefik-acme.tf
 # and rendered into the task environment at runtime, so the token never
 # appears in the jobspec or in tracked files.
-path "secret/data/traefik-acme" {
+path "secret/data/infra/traefik/acme" {
   capabilities = ["read"]
 }

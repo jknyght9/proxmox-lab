@@ -34,8 +34,8 @@ done
 
 # --- secrets from Vault --------------------------------------------------------
 vault_get() { curl -sk -m5 -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/$1"; }
-PULSE_SECRET="$(vault_get secret/data/pulse)"
-OIDC_SECRET="$(vault_get secret/data/pulse-oidc)"
+PULSE_SECRET="$(vault_get secret/data/infra/pulse/admin)"
+OIDC_SECRET="$(vault_get secret/data/infra/pulse/oidc)"
 ADMIN_PW="$(echo "$PULSE_SECRET" | jq -r '.data.data.admin_password // empty')"
 PVE_TID="$(echo "$PULSE_SECRET" | jq -r '.data.data.pve_token_id // empty')"
 PVE_TOK_FULL="$(echo "$PULSE_SECRET" | jq -r '.data.data.pve_token // empty')"
@@ -43,7 +43,7 @@ PVE_BARE="$${PVE_TOK_FULL##*=}"
 OIDC_ISSUER="$(echo "$OIDC_SECRET" | jq -r '.data.data.oidc_endpoint // empty')"
 OIDC_CLIENT_SECRET="$(echo "$OIDC_SECRET" | jq -r '.data.data.oidc_client_secret // empty')"
 
-[ -n "$ADMIN_PW" ] || { echo '[!] secret/pulse admin_password not found in Vault'; exit 1; }
+[ -n "$ADMIN_PW" ] || { echo '[!] secret/infra/pulse/admin admin_password not found in Vault'; exit 1; }
 
 # --- login (session cookie + CSRF double-submit) -------------------------------
 echo '[+] Logging into Pulse...'
@@ -95,7 +95,7 @@ if [ -n "$OIDC_ISSUER" ]; then
     echo "    SSO provider created"
   fi
 else
-  echo '[!] secret/pulse-oidc not populated yet — skipping SSO (run authentik_apps first)'
+  echo '[!] secret/infra/pulse/oidc not populated yet — skipping SSO (run authentik_apps first)'
 fi
 
 # --- Proxmox cluster (match by host) -------------------------------------------

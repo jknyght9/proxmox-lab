@@ -249,7 +249,7 @@ resource "null_resource" "authentik_apps" {
         "$API/providers/oauth2/" | jq -r --arg name "Netbox OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$NETBOX_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/netbox-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/netbox/oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"netbox\",\"oidc_client_secret\":\"$NETBOX_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/netbox/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/netbox-oidc"
       else
@@ -272,7 +272,7 @@ resource "null_resource" "authentik_apps" {
         "$API/providers/oauth2/" | jq -r --arg name "unifi-dns OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$UNIFIDNS_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/unifi-dns-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/unifi-dns/oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"unifi-dns\",\"oidc_client_secret\":\"$UNIFIDNS_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/unifi-dns/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/unifi-dns-oidc"
       else
@@ -298,7 +298,7 @@ resource "null_resource" "authentik_apps" {
         "$API/providers/oauth2/" | jq -r --arg name "pulse OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$PULSE_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/pulse-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/pulse/oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"pulse\",\"oidc_client_secret\":\"$PULSE_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/pulse/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/pulse-oidc"
       else
@@ -323,7 +323,7 @@ resource "null_resource" "authentik_apps" {
         "$API/providers/oauth2/" | jq -r --arg name "forgejo OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$FORGEJO_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/forgejo-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/forgejo/oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"forgejo\",\"oidc_client_secret\":\"$FORGEJO_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/forgejo/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/forgejo-oidc"
       else
@@ -355,7 +355,7 @@ resource "null_resource" "authentik_apps" {
         "$API/providers/oauth2/" | jq -r --arg name "kaneo OIDC" '[.results[] | select(.name == $name)][0].client_secret // empty')
       if [ -n "$KANEO_OIDC_SECRET" ]; then
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/kaneo-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/kaneo/oidc" \
           -d "{\"data\":{\"oidc_client_id\":\"kaneo\",\"oidc_client_secret\":\"$KANEO_OIDC_SECRET\",\"oidc_endpoint\":\"https://auth.${var.dns_postfix}/application/o/kaneo/\"}}" > /dev/null
         echo "    OIDC credentials stored at secret/kaneo-oidc"
       else
@@ -484,7 +484,7 @@ resource "null_resource" "authentik_apps" {
       LDAP_GROUP_PKS=$(echo "$LDAP_MAPS" | jq -c '[.results[] | select((.managed // "") == "goauthentik.io/sources/ldap/default-name") | .pk]')
 
       # Optional bind password (preserve the live one when absent in Vault).
-      SYNC_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/secret/data/samba-ad" | jq -r '.data.data.authentik_sync_password // empty')
+      SYNC_PW=$(curl -sk -H "X-Vault-Token: ${var.vault_token}" "${var.vault_address}/v1/secret/data/ad/dc" | jq -r '.data.data.authentik_sync_password // empty')
 
       LDAP_PK=$(create_or_get "sources/ldap" "slug" "samba-ad" "$(jq -nc --arg uri "ldaps://dc01.${var.dns_postfix}" --arg bind "CN=authentik-sync,CN=Users,${local.ad_base_dn}" --arg base "${local.ad_base_dn}" '{name:"Samba AD",slug:"samba-ad",server_uri:$uri,bind_cn:$bind,base_dn:$base}')")
 
@@ -512,7 +512,7 @@ resource "null_resource" "authentik_apps" {
       if [ -n "$VAULT_OIDC_SECRET" ]; then
         # Store secret in Vault KV
         curl -sk -X POST -H "X-Vault-Token: ${var.vault_token}" -H "Content-Type: application/json" \
-          "${var.vault_address}/v1/secret/data/vault-oidc" \
+          "${var.vault_address}/v1/secret/data/infra/vault/oidc" \
           -d "{\"data\":{\"client_id\":\"vault\",\"client_secret\":\"$VAULT_OIDC_SECRET\",\"discovery_url\":\"https://auth.${var.dns_postfix}/application/o/vault/\"}}" > /dev/null
 
         # Enable OIDC auth backend (idempotent — ignores if already enabled)

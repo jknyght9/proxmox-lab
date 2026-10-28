@@ -3,11 +3,11 @@
 
 # Registration token, minted from the live Forgejo instance by
 # null_resource.forgejo_runner_token and written here (not by Terraform).
-path "secret/data/forgejo-runner" {
+path "secret/data/infra/forgejo/runner" {
   capabilities = ["read"]
 }
 
-path "secret/metadata/forgejo-runner" {
+path "secret/metadata/infra/forgejo/runner" {
   capabilities = ["read", "list"]
 }
 

@@ -288,7 +288,7 @@ kasm_ip = "$(sed -n 's/.*"kasm01".*ip = "\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/terra
 
 pihole_admin_password = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/pihole" 2>/dev/null | jq -r '.data.data.admin_password // ""' 2>/dev/null || true)"
 
-authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
+authentik_api_token = "$(curl -sk -H "X-Vault-Token: ${ROOT_TOKEN}" "${VAULT_ADDR_FINAL}/v1/secret/data/infra/authentik" 2>/dev/null | jq -r '.data.data.api_token // "not-configured"' 2>/dev/null || echo "not-configured")"
 
 # Service deploy toggles — preserved across re-runs. NEVER let these
 # silently fall back to defaults; doing so destroys vault_kv_secret_v2

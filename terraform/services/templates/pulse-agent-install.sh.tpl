@@ -4,7 +4,7 @@
 # on each Nomad VM. Installs/refreshes the Pulse agent (host + Docker metrics)
 # with a per-node token.
 #
-# Token: reused from Vault (secret/pulse-agents/<node>) if present, else minted
+# Token: reused from Vault (secret/infra/pulse/agents/<node>) if present, else minted
 # once via the Pulse API (POST /api/security/tokens -> .token) and cached in
 # Vault so re-runs don't mint duplicates. Each host gets its own token.
 #
@@ -31,13 +31,13 @@ trap 'rm -f "$JAR" "$RESP"' EXIT
 vault_get() { curl -sk -m5 -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/$1"; }
 
 # --- token: reuse from Vault, else mint via Pulse API --------------------------
-TOK="$(vault_get secret/data/pulse-agents/$NODE | jq -r '.data.data.token // empty')"
+TOK="$(vault_get secret/data/infra/pulse/agents/$NODE | jq -r '.data.data.token // empty')"
 if [ -n "$TOK" ]; then
-  echo "[+] token: reused from Vault (secret/pulse-agents/$NODE)"
+  echo "[+] token: reused from Vault (secret/infra/pulse/agents/$NODE)"
 else
   echo "[+] token: minting via Pulse API for $NODE..."
-  ADMIN_PW="$(vault_get secret/data/pulse | jq -r '.data.data.admin_password // empty')"
-  [ -n "$ADMIN_PW" ] || { echo '[!] secret/pulse admin_password missing in Vault'; exit 1; }
+  ADMIN_PW="$(vault_get secret/data/infra/pulse/admin | jq -r '.data.data.admin_password // empty')"
+  [ -n "$ADMIN_PW" ] || { echo '[!] secret/infra/pulse/admin admin_password missing in Vault'; exit 1; }
 
   LOGIN_CODE="$(curl -s -m10 -o /dev/null -w '%%{http_code}' -c "$JAR" \
     -H 'Content-Type: application/json' -X POST "$PULSE_API/api/login" \
@@ -54,10 +54,10 @@ else
   [ -n "$TOK" ] || { echo '[!] mint response had no .token field'; cat "$RESP"; exit 1; }
 
   STORE_CODE="$(curl -sk -m5 -o /dev/null -w '%%{http_code}' -H "X-Vault-Token: $VAULT_TOKEN" \
-    -H 'Content-Type: application/json' -X POST "$VAULT_ADDR/v1/secret/data/pulse-agents/$NODE" \
+    -H 'Content-Type: application/json' -X POST "$VAULT_ADDR/v1/secret/data/infra/pulse/agents/$NODE" \
     -d "$(jq -nc --arg t "$TOK" --arg n "pulse-agent-$NODE" '{data:{token:$t,name:$n}}')")"
   [ "$STORE_CODE" -ge 400 ] && { echo "[!] Vault store HTTP $STORE_CODE"; exit 1; }
-  echo "[+] token: minted + cached in Vault (secret/pulse-agents/$NODE)"
+  echo "[+] token: minted + cached in Vault (secret/infra/pulse/agents/$NODE)"
 fi
 
 # --- install / refresh the agent -----------------------------------------------
