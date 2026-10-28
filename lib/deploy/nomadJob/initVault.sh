@@ -188,7 +188,7 @@ function writeServicesTfvars() {
 
   local PREV_DEPLOY_TRAEFIK PREV_DEPLOY_DNS_RECORDS
   local PREV_DEPLOY_AUTHENTIK PREV_DEPLOY_SAMBA_AD PREV_DEPLOY_LAM
-  local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE PREV_DEPLOY_BACKUP
+  local PREV_DEPLOY_UPTIME_KUMA PREV_DEPLOY_NETBOX PREV_DEPLOY_TAILSCALE
   local PREV_DEPLOY_CSI PREV_DEPLOY_UNIFI_DNS PREV_DEPLOY_PULSE
   local PREV_DEPLOY_FORGEJO PREV_DEPLOY_KANEO PREV_DEPLOY_FORGEJO_RUNNER
   local PREV_CFG_AUTH PREV_CFG_NETBOX PREV_NETBOX_TOKEN PREV_DNS_BACKENDS
@@ -205,7 +205,6 @@ function writeServicesTfvars() {
   PREV_DEPLOY_UPTIME_KUMA=$(_preserve_bool "deploy_uptime_kuma" "false")
   PREV_DEPLOY_NETBOX=$(_preserve_bool    "deploy_netbox"      "false")
   PREV_DEPLOY_TAILSCALE=$(_preserve_bool "deploy_tailscale"   "false")
-  PREV_DEPLOY_BACKUP=$(_preserve_bool    "deploy_backup"      "false")
   # deploy_csi gates the CSI/NFS storage layer (csi_controller/node + every
   # nomad_csi_volume_registration). GlusterFS is decommissioned, so CSI is the
   # only storage backend — default "true" so a regen never silently drops it to
@@ -303,7 +302,6 @@ deploy_lam         = ${PREV_DEPLOY_LAM}
 deploy_uptime_kuma = ${PREV_DEPLOY_UPTIME_KUMA}
 deploy_netbox      = ${PREV_DEPLOY_NETBOX}
 deploy_tailscale   = ${PREV_DEPLOY_TAILSCALE}
-deploy_backup      = ${PREV_DEPLOY_BACKUP}
 deploy_csi         = ${PREV_DEPLOY_CSI}
 deploy_unifi_dns   = ${PREV_DEPLOY_UNIFI_DNS}
 deploy_pulse       = ${PREV_DEPLOY_PULSE}
@@ -351,23 +349,26 @@ unifi_address = "$(yq -r '.unifi_address // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>
 unifi_api_key = "$(yq -r '.unifi_api_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 unifi_site    = "$(yq -r '.unifi_site // "default"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "default")"
 
-# Periodic Backups (from bootstrap.yml)
-backup_type         = "$(yq -r '.backup.type // "nfs"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "nfs")"
-backup_nfs_server   = "$(yq -r '.backup.nfs_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_nfs_path     = "$(yq -r '.backup.nfs_path // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_server   = "$(yq -r '.backup.smb_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_share    = "$(yq -r '.backup.smb_share // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_user     = "$(yq -r '.backup.smb_user // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_smb_password = "$(yq -r '.backup.smb_password // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
-backup_cron           = "$(yq -r '.backup.cron // "0 2 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 2 * * *")"
-backup_timezone       = "$(yq -r '.backup.timezone // "UTC"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "UTC")"
-backup_retention_days = $(yq -r '.backup.retention_days // 7' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo 7)
 
 # Tailscale subnet routers (from bootstrap.yml). auth_key goes into
 # Vault at secret/data/tailscale; advertise_routes defaults to network_cidr
 # (terraform 'coalesce' falls back automatically if left empty here).
 tailscale_auth_key         = "$(yq -r '.tailscale.auth_key // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
 tailscale_advertise_routes = "$(yq -r '.tailscale.advertise_routes // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+
+# Traefik certificate resolver (from bootstrap.yml traefik_acme).
+# Unset => Traefik keeps using the internal Vault PKI wildcard. The
+# credentials map is emitted verbatim as Traefik env var names, so adding a
+# DNS provider needs no code change here.
+traefik_acme_enabled       = $(yq -r '.traefik_acme.enabled // false' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo false)
+traefik_acme_provider      = "$(yq -r '.traefik_acme.provider // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_email         = "$(yq -r '.traefik_acme.email // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_staging       = $(yq -r '.traefik_acme.staging // false' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo false)
+traefik_acme_ca_server     = "$(yq -r '.traefik_acme.ca_server // ""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)"
+traefik_acme_dns_resolvers = "$(yq -r '.traefik_acme.dns_resolvers // "1.1.1.1:53,8.8.8.8:53"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "1.1.1.1:53,8.8.8.8:53")"
+traefik_acme_credentials = {
+$(yq -r '.traefik_acme.credentials // {} | to_entries | .[] | "  " + .key + " = \"" + (.value // "") + "\""' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || true)
+}
 
 # Netbox periodic inventory sync (from bootstrap.yml — defaults to every 6h)
 netbox_sync_cron     = "$(yq -r '.netbox_sync_cron // "0 */6 * * *"' "${SCRIPT_DIR}/bootstrap.yml" 2>/dev/null || echo "0 */6 * * *")"

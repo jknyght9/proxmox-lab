@@ -64,7 +64,6 @@ $EDITOR bootstrap.yml
  4) Samba AD + LAM                - Active Directory + LDAP Account Manager
  5) Uptime Kuma                   - Service health monitoring
  6) Netbox                        - Inventory management (DCIM/IPAM)
- 7) Periodic backups              - Nightly NFS/SMB backups of stateful volumes
  8) Tailscale subnet routers      - Reach lab IPs from the tailnet
 ```
 
@@ -442,7 +441,6 @@ The integration uses JWT-based authentication instead of long-lived tokens:
 ### Vault Policies (`nomad/vault-policies/`)
 - **authentik.hcl**: Policy for Authentik to read secrets from `secret/data/authentik`
 - **samba-dc.hcl**: Policy for Samba AD DCs to read secrets from `secret/data/samba-ad`
-- **backup.hcl**: Policy for backup job to read credentials from `secret/data/backup`
 
 ### Samba AD Configuration
 - **Docker Image**: `nowsci/samba-domain:latest` (supports both JOIN=false for provisioning and JOIN=true for replica)
@@ -545,43 +543,67 @@ nomad job restart tailscale
 - Pi-hole: `http://dns-01:80/admin/`
 - Vault PKI: `https://vault.<dns_postfix>/v1/sys/health` (use -k for self-signed)
 
-### Automated Backup Configuration
-- **Job Type**: Periodic batch job (`cron = "0 2 * * *"` default)
-- **Storage Types**: NFS or SMB/CIFS
-- **Credentials**: Stored in Vault at `secret/data/backup`
-- **Vault Integration**: Uses WIF with `vault { role = "backup" }` stanza
+### Backups
 
-**What Gets Backed Up:**
-| Service | Source | Method |
-|---------|--------|--------|
-| Vault | `/srv/gluster/nomad-data/vault` | tar.gz |
-| Authentik DB | PostgreSQL container | pg_dump |
-| Authentik data | `/srv/gluster/nomad-data/authentik/data` | tar.gz |
-| Uptime Kuma | `/srv/gluster/nomad-data/uptime-kuma` | tar.gz |
-| Samba AD | `/srv/gluster/nomad-data/samba-dc01`, `samba-dc02` | tar.gz |
-| Traefik | `/srv/gluster/nomad-data/traefik` | tar.gz |
+Two distinct mechanisms, often confused:
 
-**Backup Configuration** (stored in `cluster-info.json`):
-```json
-{
-  "backup_config": {
-    "enabled": true,
-    "type": "nfs",
-    "server": "nas.local:/backups",
-    "retention_days": 7,
-    "schedule": "0 2 * * *",
-    "timezone": "UTC"
-  }
-}
+**VM/LXC images → Proxmox Backup Server.** `resource_pool` in `bootstrap.yml`
+names a Proxmox resource pool that every guest this project creates joins
+(Terraform sets `pool_id`). `pve_backup` then creates a cluster backup job
+scoped to that pool. Because membership is declarative, a re-created guest
+rejoins and the job never silently loses one — which enumerating VMIDs could
+not guarantee, since IDs change between deployments.
+
+```yaml
+resource_pool: "proxmox-lab"
+pve_backup:
+  enabled: true
+  storage: "pbs-main"      # any PVE storage with content=backup
+  schedule: "03:00"        # systemd calendar event, NOT "daily 03:00"
+  mode: "snapshot"
+  # retention: omit to inherit the storage's own prune policy (correct for PBS)
 ```
 
-**Management Commands:**
-```bash
-nomad job status backup              # View job status
-nomad job periodic force backup      # Trigger manual backup
-nomad alloc logs -job backup         # View backup logs
-nomad job stop backup                # Stop scheduled backups
-```
+The pool lives in `terraform/pool.tf`; the schedule in
+`lib/proxmox/backupJob.sh`, because a backup job is a cluster-level object
+(`/cluster/backup`) with no bpg provider resource. It is idempotent via a
+marker in the job comment, `enabled: false` removes a job it previously
+created, and purge removes it before the guests it targets disappear.
+
+**Nomad service data → ZFS snapshots on the NAS**, via `storage.snapshots`.
+This covers Vault, Authentik and Netbox volumes living on the cluster_state
+NAS over NFS/CSI. It is not a PVE backup job and does not appear in the PVE UI.
+
+The old explicit backup Nomad job (nightly tar + pg_dump to NFS/SMB) was
+retired in Phase 2/3 of the storage migration. Its `backup:` block in
+`bootstrap.yml` is ignored, and the former menu option for it is gone.
+
+### DNS backends
+
+`dns_backend` in `bootstrap.yml` selects where the lab's records are written —
+`pihole` (default) or `unifi` — and, since 2026-10-21, what the hosts use as
+their resolver at the end of a deploy:
+
+| `dns_backend` | Records written to | PVE hosts + Nomad VMs point at |
+|---|---|---|
+| `pihole` (default) | the lab Pi-hole LXCs | the Pi-hole VIP (`dns_primary_ipv4`) |
+| `unifi` | the UniFi controller | `network.dns`, else `network.gateway` |
+
+`_labResolverTarget()` in `setup.sh` makes that choice; `setProxmoxDNSToLab`
+and `setNomadVMDNSToLab` (the last steps of `deployAll`, also menu d12) consume
+it. Before that, both pointed unconditionally at Pi-hole, which sent every
+query to a server holding none of the records whenever the UniFi backend was in
+use.
+
+The Pi-hole LXCs are still deployed either way — Layer 1 always builds them, and
+`terraform/main.tf` indexes `dns_main_nodes[0]` unconditionally, so an empty
+list breaks the plan. With `unifi` they simply are not the record target.
+
+The two writers differ in an important way: the Pi-hole writer sets
+`dns.hosts` wholesale (each apply REPLACES the array, so manual entries are
+lost), while the UniFi writer is scoped — it tracks what it created in
+`managed.json` on nomad01 and prunes only that, leaving manual controller
+records alone.
 
 ### DNS for Nomad Services
 `terraform/services/dns-records.tf` writes service DNS entries to Pi-hole:
@@ -670,10 +692,8 @@ The complete purge (setup.sh option 10) removes all project resources:
 - **Lost admin access**: Reset by deleting data: `rm -rf /srv/gluster/nomad-data/uptime-kuma/*` and redeploy
 
 ### Backup Issues
-- **NFS mount failing**: Verify NFS export accessible from Nomad nodes: `showmount -e <nfs-server>`
-- **SMB mount failing**: Check credentials, ensure `vers=3.0` supported, test with: `mount -t cifs //<server>/<share> /mnt -o username=<user>`
-- **Job not running on schedule**: Check periodic status: `nomad job status backup` shows next run time
-- **Vault credentials not found**: Verify backup secret exists: `vault kv get secret/backup` (with root token)
-- **Backup directory not writable**: Ensure NFS/SMB share has write permissions for root/nobody
-- **View backup logs**: `nomad alloc logs -job backup` (must wait for periodic run or force with `nomad job periodic force backup`)
-- **Retention not working**: Old backups pruned based on `mtime`; check NFS server time sync
+- **PBS job not running**: check the job exists and is enabled — `pvesh get /cluster/backup`; the managed one carries `managed-by:proxmox-lab` in its comment
+- **Job targets nothing**: confirm the pool has members — `pvesh get /pools/<resource_pool>`; guests join via `pool_id`, so a guest created outside this project needs adding by hand
+- **Invalid schedule**: PBS and PVE take systemd calendar events. `01:00` and `sat 02:00` are valid; `daily 01:00` is rejected
+- **Storage missing**: `pvesm status --storage <id>` must list it with `content=backup`
+- **ZFS snapshots (service data)**: verify on the NAS, not in PVE — `storage.snapshots` drives these

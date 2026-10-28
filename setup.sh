@@ -27,6 +27,7 @@ source "$SCRIPT_DIR/lib/credentials.sh"
 
 source "$SCRIPT_DIR/lib/proxmox/clusterHelpers.sh"
 source "$SCRIPT_DIR/lib/proxmox/configureProxmox.sh"
+source "$SCRIPT_DIR/lib/proxmox/backupJob.sh"
 source "$SCRIPT_DIR/lib/proxmox/purgeClusterResources.sh"
 source "$SCRIPT_DIR/lib/proxmox/selectSharedStorage.sh"
 source "$SCRIPT_DIR/lib/proxmox/ssh.sh"
@@ -171,18 +172,46 @@ function getNomad01IP() {
 # This is the LAST step of a successful deploy. Done as the final
 # action so a half-broken deploy never leaves Proxmox unable to
 # resolve archive.ubuntu.com on the next bootstrap.
-function setProxmoxDNSToLab() {
-  ensureClusterContext || return 1
+# Resolve which DNS server the lab's hosts should point at, based on the
+# configured records backend. Pi-hole remains the default; when bootstrap.yml
+# sets dns_backend: unifi the records live on the UniFi controller instead, so
+# pointing resolvers at the lab Pi-hole would send every query to a server that
+# has none of them. Echoes "<ip>|<label>", empty on failure.
+function _labResolverTarget() {
+  local backend
+  backend=$(yq -r '.dns_backend // "pihole"' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null \
+            | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+
+  if [ "$backend" = "unifi" ]; then
+    # Network DNS — explicit network.dns wins, else the gateway, which is where
+    # the UniFi controller serves records from.
+    local ip
+    ip=$(yq -r '.network.dns // ""' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null)
+    [ -z "$ip" ] || [ "$ip" = "null" ] && ip=$(yq -r '.network.gateway // ""' "$SCRIPT_DIR/bootstrap.yml" 2>/dev/null)
+    [ -z "$ip" ] || [ "$ip" = "null" ] && return 1
+    printf '%s|%s' "$ip" "network DNS / UniFi"
+    return 0
+  fi
+
   local pihole_ip
   pihole_ip=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null | head -1)
-  if [ -z "$pihole_ip" ]; then
-    error "Cannot determine Pi-hole DNS IP from terraform.tfvars"
+  [ -z "$pihole_ip" ] && return 1
+  printf '%s|%s' "$pihole_ip" "lab Pi-hole"
+  return 0
+}
+
+function setProxmoxDNSToLab() {
+  ensureClusterContext || return 1
+  local target pihole_ip label
+  target=$(_labResolverTarget) || {
+    error "Cannot determine the lab DNS target (check dns_backend / network.dns / dns_primary_ipv4)"
     return 1
-  fi
+  }
+  pihole_ip="${target%%|*}"; label="${target##*|}"
   local search_domain
   search_domain=$(yamlGet dns_suffix 2>/dev/null || jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
 
-  doing "Switching Proxmox host DNS → ${pihole_ip} (lab Pi-hole)..."
+  doing "Switching Proxmox host DNS → ${pihole_ip} (${label})..."
   for i in "${!CLUSTER_NODES[@]}"; do
     local node="${CLUSTER_NODES[$i]}"
     local ip="${CLUSTER_NODE_IPS[$i]}"
@@ -191,7 +220,7 @@ function setProxmoxDNSToLab() {
       "pvesh set /nodes/${node}/dns -dns1 ${pihole_ip} -search ${search_domain}" 2>/dev/null \
       || warn "    failed on ${node}"
   done
-  success "Proxmox DNS pointed at lab Pi-hole"
+  success "Proxmox DNS pointed at ${label} (${pihole_ip})"
 }
 
 # Reverse of setProxmoxDNSToLab — used when tearing down or
@@ -240,17 +269,17 @@ function _nomadVMIPs() {
 # rationale: never switch Nomad VMs to Pi-hole until every nomad_job
 # that pulls images has succeeded.
 function setNomadVMDNSToLab() {
-  local pihole_ip
-  pihole_ip=$(sed -n 's/^dns_primary_ipv4.*=.*"\(.*\)"/\1/p' "$SCRIPT_DIR/terraform/terraform.tfvars" 2>/dev/null | head -1)
-  if [ -z "$pihole_ip" ]; then
-    error "Cannot determine Pi-hole DNS IP from terraform.tfvars"
+  local target pihole_ip label
+  target=$(_labResolverTarget) || {
+    error "Cannot determine the lab DNS target (check dns_backend / network.dns / dns_primary_ipv4)"
     return 1
-  fi
+  }
+  pihole_ip="${target%%|*}"; label="${target##*|}"
   local search_domain
   search_domain=$(yamlGet dns_suffix 2>/dev/null || jq -r '.dns_postfix // ""' "$CLUSTER_INFO_FILE" 2>/dev/null)
   local key="$SCRIPT_DIR/crypto/labadmin"
 
-  doing "Switching Nomad VM DNS → ${pihole_ip} (lab Pi-hole)..."
+  doing "Switching Nomad VM DNS → ${pihole_ip} (${label})..."
   for ip in $(_nomadVMIPs); do
     info "  ${ip}: dns=${pihole_ip} domain=${search_domain}"
     ssh -i "$key" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
@@ -261,7 +290,7 @@ function setNomadVMDNSToLab() {
       sudo systemctl restart docker
     " 2>/dev/null || warn "    failed on ${ip}"
   done
-  success "Nomad VM DNS pointed at lab Pi-hole"
+  success "Nomad VM DNS pointed at ${label} (${pihole_ip})"
 }
 
 # Reverse of setNomadVMDNSToLab. Resets to network.dns from
@@ -1278,6 +1307,13 @@ EOF
   setNomadVMDNSToLab  || warn "Could not switch Nomad VM DNS — fix manually with menu d12"
   setProxmoxDNSToLab  || warn "Could not switch Proxmox DNS — fix manually with menu d12"
 
+  # Pool membership, then the pool-scoped backup schedule. Terraform creates
+  # the pool object (terraform/pool.tf); membership is applied here because the
+  # provider's pool_id is unusable on cloned guests. Both are no-ops when
+  # resource_pool / pve_backup.enabled are unset.
+  ensurePoolMembership "$PROXMOX_HOST" || warn "Pool membership incomplete — see above"
+  configureBackupJob  "$PROXMOX_HOST" || warn "Backup job not configured — see above"
+
   echo
   success "Deployment complete!"
   echo
@@ -1397,7 +1433,6 @@ function showMenu() {
   echo "    4) Samba AD + LDAP Account Manager"
   echo "    5) Uptime Kuma (monitoring)"
   echo "    6) Netbox (inventory management)"
-  echo "    7) Periodic backups (NFS/SMB)"
   echo "    8) Tailscale subnet routers"
   echo
   echo -e "  ${C_BOLD}Management${C_RESET}"
@@ -1421,7 +1456,7 @@ function showMenu() {
     echo "   d9) Deploy Traefik only"
     echo "  d10) Deploy Authentik only"
     echo "  d11) Rebuild DNS records"
-    echo "  d12) Switch ALL DNS → lab Pi-hole (Nomad VMs + PVE hosts; default last-step of deployAll)"
+    echo "  d12) Switch ALL DNS → lab resolver (Pi-hole, or network DNS when dns_backend=unifi)"
     echo "  d13) Revert ALL DNS → bootstrap.yml network.dns (Nomad VMs + PVE hosts)"
     echo "  d14) Download internal root CA cert (saves to crypto/proxmox-lab-root-ca.crt)"
     echo "  d15) TrueNAS — purge existing AD join (reads nas_servers from bootstrap.yml)"
@@ -1465,7 +1500,6 @@ while true; do
     4)  enableService "samba_ad" && enableService "lam";;
     5)  enableService "uptime_kuma";;
     6)  enableService "netbox";;
-    7)  enableService "backup";;
     8)  enableService "tailscale";;
 
     # Management
